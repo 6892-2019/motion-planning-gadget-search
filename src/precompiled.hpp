@@ -7,6 +7,8 @@
 #include <string>
 #include <experimental/string_view>
 #include <boost/container/small_vector.hpp>
+#include <bitset>
+#include <boost/dynamic_bitset.hpp>
 
 #include <algorithm>
 #include <random>
@@ -26,6 +28,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <utility>
 #include <type_traits>
+#include <boost/integer.hpp>
 
 #include <exception>
 #include <cassert>
