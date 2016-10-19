@@ -196,6 +196,8 @@ private:
 	//save on automata that are already small, so it's not really worth it.
 	using state_type = unsigned int;
 	struct Transition {
+		Transition() = default;
+		Transition(state_type next, symbol_mask_type symbols) : next_(next), symbols_(symbols) {}
 		state_type next_;
 		symbol_mask_type symbols_;
 	};
@@ -233,11 +235,63 @@ private:
 	 * Add transitions out of from that simulate the presence of an epsilon
 	 * transition into to.  (Later modifications of to's transitions will not
 	 * result in corresponding updates of from's transitions.)
+	 * @return true if the automaton changed, either by adding a transition or
+	 * making a non-accepting state an accepting state
 	 */
-	void addEpsilon(state_type from, state_type to) {
-		if (accept_[from])
+	bool addEpsilon(state_type from, state_type to) {
+		bool changed = false;
+		if (accept_[from]) {
+			changed |= !accept_[to];
 			accept_.set(to);
-		transitions_[from].insert(transitions_[from].end(), transitions_[to].begin(), transitions_[to].end());
+		}
+		for (const Transition& t : transitions_[to])
+			changed |= addTrans(from, t.symbols_, t.next_);
+		return changed;
+	}
+
+	/**
+	 * Adds a transition to this automaton.
+	 * @return true if the automaton changed, false if the transition was
+	 * already present
+	 */
+	bool addTrans(state_type from, symbol_type symbol, state_type to) {
+		for (Transition& t : transitions_[from])
+			if (t.next_ == to) {
+				if (t.symbols_[symbol])
+					return false;
+				t.symbols_.set(symbol);
+				if (!isStateDeterministic(from))
+					deterministic_ = false;
+				return true;
+			}
+		transitions_[from].push_back();
+		transitions_[from].back().next_ = to;
+		transitions_[from].back().symbols_.set(symbol);
+		if (!isStateDeterministic(from))
+			deterministic_ = false;
+		return true;
+	}
+
+	/**
+	 * Adds the given transitions to this automaton.
+	 * @return true if the automaton changed, false if all transitions were
+	 * already present
+	 */
+	bool addTrans(state_type from, symbol_mask_type symbols, state_type to) {
+		for (Transition& t : transitions_[from])
+			if (t.next_ == to) {
+				auto before = t.symbols_;
+				t.symbols_ |= symbols;
+				if (t.symbols_ == before)
+					return false;
+				if (!isStateDeterministic(from))
+					deterministic_ = false;
+				return true;
+			}
+		transitions_[from].push_back(Transition(to, symbols));
+		if (!isStateDeterministic(from))
+			deterministic_ = false;
+		return true;
 	}
 
 	/**
