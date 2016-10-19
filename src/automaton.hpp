@@ -61,6 +61,17 @@ public:
 	}
 
 	/**
+	 * Returns a new Automaton that accepts the string containing just the given
+	 * character.
+	 */
+	static ptr lit(unsigned int symbol) {
+		ptr a = any();
+		a->transitions_[0].back().symbols_.reset();
+		a->transitions_[0].back().symbols_.set(symbol);
+		return a;
+	}
+
+	/**
 	 * Returns true if this automaton is known to be deterministic.
 	 */
 	bool deterministic() const {return deterministic_;}
