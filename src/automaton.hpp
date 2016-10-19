@@ -82,6 +82,50 @@ public:
 		return a;
 	}
 
+	template<class ForwardIterator>
+	static ptr cat(ForwardIterator begin, ForwardIterator end) {
+		if (begin == end)
+			//the empty string is the identity element for concatenation
+			return epsilon();
+
+		std::size_t totalStates = 0;
+		for (ForwardIterator i = begin; i != end; ++i)
+			totalStates += (*i)->transitions_.size();
+
+		ptr a = new Automaton;
+		a->transitions_.reserve(totalStates);
+		a->accept_.resize(totalStates);
+		for (ForwardIterator i = begin; i != end; ++i) {
+			ptr b = *i;
+			//Copy states into a, renumbering around the states that already exist.
+			state_type base = static_cast<state_type>(a->transitions_.size());
+			for (const auto& t : b->transitions_) {
+				a->transitions_.push_back(t);
+				for (Transition& nt : a->transitions_.back())
+					nt.next_ += base;
+			}
+			for (std::size_t p = 0, q = base; q < a->transitions_.size(); ++p, ++q)
+				a->accept_[q] = b->accept_[p];
+
+			//Wire the previous automaton's accept states to the current initial
+			//state (base), modifying them to not accept.
+			//TODO: addEpsilon may cause p to become accepting again, so we have
+			//to scan from 0 each time.  We should probably keep a set of
+			//accepting /state indices to avoid the repeated scanning.
+			for (state_type p = 0; p < base; ++p) {
+				if (a->accept_[p]) {
+					a->accept_.reset(p);
+					a->addEpsilon(p, base);
+				}
+			}
+		}
+		a->deterministic_ = false;
+		return a;
+	}
+	static ptr cat(std::initializer_list<ptr> lists) {
+		return cat(lists.begin(), lists.end());
+	}
+
 	/**
 	 * Returns true if this automaton is known to be deterministic.
 	 */
@@ -142,8 +186,21 @@ private:
 		for (const Transition& t : transitions_[current])
 			if (t.symbols_[symbol])
 				next.push_back(t.next_);
+		//TODO: if we have multiple transitions to the same state, we're
+		//technically deterministic.  Maybe return a set-like type?
 		assert(next.size() <= 1 || !deterministic_);
 		return next;
+	}
+
+	/**
+	 * Add transitions out of from that simulate the presence of an epsilon
+	 * transition into to.  (Later modifications of to's transitions will not
+	 * result in corresponding updates of from's transitions.)
+	 */
+	void addEpsilon(state_type from, state_type to) {
+		if (accept_[from])
+			accept_.set(to);
+		transitions_[from].insert(transitions_[from].end(), transitions_[to].begin(), transitions_[to].end());
 	}
 
 	std::atomic<unsigned int> refcount_;

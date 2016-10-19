@@ -61,3 +61,31 @@ TEST(AutomatonTest, Lit) {
 	EXPECT_FALSE(a->run({0, 1}));
 	EXPECT_FALSE(a->run({1, 0}));
 }
+
+TEST(AutomatonTest, Cat) {
+	auto a = Automaton<2>::lit(0);
+	auto cat = Automaton<2>::cat({a});
+	EXPECT_FALSE(cat->run({}));
+	EXPECT_TRUE(cat->run({0}));
+	EXPECT_FALSE(cat->run({1}));
+	EXPECT_FALSE(cat->run({0, 1}));
+	EXPECT_FALSE(cat->run({1, 0}));
+
+	auto b = Automaton<2>::lit(1);
+	auto c = Automaton<2>::lit(0);
+
+	cat = Automaton<2>::cat({a, b, c});
+	EXPECT_FALSE(cat->run({}));
+	EXPECT_FALSE(cat->run({0}));
+	EXPECT_FALSE(cat->run({1}));
+	EXPECT_FALSE(cat->run({0, 1}));
+	EXPECT_FALSE(cat->run({1, 0}));
+	EXPECT_FALSE(cat->run({0, 0, 0}));
+	EXPECT_FALSE(cat->run({0, 0, 1}));
+	EXPECT_TRUE(cat->run({0, 1, 0}));
+	EXPECT_FALSE(cat->run({0, 1, 1}));
+	EXPECT_FALSE(cat->run({1, 0, 0}));
+	EXPECT_FALSE(cat->run({1, 0, 1}));
+	EXPECT_FALSE(cat->run({1, 1, 0}));
+	EXPECT_FALSE(cat->run({1, 1, 1}));
+}
