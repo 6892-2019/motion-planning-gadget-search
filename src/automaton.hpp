@@ -43,6 +43,17 @@ public:
 	}
 
 	/**
+	 * Returns a new Automaton that accepts the empty string.
+	 */
+	static ptr epsilon() {
+		ptr a = new Automaton();
+		a->transitions_.push_back({});
+		a->accept_.push_back(true);
+		a->deterministic_ = true;
+		return a;
+	}
+
+	/**
 	 * Returns a new Automaton that accepts any single character.
 	 */
 	static ptr any() {

@@ -34,6 +34,16 @@ TEST(AutomatonTest, Any) {
 	EXPECT_FALSE(a->run({1, 0}));
 }
 
+TEST(AutomatonTest, Epsilon) {
+	auto a = Automaton<2>::epsilon();
+	EXPECT_TRUE(a->deterministic());
+	EXPECT_TRUE(a->run({}));
+	EXPECT_FALSE(a->run({0}));
+	EXPECT_FALSE(a->run({1}));
+	EXPECT_FALSE(a->run({0, 1}));
+	EXPECT_FALSE(a->run({1, 0}));
+}
+
 TEST(AutomatonTest, Lit) {
 	auto a = Automaton<2>::lit(0);
 	EXPECT_TRUE(a->deterministic());
