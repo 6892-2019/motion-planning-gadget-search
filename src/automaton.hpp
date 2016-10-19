@@ -95,6 +95,8 @@ public:
 		ptr a = new Automaton;
 		a->transitions_.reserve(totalStates);
 		a->accept_.resize(totalStates);
+		//This is for the copied states; addEpsilon handles our additions.
+		a->deterministic_ = std::all_of(begin, end, [](ptr a){return a->deterministic();});
 		for (ForwardIterator i = begin; i != end; ++i) {
 			ptr b = *i;
 			//Copy states into a, renumbering around the states that already exist.
@@ -119,7 +121,6 @@ public:
 				}
 			}
 		}
-		a->deterministic_ = false;
 		return a;
 	}
 	static ptr cat(std::initializer_list<ptr> lists) {
@@ -138,6 +139,8 @@ public:
 		ptr a = new Automaton;
 		a->transitions_.reserve(totalStates);
 		a->accept_.resize(totalStates);
+		//This is for the copied states; addEpsilon handles our additions.
+		a->deterministic_ = std::all_of(begin, end, [](ptr p){return p->deterministic();});
 		//initial state that transitions to the individual machines' states
 		a->transitions_.push_back({});
 		a->accept_.reset(0);
@@ -155,8 +158,6 @@ public:
 
 			a->addEpsilon(0, base);
 		}
-		a->deterministic_ = a->isStateDeterministic(0) &&
-				std::all_of(begin, end, [](ptr p){return p->deterministic();});
 		return a;
 	}
 	static ptr alt(std::initializer_list<ptr> alternatives) {
