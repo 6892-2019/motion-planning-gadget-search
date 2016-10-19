@@ -126,6 +126,43 @@ public:
 		return cat(lists.begin(), lists.end());
 	}
 
+	template<class ForwardIterator>
+	static ptr alt(ForwardIterator begin, ForwardIterator end) {
+		if (begin == end)
+			return empty();
+
+		std::size_t totalStates = 1;
+		for (ForwardIterator i = begin; i != end; ++i)
+			totalStates += (*i)->transitions_.size();
+
+		ptr a = new Automaton;
+		a->transitions_.reserve(totalStates);
+		a->accept_.resize(totalStates);
+		//initial state that transitions to the individual machines' states
+		a->transitions_.push_back({});
+		a->accept_.reset(0);
+		for (ForwardIterator i = begin; i != end; ++i) {
+			ptr b = *i;
+			//Copy states into a, renumbering around the states that already exist.
+			state_type base = static_cast<state_type>(a->transitions_.size());
+			for (const auto& t : b->transitions_) {
+				a->transitions_.push_back(t);
+				for (Transition& nt : a->transitions_.back())
+					nt.next_ += base;
+			}
+			for (std::size_t p = 0, q = base; q < a->transitions_.size(); ++p, ++q)
+				a->accept_[q] = b->accept_[p];
+
+			a->addEpsilon(0, base);
+		}
+		a->deterministic_ = a->isStateDeterministic(0) &&
+				std::all_of(begin, end, [](ptr p){return p->deterministic();});
+		return a;
+	}
+	static ptr alt(std::initializer_list<ptr> alternatives) {
+		return alt(alternatives.begin(), alternatives.end());
+	}
+
 	/**
 	 * Returns true if this automaton is known to be deterministic.
 	 */
@@ -201,6 +238,17 @@ private:
 		if (accept_[from])
 			accept_.set(to);
 		transitions_[from].insert(transitions_[from].end(), transitions_[to].begin(), transitions_[to].end());
+	}
+
+	/**
+	 * Returns true iff the given state transitions to at most one state on
+	 * every symbol.
+	 */
+	bool isStateDeterministic(state_type state) const {
+		for (symbol_type s = 0; s < AlphabetSize; ++s)
+			if (step(state, s).size() > 1)
+				return false;
+		return true;
 	}
 
 	std::atomic<unsigned int> refcount_;

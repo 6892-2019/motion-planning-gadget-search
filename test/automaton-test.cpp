@@ -89,3 +89,45 @@ TEST(AutomatonTest, Cat) {
 	EXPECT_FALSE(cat->run({1, 1, 0}));
 	EXPECT_FALSE(cat->run({1, 1, 1}));
 }
+
+TEST(AutomatonTest, Alt) {
+	auto a = Automaton<2>::lit(0);
+	auto alt = Automaton<2>::alt({a});
+	EXPECT_FALSE(alt->run({}));
+	EXPECT_TRUE(alt->run({0}));
+	EXPECT_FALSE(alt->run({1}));
+	EXPECT_FALSE(alt->run({0, 1}));
+	EXPECT_FALSE(alt->run({1, 0}));
+
+	auto b = Automaton<2>::lit(1);
+	alt = Automaton<2>::alt({a, b});
+	EXPECT_FALSE(alt->run({}));
+	EXPECT_TRUE(alt->run({0}));
+	EXPECT_TRUE(alt->run({1}));
+	EXPECT_FALSE(alt->run({0, 1}));
+	EXPECT_FALSE(alt->run({1, 0}));
+	EXPECT_FALSE(alt->run({0, 0, 0}));
+	EXPECT_FALSE(alt->run({0, 0, 1}));
+	EXPECT_FALSE(alt->run({0, 1, 0}));
+	EXPECT_FALSE(alt->run({0, 1, 1}));
+	EXPECT_FALSE(alt->run({1, 0, 0}));
+	EXPECT_FALSE(alt->run({1, 0, 1}));
+	EXPECT_FALSE(alt->run({1, 1, 0}));
+	EXPECT_FALSE(alt->run({1, 1, 1}));
+
+	auto c = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
+	alt = Automaton<2>::alt({a, c});
+	EXPECT_FALSE(alt->run({}));
+	EXPECT_TRUE(alt->run({0}));
+	EXPECT_FALSE(alt->run({1}));
+	EXPECT_FALSE(alt->run({0, 1}));
+	EXPECT_TRUE(alt->run({1, 0}));
+	EXPECT_FALSE(alt->run({0, 0, 0}));
+	EXPECT_FALSE(alt->run({0, 0, 1}));
+	EXPECT_FALSE(alt->run({0, 1, 0}));
+	EXPECT_FALSE(alt->run({0, 1, 1}));
+	EXPECT_FALSE(alt->run({1, 0, 0}));
+	EXPECT_FALSE(alt->run({1, 0, 1}));
+	EXPECT_FALSE(alt->run({1, 1, 0}));
+	EXPECT_FALSE(alt->run({1, 1, 1}));
+}
