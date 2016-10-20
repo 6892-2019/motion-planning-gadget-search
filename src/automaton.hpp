@@ -29,7 +29,6 @@ public:
 		a->transitions_.back().back().next_ = 0; //loop back to itself
 		a->transitions_.back().back().symbols_.set();
 		a->accept_.push_back(false);
-		a->deterministic_ = true;
 		return a;
 	}
 
@@ -49,7 +48,6 @@ public:
 		ptr a = new Automaton();
 		a->transitions_.push_back({});
 		a->accept_.push_back(true);
-		a->deterministic_ = true;
 		return a;
 	}
 
@@ -67,7 +65,6 @@ public:
 		a->accept_[0] = false;
 		//Second state is accepting, but has no outgoing transitions.
 		a->accept_[1] = true;
-		a->deterministic_ = true;
 		return a;
 	}
 
@@ -187,7 +184,7 @@ public:
 		return std::any_of(current.begin(), current.end(), [this](state_type s){return accept_[s];});
 	}
 private:
-	Automaton() {}
+	Automaton() : deterministic_(true) {}
 
 	using symbol_type = unsigned int; //cf. Literal
 //	using symbol_mask_type = boost::uint_t<AlphabetSize>::least;
