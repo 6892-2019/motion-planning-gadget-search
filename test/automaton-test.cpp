@@ -160,3 +160,17 @@ TEST(AutomatonTest, Conj) {
 	EXPECT_TRUE(cat->run({0, 1}));
 	EXPECT_FALSE(cat->run({1, 0}));
 }
+
+TEST(AutomatonTest, Star) {
+	auto a = Automaton<2>::lit(0);
+	auto s = Automaton<2>::star(a);
+	EXPECT_TRUE(s->deterministic());
+	EXPECT_TRUE(s->run({}));
+	EXPECT_TRUE(s->run({0}));
+	EXPECT_TRUE(s->run({0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0}));
+	EXPECT_FALSE(s->run({1}));
+	EXPECT_FALSE(s->run({0, 1}));
+	EXPECT_FALSE(s->run({0, 0, 1}));
+	EXPECT_FALSE(s->run({1, 0, 0}));
+}

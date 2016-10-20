@@ -205,10 +205,46 @@ public:
 		return a;
 	}
 
+	static ptr star(ptr b) {
+		ptr a = new Automaton;
+		a->transitions_.reserve(1 + b->size());
+		a->accept_.resize(1 + b->size());
+		a->addState();
+		a->accept_.set(0);
+		a->deterministic_ = b->deterministic();
+		//Copy states into a, renumbering around the states that already exist.
+		state_type base = static_cast<state_type>(a->transitions_.size());
+		for (const auto& t : b->transitions_) {
+			a->transitions_.push_back(t);
+			for (Transition& nt : a->transitions_.back())
+				nt.next_ += base;
+		}
+		for (std::size_t p = 0, q = base; q < a->transitions_.size(); ++p, ++q)
+			a->accept_[q] = b->accept_[p];
+
+		a->addEpsilon(0, 1);
+		for (state_type p = base; p < a->accept_.size(); ++p)
+			if (a->accept_.test(p))
+				a->addEpsilon(p, 0);
+		return a;
+	}
+
 	/**
 	 * Returns true if this automaton is known to be deterministic.
 	 */
 	bool deterministic() const {return deterministic_;}
+
+	/**
+	 * Returns the number of states in this automaton.
+	 */
+	std::size_t size() const {return transitions_.size();}
+	/**
+	 * Returns the number of transitions in this automaton.
+	 */
+	std::size_t numTransitions() const {
+		return std::accumulate(transitions_.begin(), transitions_.end(), static_cast<std::size_t>(0),
+				[](std::size_t l, const auto& r) {return l + r.size();});
+	}
 
 	/**
 	 * Returns true if the machine accepts the given string (as symbol indices)
