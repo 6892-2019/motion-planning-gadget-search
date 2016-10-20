@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <string>
 #include <experimental/string_view>
+#include <tuple>
 #include <boost/container/small_vector.hpp>
 #include <bitset>
 #include <boost/dynamic_bitset.hpp>
@@ -29,6 +30,7 @@
 #include <utility>
 #include <type_traits>
 #include <boost/integer.hpp>
+#include <boost/functional/hash.hpp> //for std::pair/std::tuple hashing
 
 #include <exception>
 #include <cassert>

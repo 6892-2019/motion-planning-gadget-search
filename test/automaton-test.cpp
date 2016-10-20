@@ -131,3 +131,32 @@ TEST(AutomatonTest, Alt) {
 	EXPECT_FALSE(alt->run({1, 1, 0}));
 	EXPECT_FALSE(alt->run({1, 1, 1}));
 }
+
+TEST(AutomatonTest, Conj) {
+	auto a = Automaton<2>::lit(0);
+	auto b = Automaton<2>::lit(0);
+	auto cat = Automaton<2>::conj(a, b);
+	EXPECT_FALSE(cat->run({}));
+	EXPECT_TRUE(cat->run({0}));
+	EXPECT_FALSE(cat->run({1}));
+	EXPECT_FALSE(cat->run({0, 1}));
+	EXPECT_FALSE(cat->run({1, 0}));
+
+	auto c = Automaton<2>::lit(1);
+	cat = Automaton<2>::conj(a, c);
+	EXPECT_FALSE(cat->run({}));
+	EXPECT_FALSE(cat->run({0}));
+	EXPECT_FALSE(cat->run({1}));
+	EXPECT_FALSE(cat->run({0, 1}));
+	EXPECT_FALSE(cat->run({1, 0}));
+
+	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
+	auto f = Automaton<2>::alt({d, e});
+	cat = Automaton<2>::conj(f, d);
+	EXPECT_FALSE(cat->run({}));
+	EXPECT_FALSE(cat->run({0}));
+	EXPECT_FALSE(cat->run({1}));
+	EXPECT_TRUE(cat->run({0, 1}));
+	EXPECT_FALSE(cat->run({1, 0}));
+}

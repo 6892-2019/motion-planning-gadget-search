@@ -161,6 +161,50 @@ public:
 		return alt(alternatives.begin(), alternatives.end());
 	}
 
+	static ptr conj(ptr left, ptr right) {
+		//(left state, right state, new state)
+		using state_triple = std::tuple<state_type, state_type, state_type>;
+		std::stack<state_triple> worklist;
+		//std::hash isn't provided for pair :(
+		std::unordered_map<std::pair<state_type, state_type>, state_type,
+				boost::hash<std::pair<state_type, state_type>>> newstates;
+
+		ptr a = new Automaton;
+		a->addState();
+		//TODO: assuming 0 is the initial state
+		worklist.push({0, 0, 0});
+		newstates[{0, 0}] = 0;
+
+		while (!worklist.empty()) {
+			state_type ls, rs, ns;
+			std::tie(ls, rs, ns) = worklist.top();
+			worklist.pop();
+			a->accept_.set(ns, left->accept_[ls] && right->accept_[rs]);
+
+			//This is a bit naive and may need to be revised for large alphabets.
+			for (symbol_type s = 0; s < AlphabetSize; ++s) {
+				auto leftnexts = left->step(ls, s);
+				auto rightnexts = right->step(rs, s);
+				for (state_type leftnext : leftnexts)
+					for (state_type rightnext : rightnexts) {
+						auto it = newstates.find({leftnext, rightnext});
+						state_type newnext;
+						if (it == newstates.end()) {
+							newnext = a->addState();
+							newstates[{leftnext, rightnext}] = newnext;
+							worklist.push({leftnext, rightnext, newnext});
+						} else
+							newnext = it->second;
+						a->addTrans(ns, s, newnext);
+					}
+			}
+		}
+
+		//TODO: are we sure?
+		a->deterministic_ = left->deterministic() && right->deterministic();
+		return a;
+	}
+
 	/**
 	 * Returns true if this automaton is known to be deterministic.
 	 */
@@ -230,6 +274,17 @@ private:
 	}
 
 	/**
+	 * Adds a new state to this automaton.  The state is rejecting and has no
+	 * outgoing transitions.
+	 */
+	state_type addState() {
+		state_type s = static_cast<state_type>(transitions_.size());
+		transitions_.push_back({});
+		accept_.push_back(false);
+		return s;
+	}
+
+	/**
 	 * Add transitions out of from that simulate the presence of an epsilon
 	 * transition into to.  (Later modifications of to's transitions will not
 	 * result in corresponding updates of from's transitions.)
@@ -262,7 +317,7 @@ private:
 					deterministic_ = false;
 				return true;
 			}
-		transitions_[from].push_back();
+		transitions_[from].push_back({});
 		transitions_[from].back().next_ = to;
 		transitions_[from].back().symbols_.set(symbol);
 		if (!isStateDeterministic(from))
