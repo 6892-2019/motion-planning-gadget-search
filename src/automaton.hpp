@@ -90,22 +90,9 @@ public:
 			totalStates += (*i)->transitions_.size();
 
 		ptr a = new Automaton;
-		a->transitions_.reserve(totalStates);
-		a->accept_.resize(totalStates);
-		//This is for the copied states; addEpsilon handles our additions.
-		a->deterministic_ = std::all_of(begin, end, [](ptr a){return a->deterministic();});
+		a->reserve(totalStates);
 		for (ForwardIterator i = begin; i != end; ++i) {
-			ptr b = *i;
-			//Copy states into a, renumbering around the states that already exist.
-			state_type base = static_cast<state_type>(a->transitions_.size());
-			for (const auto& t : b->transitions_) {
-				a->transitions_.push_back(t);
-				for (Transition& nt : a->transitions_.back())
-					nt.next_ += base;
-			}
-			for (std::size_t p = 0, q = base; q < a->transitions_.size(); ++p, ++q)
-				a->accept_[q] = b->accept_[p];
-
+			state_type base = a->append(*i);
 			//Wire the previous automaton's accept states to the current initial
 			//state (base), modifying them to not accept.
 			//TODO: addEpsilon may cause p to become accepting again, so we have
@@ -134,25 +121,11 @@ public:
 			totalStates += (*i)->transitions_.size();
 
 		ptr a = new Automaton;
-		a->transitions_.reserve(totalStates);
-		a->accept_.resize(totalStates);
-		//This is for the copied states; addEpsilon handles our additions.
-		a->deterministic_ = std::all_of(begin, end, [](ptr p){return p->deterministic();});
+		a->reserve(totalStates);
 		//initial state that transitions to the individual machines' states
-		a->transitions_.push_back({});
-		a->accept_.reset(0);
+		a->addState();
 		for (ForwardIterator i = begin; i != end; ++i) {
-			ptr b = *i;
-			//Copy states into a, renumbering around the states that already exist.
-			state_type base = static_cast<state_type>(a->transitions_.size());
-			for (const auto& t : b->transitions_) {
-				a->transitions_.push_back(t);
-				for (Transition& nt : a->transitions_.back())
-					nt.next_ += base;
-			}
-			for (std::size_t p = 0, q = base; q < a->transitions_.size(); ++p, ++q)
-				a->accept_[q] = b->accept_[p];
-
+			state_type base = a->append(*i);
 			a->addEpsilon(0, base);
 		}
 		return a;
@@ -207,21 +180,9 @@ public:
 
 	static ptr star(ptr b) {
 		ptr a = new Automaton;
-		a->transitions_.reserve(1 + b->size());
-		a->accept_.resize(1 + b->size());
+		a->reserve(1 + b->size());
 		a->addState();
-		a->accept_.set(0);
-		a->deterministic_ = b->deterministic();
-		//Copy states into a, renumbering around the states that already exist.
-		state_type base = static_cast<state_type>(a->transitions_.size());
-		for (const auto& t : b->transitions_) {
-			a->transitions_.push_back(t);
-			for (Transition& nt : a->transitions_.back())
-				nt.next_ += base;
-		}
-		for (std::size_t p = 0, q = base; q < a->transitions_.size(); ++p, ++q)
-			a->accept_[q] = b->accept_[p];
-
+		state_type base = a->append(b);
 		a->addEpsilon(0, 1);
 		for (state_type p = base; p < a->accept_.size(); ++p)
 			if (a->accept_.test(p))
@@ -307,6 +268,37 @@ private:
 		//technically deterministic.  Maybe return a set-like type?
 		assert(next.size() <= 1 || !deterministic_);
 		return next;
+	}
+
+	/**
+	 * Reserves space in this automaton for the given number of states.
+	 */
+	void reserve(std::size_t size) {
+		transitions_.reserve(size);
+		accept_.reserve(size);
+	}
+
+	/**
+	 * Copies all states from the given automaton into this automaton, adjusting
+	 * transition numbers as required.  This does not add any transitions to the
+	 * newly-copied states.
+	 * @return the number of states of this automaton before appending;
+	 * equivalently, the number of the first inserted state (if any)
+	 */
+	state_type append(ptr b) {
+		//TODO: this may result in pathological behavior if we're appending
+		//repeatedly, each time allocating "just enough" instead of e.g. doubling
+		reserve(size() + b->size());
+		state_type base = static_cast<state_type>(transitions_.size());
+		for (const auto& t : b->transitions_) {
+			transitions_.push_back(t);
+			for (Transition& nt : transitions_.back())
+				nt.next_ += base;
+		}
+		for (std::size_t p = 0; p < b->size(); ++p)
+			accept_.push_back(b->accept_[p]);
+		deterministic_ &= b->deterministic();
+		return base;
 	}
 
 	/**
