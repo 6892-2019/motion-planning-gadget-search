@@ -190,6 +190,32 @@ public:
 				a->addEpsilon(p, 0);
 		return a;
 	}
+	static ptr nCopies(const_ptr b, unsigned int count) {
+		std::vector<const_ptr> v(count, b);
+		return cat(v.begin(), v.end());
+	}
+	static ptr nOrMore(const_ptr b, unsigned int min) {
+		if (min == 0) return star(b);
+		std::vector<const_ptr> v(min-1, b);
+		v.push_back(star(b));
+		return cat(v.begin(), v.end());
+	}
+	static ptr range(const_ptr b, unsigned int min, unsigned int max) {
+		assert(max > min);
+		ptr a = nCopies(b, min); //TODO: we could save a copy by writing this inline
+		a->reserve(max * b->size());
+		//like cat, but not clearing the accept states (and so not scanning from
+		//state 0 each time)
+		state_type lastbase = 0;
+		for (unsigned int i = 0; i < max - min; ++i) {
+			state_type base = a->append(b);
+			for (state_type q = lastbase; q < base; ++q)
+				if (a->accept_[q])
+					a->addEpsilon(q, base);
+			lastbase = base;
+		}
+		return a;
+	}
 
 	/**
 	 * Returns true if this automaton is known to be deterministic.

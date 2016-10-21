@@ -174,3 +174,54 @@ TEST(AutomatonTest, Star) {
 	EXPECT_FALSE(s->run({0, 0, 1}));
 	EXPECT_FALSE(s->run({1, 0, 0}));
 }
+
+TEST(AutomatonTest, NCopies) {
+	auto a = Automaton<2>::lit(0);
+	auto s = Automaton<2>::nCopies(a, 3);
+	EXPECT_FALSE(s->run({}));
+	EXPECT_FALSE(s->run({0}));
+	EXPECT_FALSE(s->run({0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({1}));
+	EXPECT_FALSE(s->run({0, 1}));
+	EXPECT_FALSE(s->run({0, 0, 1}));
+	EXPECT_FALSE(s->run({1, 0, 0}));
+}
+
+TEST(AutomatonTest, NOrMore) {
+	auto a = Automaton<2>::lit(0);
+	auto s = Automaton<2>::nOrMore(a, 3);
+	EXPECT_FALSE(s->run({}));
+	EXPECT_FALSE(s->run({0}));
+	EXPECT_FALSE(s->run({0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({1}));
+	EXPECT_FALSE(s->run({0, 1}));
+	EXPECT_FALSE(s->run({0, 0, 1}));
+	EXPECT_FALSE(s->run({1, 0, 0}));
+}
+
+TEST(AutomatonTest, Range) {
+	auto a = Automaton<2>::lit(0);
+	auto s = Automaton<2>::range(a, 2, 6);
+	EXPECT_FALSE(s->run({}));
+	EXPECT_FALSE(s->run({0}));
+	EXPECT_TRUE(s->run({0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({1}));
+	EXPECT_FALSE(s->run({0, 1}));
+	EXPECT_FALSE(s->run({0, 0, 1}));
+	EXPECT_FALSE(s->run({1, 0, 0}));
+}
