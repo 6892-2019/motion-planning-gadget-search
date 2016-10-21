@@ -265,9 +265,11 @@ private:
 		for (const Transition& t : transitions_[current])
 			if (t.symbols_[symbol])
 				next.push_back(t.next_);
-		//TODO: if we have multiple transitions to the same state, we're
-		//technically deterministic.  Maybe return a set-like type?
-		assert(next.size() <= 1 || !deterministic_);
+		//We used to assert(next.size() <= 1 || !deterministic_), but the
+		//addTrans calls isStateDeterministic calls step (us) when checking
+		//whether to clear deterministic_.  If we change the implementation of
+		//isStateDeterministic to not actually build the steps, we could add the
+		//assert back.
 		return next;
 	}
 
