@@ -19,6 +19,7 @@ template<unsigned int AlphabetSize>
 class Automaton {
 public:
 	using ptr = boost::intrusive_ptr<Automaton>;
+	using const_ptr = boost::intrusive_ptr<const Automaton>;
 
 	/**
 	 * Returns a new Automaton that accepts the empty language.
@@ -107,7 +108,7 @@ public:
 		}
 		return a;
 	}
-	static ptr cat(std::initializer_list<ptr> lists) {
+	static ptr cat(std::initializer_list<const_ptr> lists) {
 		return cat(lists.begin(), lists.end());
 	}
 
@@ -130,11 +131,11 @@ public:
 		}
 		return a;
 	}
-	static ptr alt(std::initializer_list<ptr> alternatives) {
+	static ptr alt(std::initializer_list<const_ptr> alternatives) {
 		return alt(alternatives.begin(), alternatives.end());
 	}
 
-	static ptr conj(ptr left, ptr right) {
+	static ptr conj(const_ptr left, const_ptr right) {
 		//(left state, right state, new state)
 		using state_triple = std::tuple<state_type, state_type, state_type>;
 		std::stack<state_triple> worklist;
@@ -178,7 +179,7 @@ public:
 		return a;
 	}
 
-	static ptr star(ptr b) {
+	static ptr star(const_ptr b) {
 		ptr a = new Automaton;
 		a->reserve(1 + b->size());
 		a->addState();
@@ -285,7 +286,7 @@ private:
 	 * @return the number of states of this automaton before appending;
 	 * equivalently, the number of the first inserted state (if any)
 	 */
-	state_type append(ptr b) {
+	state_type append(const_ptr b) {
 		//TODO: this may result in pathological behavior if we're appending
 		//repeatedly, each time allocating "just enough" instead of e.g. doubling
 		reserve(size() + b->size());
@@ -386,11 +387,12 @@ private:
 		return true;
 	}
 
-	std::atomic<unsigned int> refcount_;
-	friend void intrusive_ptr_add_ref(Automaton* p) noexcept {
+	//mutable == thread-safe in C++11+
+	mutable std::atomic<unsigned int> refcount_;
+	friend void intrusive_ptr_add_ref(const Automaton* p) noexcept {
 		++p->refcount_;
 	}
-	friend void intrusive_ptr_release(Automaton* p) noexcept {
+	friend void intrusive_ptr_release(const Automaton* p) noexcept {
 		if (!(--p->refcount_))
 			delete p;
 	}
