@@ -253,6 +253,13 @@ public:
 	}
 private:
 	Automaton() : deterministic_(true) {}
+	//move everything but the reference counter (which is tied to the physical object)
+	Automaton& operator=(Automaton&& victim) {
+		transitions_ = std::move(victim.transitions_);
+		accept_ = std::move(victim.accept_);
+		deterministic_ = victim.deterministic_;
+		return *this;
+	}
 
 	using symbol_type = unsigned int; //cf. Literal
 //	using symbol_mask_type = boost::uint_t<AlphabetSize>::least;
@@ -402,6 +409,93 @@ private:
 		if (!isStateDeterministic(from))
 			deterministic_ = false;
 		return true;
+	}
+
+	void determinize() {
+		if (deterministic()) return;
+		//We manually sort before inserting in newstate.
+		//Unfortunately there's no small_flat_set...
+		using state_set = small_vector<state_type, 4>;
+		auto hasher = [](const state_set& set) {
+			//could be std::accumulate, I guess
+			std::size_t accum = 0;
+			for (state_type t : set)
+				accum = accum * 17 + t;
+			return accum;
+		};
+
+		//0 bucket count is fine: http://stackoverflow.com/q/14179441/3614835
+		std::unordered_map<state_set, state_type, decltype(hasher)> newstate(0, hasher);
+		//pointers to keys in newstate
+		std::stack<const typename decltype(newstate)::value_type*> worklist;
+		ptr a = new Automaton;
+		a->addState();
+		auto iterSucc = newstate.insert(std::make_pair(state_set({0}), 0));
+		assert(iterSucc.second);
+		worklist.push(&*(iterSucc.first));
+
+		while (!worklist.empty()) {
+			auto current = worklist.top();
+			worklist.pop();
+
+			a->accept_[current->second] = std::any_of(current->first.begin(), current->first.end(),
+					[this](state_type state) {return this->accept_[state];});
+
+			state_set next;
+			for (symbol_type s = 0; s < AlphabetSize; ++s) {
+				next.clear();
+				for (state_type f : current->first)
+					for (state_type t : step(f, s))
+						if (std::find(next.begin(), next.end(), t) == next.end())
+							next.push_back(t);
+				if (next.empty())
+					continue; //all NFA states crashed
+				std::sort(next.begin(), next.end());
+				//TODO: is there a computeIfAbsent equivalent?
+				auto it = newstate.find(next);
+				if (it == newstate.end()) {
+					it = newstate.insert(std::make_pair(std::move(next), a->addState())).first;
+					worklist.push(&*it);
+				}
+				a->addTrans(current->second, s, it->second);
+				assert(a->deterministic());
+			}
+		}
+
+		*this = std::move(*a);
+		assert(deterministic());
+	}
+
+	/**
+	 * Fills in any missing transitions with transitions to an explicit crash
+	 * state.
+	 */
+	void totalize() {
+		state_type crash;
+		bool madeCrashState = false;
+		for (state_type s = 0; s < transitions_.size(); ++s) {
+			symbol_mask_type missing = ~outgoing(s);
+			if (missing.any()) {
+				if (!madeCrashState) {
+					crash = addState();
+					madeCrashState = true;
+				}
+				addTrans(s, missing, crash);
+			}
+		}
+	}
+
+	/**
+	 * Returns a mask of the symbols for which the given state has outgoing
+	 * transitions.
+	 * @return a mask of the symbols for which the given state has outgoing
+	 * transitions.
+	 */
+	symbol_mask_type outgoing(state_type state) const {
+		symbol_mask_type mask;
+		for (const Transition& t : transitions_[state])
+			mask |= t.symbols_;
+		return mask;
 	}
 
 	/**
