@@ -302,6 +302,30 @@ TEST(AutomatonTest, Range) {
 	EXPECT_FALSE(s->run({1, 0, 0}));
 }
 
+TEST(AutomatonTest, Comp) {
+	auto a = Automaton<2>::lit(0);
+	auto comp = Automaton<2>::comp(a);
+	EXPECT_TRUE(comp->run({}));
+	EXPECT_FALSE(comp->run({0}));
+	EXPECT_TRUE(comp->run({1}));
+	EXPECT_TRUE(comp->run({0, 1, 0}));
+
+	auto s = Automaton<2>::range(a, 2, 6);
+	s = Automaton<2>::comp(s);
+	EXPECT_TRUE(s->run({}));
+	EXPECT_TRUE(s->run({0}));
+	EXPECT_FALSE(s->run({0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({1}));
+	EXPECT_TRUE(s->run({0, 1}));
+	EXPECT_TRUE(s->run({0, 0, 1}));
+	EXPECT_TRUE(s->run({1, 0, 0}));
+}
+
 TEST(AutomatonTest, Clone) {
 	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
 	auto b = a->clone();

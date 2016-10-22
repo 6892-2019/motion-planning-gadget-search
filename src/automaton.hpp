@@ -217,6 +217,15 @@ public:
 		return a;
 	}
 
+	static ptr comp(const_ptr b) {
+		ptr a = b->clone();
+		a->determinize();
+		a->totalize();
+		a->accept_.flip();
+		//TODO: removeDeadTransitions?
+		return a;
+	}
+
 	ptr clone() const {
 		return new Automaton(*this);
 	}
