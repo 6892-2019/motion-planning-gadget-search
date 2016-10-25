@@ -190,6 +190,12 @@ public:
 				a->addEpsilon(p, 0);
 		return a;
 	}
+	static ptr plus(const_ptr b) {
+		return nOrMore(b, 1);
+	}
+	static ptr maybe(const_ptr b) {
+		return range(b, 0, 1);
+	}
 	static ptr nCopies(const_ptr b, unsigned int count) {
 		std::vector<const_ptr> v(count, b);
 		return cat(v.begin(), v.end());
@@ -355,6 +361,21 @@ public:
 				addTrans(s, missing, crash);
 			}
 		}
+	}
+
+	/**
+	 * Enumerates the strings accepted by this automaton.
+	 *
+	 * This function is not const because it may need to determinize the
+	 * automaton (to ensure each string is only generated once).
+	 */
+	template<class Alphabet, class Callable>
+	void enumerate(Callable callback) {
+		determinize();
+		std::stack<state_type> stateStack;
+		stateStack.push(0);
+		std::vector<typename Alphabet::symbol_type> symbolString;
+		enumerateRecurse<Alphabet>(stateStack, symbolString, callback);
 	}
 
 private:
@@ -542,6 +563,25 @@ private:
 			if (step(state, s).size() > 1)
 				return false;
 		return true;
+	}
+
+	template<class Alphabet, class Callable>
+	void enumerateRecurse(std::stack<state_type>& stateStack, std::vector<typename Alphabet::symbol_type>& symbolString, Callable callback) {
+		state_type cur = stateStack.top();
+		if (accept_[cur])
+			callback(symbolString);
+		//For large alphabets we're better off walking the bitsets.
+		for (symbol_type s = 0; s < AlphabetSize; ++s) {
+			auto nexts = step(cur, s);
+			assert(nexts.size() <= 1 && "should be deterministic");
+			if (nexts.empty())
+				continue;
+			stateStack.push(nexts.front());
+			symbolString.push_back(Alphabet::at(s));
+			enumerateRecurse<Alphabet>(stateStack, symbolString, callback);
+			symbolString.pop_back();
+			stateStack.pop();
+		}
 	}
 
 	//mutable == thread-safe in C++11+
