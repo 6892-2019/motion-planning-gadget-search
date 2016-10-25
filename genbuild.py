@@ -16,8 +16,8 @@ globals.update({
 globals['includeflags'] = '-I$builddir/include -I$src_dir/'
 globals['testldflags'] = '$ldflags -lgtest -lgtest_main'
 
-debug_cfg = {'config': 'debug', 'optflags': '-g -O0 -march=native'}
-fastdebug_cfg = {'config': 'fastdebug', 'optflags': '-g -O2 -march=native'}
+debug_cfg = {'config': 'debug', 'optflags': '-g -O0 -march=native -gsplit-dwarf -fdebug-types-section -grecord-gcc-switches'}
+fastdebug_cfg = {'config': 'fastdebug', 'optflags': '-g -O2 -march=native -gsplit-dwarf -fdebug-types-section -grecord-gcc-switches'}
 release_cfg = {'config': 'release', 'optflags': '-O2 -march=native -flto -fvisibility=hidden -DNDEBUG'}
 configs = [debug_cfg, fastdebug_cfg, release_cfg]
 
