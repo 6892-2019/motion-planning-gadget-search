@@ -416,6 +416,7 @@ public:
 	template<class Alphabet, class Callable>
 	void enumerate(Callable callback) {
 		determinize();
+		removeDeadStates();
 		std::stack<state_type> stateStack;
 		stateStack.push(0);
 		std::vector<typename Alphabet::symbol_type> symbolString;
