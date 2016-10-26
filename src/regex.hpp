@@ -177,18 +177,6 @@ void Regex<Alphabet>::enumerate(Callable callback) const {
 	automaton->enumerate<Alphabet>(callback);
 }
 
-//TODO: built-in alphabets may move to their own file
-struct BooleanAlphabet {
-	using symbol_type = bool;
-	static constexpr std::array<symbol_type, 2> symbols = {false, true};
-	static constexpr unsigned int find(symbol_type symbol) {
-		return symbol ? 1 : 0;
-	}
-	static constexpr symbol_type at(unsigned int index) {
-		return symbols.at(index);
-	}
-};
-
 } //namespace automaton
 
 #endif /* REGEX_HPP */

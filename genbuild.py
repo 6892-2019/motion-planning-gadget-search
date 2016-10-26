@@ -1,6 +1,6 @@
 #!/usr/bin/env python2
 
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import os
 
 globals = OrderedDict()
@@ -42,25 +42,30 @@ for config in configs:
     buildfile.write('build $pch_target : cxx $src_dir/precompiled.hpp\n')
     buildfile.write('\n')
 
-    src_objects = []
+    src_objects = defaultdict(list)
     for subdir, dirs, files in os.walk('src/'):
       for f in files:
         if f.endswith('.cpp'):
           source = os.path.join(subdir, f)
-          object = "$builddir/$src_dir/" + f[:-4] + '.o'
+          rel = os.path.relpath(subdir, 'src/')
+          object = "$builddir/$src_dir/" + rel + '/' + f[:-4] + '.o'
           buildfile.write('build {} : cxx {} | $pch_target\n'.format(object, source))
-          src_objects.append(object)
+          src_objects[rel].append(object)
     buildfile.write('\n')
 
-    buildfile.write('build $builddir/bin/automaton.exe : ld {}\n'.format(' '.join(src_objects)))
-    buildfile.write('\n')
+    src_objects_str = ' '.join(src_objects['.'])
+    del src_objects['.']
+    for k, v in src_objects.iteritems():
+      buildfile.write('build $builddir/bin/{}.exe : ld {} {}\n'.format(k, src_objects_str, ' '.join(v)))
+      buildfile.write('\n')
 
     test_objects = []
     for subdir, dirs, files in os.walk('test/'):
       for f in files:
         if f.endswith('.cpp'):
           source = os.path.join(subdir, f)
-          object = "$builddir/$test_dir/" + f[:-4] + '.o'
+          rel = os.path.relpath(source, 'test/')
+          object = "$builddir/$test_dir/" + rel[:-4] + '.o'
           buildfile.write('build {} : cxx {} | $pch_target\n'.format(object, source))
           test_objects.append(object)
     buildfile.write('\n')

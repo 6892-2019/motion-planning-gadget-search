@@ -2,6 +2,13 @@
 <configurationDescriptor version="100">
   <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
     <df root="src" name="0">
+      <df name="nonogram">
+        <in>nonogram.cpp</in>
+        <in>puzzle.cpp</in>
+        <in>puzzle.hpp</in>
+      </df>
+      <in>alphabet.cpp</in>
+      <in>alphabet.hpp</in>
       <in>automaton.hpp</in>
       <in>expr.cpp</in>
       <in>expr.hpp</in>
@@ -58,6 +65,10 @@
           <preBuildFirst>true</preBuildFirst>
         </preBuild>
       </makefileType>
+      <item path="src/alphabet.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/alphabet.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/automaton.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="0">
@@ -67,6 +78,12 @@
       <item path="src/main.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="0">
         </ccTool>
+      </item>
+      <item path="src/nonogram/nonogram.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/nonogram/puzzle.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/nonogram/puzzle.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/regex.hpp" ex="false" tool="3" flavor2="0">
       </item>
