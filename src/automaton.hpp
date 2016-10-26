@@ -468,6 +468,8 @@ private:
 	 * crashed.
 	 */
 	small_vector<state_type, 4> step(state_type current, symbol_type symbol) const {
+		assert(current < transitions_.size());
+		assert(symbol < AlphabetSize);
 		small_vector<state_type, 4> next;
 		for (const Transition& t : transitions_[current])
 			if (t.symbols_[symbol])
