@@ -364,6 +364,50 @@ public:
 	}
 
 	/**
+	 * Removes dead states and transitions from this automaton.
+	 */
+	void removeDeadStates() {
+		std::unordered_set<state_type> live = liveStates();
+		//maps old state numbers to new state numbers
+		std::unordered_map<state_type, state_type> renumber;
+		boost::dynamic_bitset<std::size_t> newnumbers(live.size());
+		newnumbers.set();
+		for (state_type s : live)
+			//live states keep their numbers if possible
+			if (s < live.size()) {
+				renumber.insert({s, s});
+				newnumbers.reset(s);
+			}
+		unsigned long freestart = 0;
+		for (state_type s : live)
+			if (s >= live.size()) {
+				freestart = newnumbers.find_next(freestart);
+				renumber.insert({s, static_cast<state_type>(freestart)});
+				newnumbers.reset(freestart);
+			}
+
+		for (const std::pair<state_type, state_type> p : renumber) {
+			auto& nt = transitions_[p.second];
+			if (p.first != p.second) {
+				transitions_[p.second] = std::move(transitions_[p.first]);
+				accept_[p.second] = accept_[p.first];
+			}
+			//iterate backwards to gracefully remove
+			for (auto i = nt.size(); i-- > 0;) {
+				auto it = renumber.find(nt[i].next_);
+				if (it != renumber.end())
+					nt[i].next_ = it->second;
+				else
+					nt.erase(nt.begin()+i);
+			}
+		}
+
+		transitions_.resize(live.size());
+		accept_.resize(live.size());
+		//TODO: shrink_to_fit?
+	}
+
+	/**
 	 * Enumerates the strings accepted by this automaton.
 	 *
 	 * This function is not const because it may need to determinize the
@@ -555,6 +599,22 @@ private:
 	}
 
 	/**
+	 * Returns the states directly reachable from the given state.
+	 * @return the states directly reachable from the given state
+	 */
+	small_vector<state_type, 4> destinations(state_type state) const {
+		small_vector<state_type, 4> dest;
+		for (const Transition& t : transitions_[state])
+			dest.push_back(t.next_);
+#ifndef NDEBUG
+		//addTrans enforces we don't have duplicate transitions; check that here.
+		std::sort(dest.begin(), dest.end());
+		assert(std::adjacent_find(dest.begin(), dest.end()) == dest.end());
+#endif
+		return dest;
+	}
+
+	/**
 	 * Returns true iff the given state transitions to at most one state on
 	 * every symbol.
 	 */
@@ -563,6 +623,45 @@ private:
 			if (step(state, s).size() > 1)
 				return false;
 		return true;
+	}
+
+	/**
+	 * Returns a set of the live states of this automaton.  A state is live iff
+	 * it is contained in a path from the initial state to an accept state.
+	 * @return the set of live states
+	 */
+	std::unordered_set<state_type> liveStates() const {
+		//If for some reason we care about reachable but not live states, we're
+		//computing them here of necessity.
+		std::unordered_set<state_type> live, visited;
+		std::vector<state_type> path;
+		std::stack<boost::optional<state_type>> nexts;
+		nexts.push(boost::make_optional(0U));
+
+		while (!nexts.empty()) {
+			boost::optional<state_type> n = nexts.top();
+			nexts.pop();
+			if (n) {
+				//We might have already visited this state while it was waiting
+				//on the stack.
+				if (!visited.insert(*n).second)
+					continue;
+				path.push_back(*n);
+				if (accept_[path.back()])
+					//Add path elements to the live set until we find a state
+					//already in the live set, after which all previous states
+					//have already been marked live.
+					for (auto i = path.rbegin(); i != path.rend(); ++i)
+						if (!live.insert(*i).second)
+							break;
+				nexts.push(boost::optional<state_type>(boost::none));
+				for (state_type next : destinations(path.back()))
+					if (visited.find(next) == visited.end())
+						nexts.push(boost::make_optional(next));
+			} else
+				path.pop_back();
+		}
+		return live;
 	}
 
 	template<class Alphabet, class Callable>

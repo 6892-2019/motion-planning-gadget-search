@@ -45,9 +45,9 @@ std::vector<std::vector<unsigned int>> allStrings(unsigned int alphabetSize, uns
 }
 
 template<int AlphabetSize>
-void equivalentOnAllStrings(typename Automaton<AlphabetSize>::const_ptr a, typename Automaton<AlphabetSize>::const_ptr b, int length) {
+void equivalentOnAllStrings(typename Automaton<AlphabetSize>::const_ptr a, typename Automaton<AlphabetSize>::const_ptr b, int length, int lineno = -1) {
 	for (auto& string : allStrings(AlphabetSize, length))
-		EXPECT_EQ(a->run(string), b->run(string)) << to_string(string);
+		EXPECT_EQ(a->run(string), b->run(string)) << to_string(string) << " from line " << lineno;
 }
 
 } //end anonymous namespace
@@ -412,4 +412,49 @@ TEST(AutomatonTest, TotalizeDeterminize) {
 	gc->totalize();
 	gc->determinize();
 	equivalentOnAllStrings<2>(g, gc, 8);
+}
+
+TEST(AutomatonTest, RemoveDeadStates) {
+	auto p = Automaton<2>::lit(0);
+	auto q = p->clone();
+	q->removeDeadStates();
+	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
+	p = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	q = p->clone();
+	q->removeDeadStates();
+	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
+	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
+	auto b = a->clone();
+	b->removeDeadStates();
+	equivalentOnAllStrings<2>(a, b, 8, __LINE__);
+	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
+	auto f = Automaton<2>::alt({d, e});
+	auto fc = f->clone();
+	fc->removeDeadStates();
+	equivalentOnAllStrings<2>(f, fc, 8, __LINE__);
+	auto g = Automaton<2>::conj(f, d);
+	auto gc = g->clone();
+	gc->removeDeadStates();
+	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
+}
+
+TEST(AutomatonTest, DeterminizeRemoveDeadStates) {
+	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
+	auto b = a->clone();
+	b->determinize();
+	b->removeDeadStates();
+	equivalentOnAllStrings<2>(a, b, 8, __LINE__);
+	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
+	auto f = Automaton<2>::alt({d, e});
+	auto fc = f->clone();
+	fc->determinize();
+	fc->removeDeadStates();
+	equivalentOnAllStrings<2>(f, fc, 8, __LINE__);
+	auto g = Automaton<2>::conj(f, d);
+	auto gc = g->clone();
+	gc->determinize();
+	gc->removeDeadStates();
+	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
 }
