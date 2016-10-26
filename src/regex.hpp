@@ -50,6 +50,9 @@ public:
 		using std::begin; using std::end;
 		return cat(begin(regexes), end(regexes));
 	}
+	static Regex cat(std::initializer_list<Regex> regexes) {
+		return cat(regexes.begin(), regexes.end());
+	}
 
 	template<class InputIterator>
 	static Regex alt(InputIterator begin, InputIterator end) {
@@ -60,6 +63,9 @@ public:
 		using std::begin; using std::end;
 		return alt(begin(regexes), end(regexes));
 	}
+	static Regex alt(std::initializer_list<Regex> regexes) {
+		return alt(regexes.begin(), regexes.end());
+	}
 
 	template<class InputIterator>
 	static Regex conj(InputIterator begin, InputIterator end) {
@@ -69,6 +75,9 @@ public:
 	static Regex conj(const Sequence& regexes) {
 		using std::begin; using std::end;
 		return conj(begin(regexes), end(regexes));
+	}
+	static Regex conj(std::initializer_list<Regex> regexes) {
+		return conj(regexes.begin(), regexes.end());
 	}
 
 	constexpr static int unlimited = impl::Expr::unlimited;
