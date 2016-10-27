@@ -164,6 +164,14 @@ TEST(AutomatonTest, Cat) {
 	EXPECT_FALSE(cat->run({1, 0, 1}));
 	EXPECT_FALSE(cat->run({1, 1, 0}));
 	EXPECT_FALSE(cat->run({1, 1, 1}));
+
+	auto e = Automaton<2>::epsilon();
+	auto ecat = Automaton<2>::cat({e});
+	equivalentOnAllStrings<2>(e, ecat, 8, __LINE__);
+	auto ee = Automaton<2>::cat({e, e});
+	equivalentOnAllStrings<2>(e, ee, 8, __LINE__);
+	auto f = Automaton<2>::cat({e, e, e, e, e});
+	equivalentOnAllStrings<2>(e, f, 8, __LINE__);
 }
 
 TEST(AutomatonTest, Alt) {

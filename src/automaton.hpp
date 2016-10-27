@@ -47,8 +47,8 @@ public:
 	 */
 	static ptr epsilon() {
 		ptr a = new Automaton();
-		a->transitions_.push_back({});
-		a->accept_.push_back(true);
+		a->addState();
+		a->accept_[0] = true;
 		return a;
 	}
 
@@ -183,6 +183,7 @@ public:
 		ptr a = new Automaton;
 		a->reserve(1 + b->size());
 		a->addState();
+		a->accept_.set(0);
 		state_type base = a->append(b);
 		a->addEpsilon(0, 1);
 		for (state_type p = base; p < a->accept_.size(); ++p)
@@ -202,7 +203,7 @@ public:
 	}
 	static ptr nOrMore(const_ptr b, unsigned int min) {
 		if (min == 0) return star(b);
-		std::vector<const_ptr> v(min-1, b);
+		std::vector<const_ptr> v(min, b);
 		v.push_back(star(b));
 		return cat(v.begin(), v.end());
 	}
@@ -534,9 +535,9 @@ private:
 	 */
 	bool addEpsilon(state_type from, state_type to) {
 		bool changed = false;
-		if (accept_[from]) {
-			changed |= !accept_[to];
-			accept_.set(to);
+		if (accept_[to]) {
+			changed |= !accept_[from];
+			accept_.set(from);
 		}
 		for (const Transition& t : transitions_[to])
 			changed |= addTrans(from, t.symbols_, t.next_);
