@@ -62,9 +62,16 @@ int main(int argc, char* argv[]) {
 		puzzleConstraints.push_back(R::cat(clueConstraints));
 	}
 
-	int solutions = 0;
 	R puzzleConstraint = R::conj(puzzleConstraints);
-	puzzleConstraint.enumerate([&](auto& v) {++solutions;});
-	std::cout << solutions << std::endl;
+	std::vector<std::vector<bool>> solutions;
+	puzzleConstraint.enumerate([&](auto& v) {solutions.push_back(v);});
+	std::cout << solutions.size() << std::endl;
+	for (auto& v : solutions) {
+		for (auto s : v)
+			std::cout << s;
+		std::cout << '\n';
+	}
+	std::cout << std::endl;
+	std::cout << puzzle->solution() << std::endl;
 	return 0;
 }
