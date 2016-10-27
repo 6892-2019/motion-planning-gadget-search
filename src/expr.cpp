@@ -44,18 +44,58 @@ auto Expr::lit(unsigned int symbolIdx) -> ptr {
 	return new Literal(symbolIdx);
 }
 auto Expr::cat(container&& regexes) -> ptr {
-	return new Concatenation(std::move(regexes));
+	if (regexes.empty())
+		return epsilon();
+	if (regexes.size() == 1)
+		return regexes.front();
+	container folder;
+	folder.reserve(regexes.size());
+	for (ptr& p : regexes)
+		if (auto q = boost::dynamic_pointer_cast<Concatenation>(p))
+			folder.insert(folder.end(), q->children().begin(), q->children().end());
+		else
+			folder.push_back(std::move(p));
+	return new Concatenation(std::move(folder));
 }
 auto Expr::alt(container&& regexes) -> ptr {
-	return new Alternation(std::move(regexes));
+	if (regexes.empty())
+		return empty();
+	if (regexes.size() == 1)
+		return regexes.front();
+	container folder;
+	folder.reserve(regexes.size());
+	for (ptr& p : regexes)
+		if (auto q = boost::dynamic_pointer_cast<Alternation>(p))
+			folder.insert(folder.end(), q->children().begin(), q->children().end());
+		else
+			folder.push_back(std::move(p));
+	return new Alternation(std::move(folder));
 }
 auto Expr::conj(container&& regexes) -> ptr {
-	return new Intersection(std::move(regexes));
+	if (regexes.empty())
+		return all();
+	if (regexes.size() == 1)
+		return regexes.front();
+	container folder;
+	folder.reserve(regexes.size());
+	for (ptr& p : regexes)
+		if (auto q = boost::dynamic_pointer_cast<Intersection>(p))
+			folder.insert(folder.end(), q->children().begin(), q->children().end());
+		else
+			folder.push_back(std::move(p));
+	return new Intersection(std::move(folder));
 }
 auto Expr::repeat(ptr regex, int min, int max) -> ptr {
+	if (min == 0 && max == 0)
+		return epsilon();
+	if (min == 1 && max == 1)
+		return regex;
+	//TODO: more folds
 	return new Repetition(std::move(regex), min, max);
 }
 auto Expr::comp(ptr regex) -> ptr {
+	if (auto q = boost::dynamic_pointer_cast<Complement>(regex))
+		return q->child();
 	return new Complement(std::move(regex));
 }
 
