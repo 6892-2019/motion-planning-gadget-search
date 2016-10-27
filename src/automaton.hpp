@@ -424,7 +424,7 @@ public:
 	}
 
 private:
-	Automaton() : deterministic_(true) {}
+	Automaton() : deterministic_(true), refcount_(0) {}
 	//copy everything but the refcount
 	Automaton(const Automaton& a) : transitions_(a.transitions_), accept_(a.accept_),
 			deterministic_(a.deterministic_), refcount_(0) {}

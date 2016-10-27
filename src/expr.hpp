@@ -36,6 +36,8 @@ public:
 	static ptr comp(ptr regex);
 
 	virtual ~Expr() = default;
+protected:
+	Expr() : refcount_(0) {}
 private:
 	mutable std::atomic<unsigned int> refcount_;
 	friend void intrusive_ptr_add_ref(const Expr* p) noexcept {

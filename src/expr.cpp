@@ -13,6 +13,19 @@ EmptyLanguage emptyLanguage;
 AllStringsLanguage allStringsLanguage;
 Epsilon epsilonString;
 Any anyCharacter;
+
+//Add a fake reference to the refcount of those globals so they won't be detroyed.
+struct FakeRefAdder {
+	FakeRefAdder() {
+		intrusive_ptr_add_ref(&emptyLanguage);
+		intrusive_ptr_add_ref(&allStringsLanguage);
+		intrusive_ptr_add_ref(&epsilonString);
+		intrusive_ptr_add_ref(&anyCharacter);
+	}
+};
+//Because it's in the same source file, this objects is guaranteed to be
+//constructed after the globals.
+FakeRefAdder fakeRefAdder;
 } //end anonymous namespace
 
 auto Expr::empty() -> ptr {
