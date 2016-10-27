@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	int solutions = 0;
-	R puzzleConstraint = R::cat(puzzleConstraints);
+	R puzzleConstraint = R::conj(puzzleConstraints);
 	puzzleConstraint.enumerate([&](auto& v) {++solutions;});
 	std::cout << solutions << std::endl;
 	return 0;
