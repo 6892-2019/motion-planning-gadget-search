@@ -417,8 +417,8 @@ public:
 	void enumerate(Callable callback) {
 		determinize();
 		removeDeadStates();
-		std::stack<state_type> stateStack;
-		stateStack.push(0);
+		std::vector<state_type> stateStack;
+		stateStack.push_back(0);
 		std::vector<typename Alphabet::symbol_type> symbolString;
 		enumerateRecurse<Alphabet>(stateStack, symbolString, callback);
 	}
@@ -668,8 +668,8 @@ private:
 	}
 
 	template<class Alphabet, class Callable>
-	void enumerateRecurse(std::stack<state_type>& stateStack, std::vector<typename Alphabet::symbol_type>& symbolString, Callable callback) {
-		state_type cur = stateStack.top();
+	void enumerateRecurse(std::vector<state_type>& stateStack, std::vector<typename Alphabet::symbol_type>& symbolString, Callable callback) {
+		state_type cur = stateStack.back();
 		if (accept_[cur])
 			callback(symbolString);
 		//For large alphabets we're better off walking the bitsets.
@@ -678,11 +678,17 @@ private:
 			assert(nexts.size() <= 1 && "should be deterministic");
 			if (nexts.empty())
 				continue;
-			stateStack.push(nexts.front());
+			state_type next = nexts.front();
+			//We only enumerate finite languages, so we shouldn't visit the
+			//same state more than once.
+			assert(std::find(stateStack.begin(), stateStack.end(), next) == stateStack.end());
+			stateStack.push_back(next);
 			symbolString.push_back(Alphabet::at(s));
 			enumerateRecurse<Alphabet>(stateStack, symbolString, callback);
+			assert(symbolString.back() == Alphabet::at(s));
 			symbolString.pop_back();
-			stateStack.pop();
+			assert(stateStack.back() == next);
+			stateStack.pop_back();
 		}
 	}
 
