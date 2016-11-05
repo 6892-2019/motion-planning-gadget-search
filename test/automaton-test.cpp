@@ -445,6 +445,10 @@ TEST(AutomatonTest, RemoveDeadStates) {
 	auto gc = g->clone();
 	gc->removeDeadStates();
 	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
+	auto h = Automaton<2>::comp(Automaton<2>::lit(0));
+	auto hc = h->clone();
+	hc->removeDeadStates();
+	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
 }
 
 TEST(AutomatonTest, DeterminizeRemoveDeadStates) {

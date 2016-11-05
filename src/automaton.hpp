@@ -645,28 +645,33 @@ private:
 		std::unordered_set<state_type> live, visited;
 		std::vector<state_type> path;
 		std::stack<boost::optional<state_type>> nexts;
-		nexts.push(boost::make_optional(0U));
+		auto markPathLive = [&]() {
+			//Add path elements to the live set until we find a state
+			//already in the live set, after which all previous states
+			//have already been marked live.
+			for (auto i = path.rbegin(); i != path.rend(); ++i)
+				if (!live.insert(*i).second)
+					return;
+		};
 
+		nexts.push(boost::make_optional(0U));
 		while (!nexts.empty()) {
 			boost::optional<state_type> n = nexts.top();
 			nexts.pop();
 			if (n) {
 				//We might have already visited this state while it was waiting
 				//on the stack.
-				if (!visited.insert(*n).second)
+				if (!visited.insert(*n).second) {
+					if (live.find(*n) != live.end())
+						markPathLive();
 					continue;
+				}
 				path.push_back(*n);
 				if (accept_[path.back()])
-					//Add path elements to the live set until we find a state
-					//already in the live set, after which all previous states
-					//have already been marked live.
-					for (auto i = path.rbegin(); i != path.rend(); ++i)
-						if (!live.insert(*i).second)
-							break;
+					markPathLive();
 				nexts.push(boost::optional<state_type>(boost::none));
 				for (state_type next : destinations(path.back()))
-					if (visited.find(next) == visited.end())
-						nexts.push(boost::make_optional(next));
+					nexts.push(boost::make_optional(next));
 			} else
 				path.pop_back();
 		}
