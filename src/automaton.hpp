@@ -305,6 +305,45 @@ public:
 		return size() == 1U && accept_.none();
 	}
 
+	/**
+	 * Returns true iff this automaton's language is infinite.  (Not to be
+	 * confused with universality, accepting the language of all strings.)
+	 *
+	 * This function is not const because it needs to call removeDeadStates().
+	 * @return true iff this automaton's language is infinite
+	 */
+	bool infinite() {
+		removeDeadStates();
+		//If all states are live, we need only check for a cycle.
+		//We could use a dynamic_bitset or a simple byte array here instead (or
+		//a specialized 0..n set, if there's such a type).
+		std::unordered_set<state_type> visited;
+		std::vector<state_type> path;
+		std::stack<boost::optional<state_type>> nexts;
+
+		nexts.push(boost::make_optional(0U));
+		while (!nexts.empty()) {
+			boost::optional<state_type> n = nexts.top();
+			nexts.pop();
+			if (n) {
+				path.push_back(*n);
+				nexts.push(boost::optional<state_type>(boost::none));
+				for (state_type next : destinations(path.back())) {
+					//We might prefer a set; we could avoid storing path itself
+					//if we store the to-be-popped element in place of the empty optional.
+					if (std::find(path.begin(), path.end(), next) != path.end())
+						return true;
+					if (visited.find(next) == visited.end())
+						nexts.push(boost::make_optional(next));
+				}
+			} else {
+				visited.insert(path.back());
+				path.pop_back();
+			}
+		}
+		return false;
+	}
+
 	void determinize() {
 		if (deterministic()) return;
 		//We manually sort before inserting in newstate.
