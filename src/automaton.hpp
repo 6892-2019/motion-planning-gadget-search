@@ -35,8 +35,10 @@ public:
 	 * Returns a new Automaton that accepts all strings.
 	 */
 	static ptr all() {
-		ptr a = empty();
+		ptr a = new Automaton;
+		a->addState();
 		a->accept_.set(0);
+		a->addTrans(0, ~a->outgoing(0), 0);
 		return a;
 	}
 
