@@ -9,6 +9,7 @@
 #define AUTOMATON_HPP
 
 #include "precompiled.hpp"
+#include "bitset.hpp"
 
 namespace automaton {
 namespace impl {
@@ -439,7 +440,7 @@ private:
 
 	using symbol_type = unsigned int; //cf. Literal
 //	using symbol_mask_type = boost::uint_t<AlphabetSize>::least;
-	using symbol_mask_type = std::bitset<AlphabetSize>;
+	using symbol_mask_type = automaton::bitset<AlphabetSize>;
 	//We could save space by using a smaller type for small automata, but it's
 	//hard to know what size to use before building the automaton.  We'd only
 	//save on automata that are already small, so it's not really worth it.

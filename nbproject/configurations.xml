@@ -10,6 +10,7 @@
       <in>alphabet.cpp</in>
       <in>alphabet.hpp</in>
       <in>automaton.hpp</in>
+      <in>bitset.hpp</in>
       <in>expr.cpp</in>
       <in>expr.hpp</in>
       <in>main.cpp</in>
@@ -70,6 +71,8 @@
       <item path="src/alphabet.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/automaton.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/bitset.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="0">
       </item>
