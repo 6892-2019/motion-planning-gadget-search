@@ -24,7 +24,8 @@ public:
 		reference(const reference&) = default;
 
 		operator bool() const {
-			return bitset_[i_];
+			//select the overload returning bool to avoid infinite recursion
+			return static_cast<const bitset&>(bitset_)[i_];
 		}
 	private:
 		reference() = delete;
