@@ -44,10 +44,16 @@ std::vector<std::vector<unsigned int>> allStrings(unsigned int alphabetSize, uns
 	return ret;
 }
 
+/**
+ * Asserts that the given automata are equivalent on all strings by checking all
+ * strings up to the given length, and by other tests.  (Do not call this method
+ * if the automata may differ on longer strings.)
+ */
 template<int AlphabetSize>
-void equivalentOnAllStrings(typename Automaton<AlphabetSize>::const_ptr a, typename Automaton<AlphabetSize>::const_ptr b, int length, int lineno = -1) {
+void equivalentOnAllStrings(typename Automaton<AlphabetSize>::ptr a, typename Automaton<AlphabetSize>::ptr b, int length, int lineno = -1) {
 	for (auto& string : allStrings(AlphabetSize, length))
 		EXPECT_EQ(a->run(string), b->run(string)) << to_string(string) << " from line " << lineno;
+	EXPECT_EQ(a->isEmpty(), b->isEmpty()) << " from line " << lineno;
 }
 
 } //end anonymous namespace
@@ -83,6 +89,7 @@ TEST(AutomatonTest, EquivOnAllStringsUtilFn) {
 TEST(AutomatonTest, EmptyLanguage) {
 	auto a = Automaton<2>::empty();
 	EXPECT_TRUE(a->deterministic());
+	EXPECT_TRUE(a->isEmpty());
 	EXPECT_FALSE(a->run({}));
 	EXPECT_FALSE(a->run({0}));
 	EXPECT_FALSE(a->run({1}));
@@ -93,6 +100,7 @@ TEST(AutomatonTest, EmptyLanguage) {
 TEST(AutomatonTest, AllLanguage) {
 	auto a = Automaton<2>::all();
 	EXPECT_TRUE(a->deterministic());
+	EXPECT_FALSE(a->isEmpty());
 	EXPECT_TRUE(a->run({}));
 	EXPECT_TRUE(a->run({0}));
 	EXPECT_TRUE(a->run({1}));
@@ -103,6 +111,7 @@ TEST(AutomatonTest, AllLanguage) {
 TEST(AutomatonTest, Any) {
 	auto a = Automaton<2>::any();
 	EXPECT_TRUE(a->deterministic());
+	EXPECT_FALSE(a->isEmpty());
 	EXPECT_FALSE(a->run({}));
 	EXPECT_TRUE(a->run({0}));
 	EXPECT_TRUE(a->run({1}));
@@ -113,6 +122,7 @@ TEST(AutomatonTest, Any) {
 TEST(AutomatonTest, Epsilon) {
 	auto a = Automaton<2>::epsilon();
 	EXPECT_TRUE(a->deterministic());
+	EXPECT_FALSE(a->isEmpty());
 	EXPECT_TRUE(a->run({}));
 	EXPECT_FALSE(a->run({0}));
 	EXPECT_FALSE(a->run({1}));
@@ -123,6 +133,7 @@ TEST(AutomatonTest, Epsilon) {
 TEST(AutomatonTest, Lit) {
 	auto a = Automaton<2>::lit(0);
 	EXPECT_TRUE(a->deterministic());
+	EXPECT_FALSE(a->isEmpty());
 	EXPECT_FALSE(a->run({}));
 	EXPECT_TRUE(a->run({0}));
 	EXPECT_FALSE(a->run({1}));
@@ -131,6 +142,7 @@ TEST(AutomatonTest, Lit) {
 
 	a = Automaton<2>::lit(1);
 	EXPECT_TRUE(a->deterministic());
+	EXPECT_FALSE(a->isEmpty());
 	EXPECT_FALSE(a->run({}));
 	EXPECT_TRUE(a->run({1}));
 	EXPECT_FALSE(a->run({0}));
@@ -141,6 +153,7 @@ TEST(AutomatonTest, Lit) {
 TEST(AutomatonTest, Cat) {
 	auto a = Automaton<2>::lit(0);
 	auto cat = Automaton<2>::cat({a});
+	EXPECT_FALSE(cat->isEmpty());
 	EXPECT_FALSE(cat->run({}));
 	EXPECT_TRUE(cat->run({0}));
 	EXPECT_FALSE(cat->run({1}));
@@ -151,6 +164,7 @@ TEST(AutomatonTest, Cat) {
 	auto c = Automaton<2>::lit(0);
 
 	cat = Automaton<2>::cat({a, b, c});
+	EXPECT_FALSE(cat->isEmpty());
 	EXPECT_FALSE(cat->run({}));
 	EXPECT_FALSE(cat->run({0}));
 	EXPECT_FALSE(cat->run({1}));
@@ -177,6 +191,7 @@ TEST(AutomatonTest, Cat) {
 TEST(AutomatonTest, Alt) {
 	auto a = Automaton<2>::lit(0);
 	auto alt = Automaton<2>::alt({a});
+	EXPECT_FALSE(alt->isEmpty());
 	EXPECT_FALSE(alt->run({}));
 	EXPECT_TRUE(alt->run({0}));
 	EXPECT_FALSE(alt->run({1}));
@@ -185,6 +200,7 @@ TEST(AutomatonTest, Alt) {
 
 	auto b = Automaton<2>::lit(1);
 	alt = Automaton<2>::alt({a, b});
+	EXPECT_FALSE(alt->isEmpty());
 	EXPECT_FALSE(alt->run({}));
 	EXPECT_TRUE(alt->run({0}));
 	EXPECT_TRUE(alt->run({1}));
@@ -201,6 +217,7 @@ TEST(AutomatonTest, Alt) {
 
 	auto c = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
 	alt = Automaton<2>::alt({a, c});
+	EXPECT_FALSE(alt->isEmpty());
 	EXPECT_FALSE(alt->run({}));
 	EXPECT_TRUE(alt->run({0}));
 	EXPECT_FALSE(alt->run({1}));
@@ -220,6 +237,7 @@ TEST(AutomatonTest, Conj) {
 	auto a = Automaton<2>::lit(0);
 	auto b = Automaton<2>::lit(0);
 	auto cat = Automaton<2>::conj(a, b);
+	EXPECT_FALSE(cat->isEmpty());
 	EXPECT_FALSE(cat->run({}));
 	EXPECT_TRUE(cat->run({0}));
 	EXPECT_FALSE(cat->run({1}));
@@ -228,6 +246,7 @@ TEST(AutomatonTest, Conj) {
 
 	auto c = Automaton<2>::lit(1);
 	cat = Automaton<2>::conj(a, c);
+	EXPECT_TRUE(cat->isEmpty());
 	EXPECT_FALSE(cat->run({}));
 	EXPECT_FALSE(cat->run({0}));
 	EXPECT_FALSE(cat->run({1}));
@@ -238,6 +257,7 @@ TEST(AutomatonTest, Conj) {
 	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
 	auto f = Automaton<2>::alt({d, e});
 	cat = Automaton<2>::conj(f, d);
+	EXPECT_FALSE(cat->isEmpty());
 	EXPECT_FALSE(cat->run({}));
 	EXPECT_FALSE(cat->run({0}));
 	EXPECT_FALSE(cat->run({1}));
@@ -249,6 +269,7 @@ TEST(AutomatonTest, Star) {
 	auto a = Automaton<2>::lit(0);
 	auto s = Automaton<2>::star(a);
 	EXPECT_TRUE(s->deterministic());
+	EXPECT_FALSE(s->isEmpty());
 	EXPECT_TRUE(s->run({}));
 	EXPECT_TRUE(s->run({0}));
 	EXPECT_TRUE(s->run({0, 0}));
@@ -262,6 +283,7 @@ TEST(AutomatonTest, Star) {
 TEST(AutomatonTest, NCopies) {
 	auto a = Automaton<2>::lit(0);
 	auto s = Automaton<2>::nCopies(a, 3);
+	EXPECT_FALSE(s->isEmpty());
 	EXPECT_FALSE(s->run({}));
 	EXPECT_FALSE(s->run({0}));
 	EXPECT_FALSE(s->run({0, 0}));
@@ -279,6 +301,7 @@ TEST(AutomatonTest, NCopies) {
 TEST(AutomatonTest, NOrMore) {
 	auto a = Automaton<2>::lit(0);
 	auto s = Automaton<2>::nOrMore(a, 3);
+	EXPECT_FALSE(s->isEmpty());
 	EXPECT_FALSE(s->run({}));
 	EXPECT_FALSE(s->run({0}));
 	EXPECT_FALSE(s->run({0, 0}));
@@ -296,6 +319,7 @@ TEST(AutomatonTest, NOrMore) {
 TEST(AutomatonTest, Range) {
 	auto a = Automaton<2>::lit(0);
 	auto s = Automaton<2>::range(a, 2, 6);
+	EXPECT_FALSE(s->isEmpty());
 	EXPECT_FALSE(s->run({}));
 	EXPECT_FALSE(s->run({0}));
 	EXPECT_TRUE(s->run({0, 0}));
@@ -313,6 +337,7 @@ TEST(AutomatonTest, Range) {
 TEST(AutomatonTest, Comp) {
 	auto a = Automaton<2>::lit(0);
 	auto comp = Automaton<2>::comp(a);
+	EXPECT_FALSE(comp->isEmpty());
 	EXPECT_TRUE(comp->run({}));
 	EXPECT_FALSE(comp->run({0}));
 	EXPECT_TRUE(comp->run({1}));
@@ -320,6 +345,7 @@ TEST(AutomatonTest, Comp) {
 
 	auto s = Automaton<2>::range(a, 2, 6);
 	s = Automaton<2>::comp(s);
+	EXPECT_FALSE(s->isEmpty());
 	EXPECT_TRUE(s->run({}));
 	EXPECT_TRUE(s->run({0}));
 	EXPECT_FALSE(s->run({0, 0}));

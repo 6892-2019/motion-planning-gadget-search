@@ -291,6 +291,20 @@ public:
 		return std::any_of(current.begin(), current.end(), [this](state_type s){return accept_[s];});
 	}
 
+	/**
+	 * Returns true iff this automaton's language is empty (contains no
+	 * strings).
+	 *
+	 * This function is not const because it needs to call removeDeadStates().
+	 * This function is not named empty() because that name is already taken by
+	 * the static member function that creates empty automata.
+	 * @return true iff this automaton's language is empty
+	 */
+	bool isEmpty() {
+		removeDeadStates();
+		return size() == 1U && accept_.none();
+	}
+
 	void determinize() {
 		if (deterministic()) return;
 		//We manually sort before inserting in newstate.
