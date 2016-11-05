@@ -172,6 +172,7 @@ public:
 			}
 		}
 
+		a->removeDeadStates();
 		//TODO: are we sure?
 		a->deterministic_ = left->deterministic() && right->deterministic();
 		return a;
