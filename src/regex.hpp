@@ -14,6 +14,64 @@
 
 namespace automaton {
 
+namespace impl {
+
+template<class Target>
+constexpr auto cast = boost::dynamic_pointer_cast<Target, const Expr>;
+
+template<unsigned int AlphabetSize>
+typename Automaton<AlphabetSize>::ptr interpret(Expr::const_ptr expr) {
+	using A = Automaton<AlphabetSize>;
+	auto recurse = interpret<AlphabetSize>;
+	if (auto e = cast<const EmptyLanguage>(expr))
+		return A::empty();
+	else if (auto a = cast<const AllStringsLanguage>(expr))
+		return A::all();
+	else if (auto e = cast<const Epsilon>(expr))
+		return A::epsilon();
+	else if (auto a = cast<const Any>(expr))
+		return A::any();
+	else if (auto l = cast<const Literal>(expr))
+		return A::lit(l->symbol());
+	else if (auto c = cast<const Complement>(expr))
+		return A::comp(recurse(c->child()));
+	else if (auto r = cast<const Repetition>(expr)) {
+		typename A::const_ptr child = recurse(r->child());
+		if (r->isStar())
+			return A::star(child);
+		else if (r->isMaybe())
+			return A::maybe(child);
+		else if (r->isPlus())
+			return A::plus(child);
+		else if (r->isFixed())
+			return A::nCopies(child, r->min());
+		else if (r->isUnbounded())
+			return A::nOrMore(child, r->min());
+		else if (r->isBounded())
+			return A::range(child, r->min(), r->max());
+	} else if (auto e = cast<const Intersection>(expr)) {
+		assert(e->children().size() > 0);
+		typename A::ptr c = recurse(e->children()[0]);
+		for (std::size_t i = 1; i < e->children().size(); ++i)
+			c = A::conj(c, recurse(e->children()[i]));
+		return c;
+	} else if (auto e = cast<const Concatenation>(expr)) {
+		std::vector<typename A::const_ptr> children;
+		children.reserve(e->children().size());
+		for (typename Expr::ptr p : e->children())
+			children.push_back(recurse(p));
+		return A::cat(children.begin(), children.end());
+	} else if (auto e = cast<const Alternation>(expr)) {
+		std::vector<typename A::const_ptr> children;
+		children.reserve(e->children().size());
+		for (typename Expr::ptr p : e->children())
+			children.push_back(recurse(p));
+		return A::alt(children.begin(), children.end());
+	}
+	assert(false && "reached end of interpret");
+}
+} //namespace impl
+
 /**
  * A regular expression over an abstract alphabet.  This is a value type.
  */
@@ -102,7 +160,10 @@ public:
 	}
 
 	template<class Callable>
-	void enumerate(Callable callback) const;
+	void enumerate(Callable callback) const {
+		auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
+		automaton->enumerate<Alphabet>(callback);
+	}
 private:
 	impl::Expr::ptr pimpl_;
 	Regex(impl::Expr::ptr pimpl) : pimpl_(pimpl) {
@@ -120,71 +181,6 @@ private:
 		return acceptor(std::move(v));
 	}
 };
-
-namespace impl {
-
-template<class Target>
-constexpr auto cast = boost::dynamic_pointer_cast<Target, const Expr>;
-
-template<unsigned int AlphabetSize>
-typename Automaton<AlphabetSize>::ptr interpret(Expr::const_ptr expr) {
-	using A = Automaton<AlphabetSize>;
-	auto recurse = interpret<AlphabetSize>;
-	if (auto e = cast<const EmptyLanguage>(expr))
-		return A::empty();
-	else if (auto a = cast<const AllStringsLanguage>(expr))
-		return A::all();
-	else if (auto e = cast<const Epsilon>(expr))
-		return A::epsilon();
-	else if (auto a = cast<const Any>(expr))
-		return A::any();
-	else if (auto l = cast<const Literal>(expr))
-		return A::lit(l->symbol());
-	else if (auto c = cast<const Complement>(expr))
-		return A::comp(recurse(c->child()));
-	else if (auto r = cast<const Repetition>(expr)) {
-		typename A::const_ptr child = recurse(r->child());
-		if (r->isStar())
-			return A::star(child);
-		else if (r->isMaybe())
-			return A::maybe(child);
-		else if (r->isPlus())
-			return A::plus(child);
-		else if (r->isFixed())
-			return A::nCopies(child, r->min());
-		else if (r->isUnbounded())
-			return A::nOrMore(child, r->min());
-		else if (r->isBounded())
-			return A::range(child, r->min(), r->max());
-	} else if (auto e = cast<const Intersection>(expr)) {
-		assert(e->children().size() > 0);
-		typename A::ptr c = recurse(e->children()[0]);
-		for (std::size_t i = 1; i < e->children().size(); ++i)
-			c = A::conj(c, recurse(e->children()[i]));
-		return c;
-	} else if (auto e = cast<const Concatenation>(expr)) {
-		std::vector<typename A::const_ptr> children;
-		children.reserve(e->children().size());
-		for (typename Expr::ptr p : e->children())
-			children.push_back(recurse(p));
-		return A::cat(children.begin(), children.end());
-	} else if (auto e = cast<const Alternation>(expr)) {
-		std::vector<typename A::const_ptr> children;
-		children.reserve(e->children().size());
-		for (typename Expr::ptr p : e->children())
-			children.push_back(recurse(p));
-		return A::alt(children.begin(), children.end());
-	}
-	assert(false && "reached end of interpret");
-}
-} //namespace impl
-
-template<class Alphabet>
-template<class Callable>
-void Regex<Alphabet>::enumerate(Callable callback) const {
-	auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
-	automaton->enumerate<Alphabet>(callback);
-}
 
 } //namespace automaton
 
