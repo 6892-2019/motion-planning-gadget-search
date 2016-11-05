@@ -27,10 +27,7 @@ public:
 	 */
 	static ptr empty() {
 		ptr a = new Automaton;
-		a->transitions_.push_back({Transition()});
-		a->transitions_.back().back().next_ = 0; //loop back to itself
-		a->transitions_.back().back().symbols_.set();
-		a->accept_.push_back(false);
+		a->addState();
 		return a;
 	}
 
