@@ -367,6 +367,10 @@ public:
 	 */
 	void removeDeadStates() {
 		std::unordered_set<state_type> live = liveStates();
+		if (live.empty()) {
+			*this = std::move(*empty());
+			return;
+		}
 		//maps old state numbers to new state numbers
 		std::unordered_map<state_type, state_type> renumber;
 		boost::dynamic_bitset<std::size_t> newnumbers(live.size());
