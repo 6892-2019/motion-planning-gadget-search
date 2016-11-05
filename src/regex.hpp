@@ -159,6 +159,24 @@ public:
 		return impl::Expr::comp(regex.pimpl_);
 	}
 
+	/**
+	 * Returns true iff this regex represents the empty language.
+	 * @return true iff this regex represents the empty language
+	 */
+	bool isEmpty() const {
+		auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
+		return automaton->isEmpty();
+	}
+
+	/**
+	 * Returns true iff this regex represents an infinite language.
+	 * @return true iff this regex represents an infinite language
+	 */
+	bool infinite() const {
+		auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
+		return automaton->infinite();
+	}
+
 	template<class Callable>
 	void enumerate(Callable callback) const {
 		auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
