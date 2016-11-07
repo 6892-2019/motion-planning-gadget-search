@@ -71,6 +71,6 @@ for config in configs:
           test_objects.append(object)
     buildfile.write('\n')
 
-    buildfile.write('build $builddir/bin/test-automaton.exe : ld {}\n'.format(' '.join(test_objects)))
+    buildfile.write('build $builddir/bin/test-automaton.exe : ld {} {}\n'.format(' '.join(test_objects), src_objects_str))
     buildfile.write('  ldflags = $testldflags\n')
     buildfile.write('\n')

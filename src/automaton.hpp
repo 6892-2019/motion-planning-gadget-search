@@ -10,6 +10,7 @@
 
 #include "precompiled.hpp"
 #include "bitset.hpp"
+#include "natural_set.hpp"
 
 namespace automaton {
 namespace impl {
@@ -317,7 +318,7 @@ public:
 		//If all states are live, we need only check for a cycle.
 		//We could use a dynamic_bitset or a simple byte array here instead (or
 		//a specialized 0..n set, if there's such a type).
-		std::unordered_set<state_type> visited;
+		natural_set<state_type> visited(static_cast<state_type>(size()));
 		std::vector<state_type> path;
 		std::stack<boost::optional<state_type>> nexts;
 
@@ -422,7 +423,7 @@ public:
 	 * Removes dead states and transitions from this automaton.
 	 */
 	void removeDeadStates() {
-		std::unordered_set<state_type> live = liveStates();
+		natural_set<state_type> live = liveStates();
 		if (live.empty()) {
 			*this = std::move(*empty());
 			return;
@@ -692,10 +693,10 @@ private:
 	 * it is contained in a path from the initial state to an accept state.
 	 * @return the set of live states
 	 */
-	std::unordered_set<state_type> liveStates() const {
+	natural_set<state_type> liveStates() const {
 		//If for some reason we care about reachable but not live states, we're
 		//computing them here of necessity.
-		std::unordered_set<state_type> live, visited;
+		natural_set<state_type> live(static_cast<state_type>(size())), visited(static_cast<state_type>(size()));
 		std::vector<state_type> path;
 		std::stack<boost::optional<state_type>> nexts;
 		auto markPathLive = [&]() {
