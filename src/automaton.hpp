@@ -11,6 +11,7 @@
 #include "precompiled.hpp"
 #include "bitset.hpp"
 #include "natural_set.hpp"
+#include "natural_map.hpp"
 
 namespace automaton {
 namespace impl {
@@ -429,7 +430,7 @@ public:
 			return;
 		}
 		//maps old state numbers to new state numbers
-		std::unordered_map<state_type, state_type> renumber;
+		natural_map<state_type, state_type> renumber(static_cast<state_type>(size()));
 		boost::dynamic_bitset<std::size_t> newnumbers(live.size());
 		newnumbers.set();
 		for (state_type s : live)
@@ -456,7 +457,7 @@ public:
 			for (auto i = nt.size(); i-- > 0;) {
 				auto it = renumber.find(nt[i].next_);
 				if (it != renumber.end())
-					nt[i].next_ = it->second;
+					nt[i].next_ = (*it).second;
 				else
 					nt.erase(nt.begin()+i);
 			}
