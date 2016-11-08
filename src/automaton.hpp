@@ -617,7 +617,7 @@ private:
 				if (t.symbols_[symbol])
 					return false;
 				t.symbols_.set(symbol);
-				if (!isStateDeterministic(from))
+				if (deterministic_ && !isStateDeterministic(from))
 					deterministic_ = false;
 				return true;
 			}
@@ -641,7 +641,7 @@ private:
 				t.symbols_ |= symbols;
 				if (t.symbols_ == before)
 					return false;
-				if (!isStateDeterministic(from))
+				if (deterministic_ && !isStateDeterministic(from))
 					deterministic_ = false;
 				return true;
 			}
