@@ -425,6 +425,8 @@ public:
 	 */
 	void removeDeadStates() {
 		natural_set<state_type> live = liveStates();
+		if (live.size() == size())
+			return;
 		if (live.empty()) {
 			*this = std::move(*empty());
 			return;
