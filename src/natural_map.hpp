@@ -10,15 +10,34 @@
 
 #include "precompiled.hpp"
 
-//TODO: should maybe just declare the overloads here as normal functions
+template<class K, typename Enable = void>
+struct MinimalPerfectHash {
+	//TODO: can we static_assert here for a better error message?
+};
+
 template<class K>
-std::enable_if_t<std::is_unsigned<K>::value, K> compress(K key) {
-	return key;
-}
+struct MinimalPerfectHash<K, std::enable_if_t<std::is_unsigned<K>::value>> {
+	explicit MinimalPerfectHash(K bound) {}
+	std::size_t compress(K key) const {
+		return key;
+	}
+	K reconstitute(std::size_t offset) const {
+		return static_cast<K>(offset);
+	}
+};
+
 template<class K>
-std::enable_if_t<std::is_unsigned<K>::value, K> reconstitute(std::size_t offset) {
-	return static_cast<K>(offset);
-}
+struct MinimalPerfectHash<std::pair<K, K>, std::enable_if_t<std::is_unsigned<K>::value>> {
+	using value_type = std::pair<K, K>;
+	const value_type bound_;
+	MinimalPerfectHash(value_type bound) : bound_(bound) {}
+	std::size_t compress(value_type key) const {
+		return key.first * bound_.second + key.second;
+	}
+	value_type reconstitute(std::size_t offset) const {
+		return {offset / bound_.second, offset % bound_.second};
+	}
+};
 
 /**
  * A map from natural numbers in a runtime-specified range 0..n-1 to data of an
@@ -31,7 +50,7 @@ template<class K, class V>
 class natural_map {
 public:
 	using value_type = std::pair<K, V>;
-	natural_map(K bound) : data_(new V[compress(bound)]), size_(0), capacity_(compress(bound)) {
+	explicit natural_map(K bound) : hash_(bound), data_(new V[hash_.compress(bound)]), size_(0), capacity_(hash_.compress(bound)) {
 		std::fill(data_.get(), data_.get()+capacity_, absent());
 	}
 
@@ -39,7 +58,7 @@ public:
 	public:
 		value_type operator*() const {
 			assert(map_.data_[pos_] != absent()); //check iterator validity
-			return {reconstitute<K>(pos_), map_.data_[pos_]};
+			return {map_.hash_.reconstitute(pos_), map_.data_[pos_]};
 		}
 		//TODO: We commonly access map iterators as it->first/second to access
 		//the key/value, but operator-> must return a pointer and we don't have
@@ -84,32 +103,32 @@ public:
 	}
 
 	std::size_t count(K key) const {
-		std::size_t pos = compress(key);
+		std::size_t pos = hash_.compress(key);
 		//Technically we could say that keys >= capacity are never in the set,
 		//but asking is probably an error.
 		assert(pos < capacity_);
 		return data_[pos] != absent() ? 1 : 0;
 	}
 	iterator find(K key) const {
-		return count(key) ? iterator{*this, compress(key)} : end();
+		return count(key) ? iterator{*this, hash_.compress(key)} : end();
 	}
 
 	V& operator[](K key) {
-		std::size_t pos = compress(key);
+		std::size_t pos = hash_.compress(key);
 		assert(pos < capacity_);
 		if (data_[pos] == absent())
 			insert({key, static_cast<V>(0)});
 		return data_[pos];
 	}
 	const V& operator[](K key) const {
-		std::size_t pos = compress(key);
+		std::size_t pos = hash_.compress(key);
 		assert(pos < capacity_);
 		assert(data_[pos] != absent());
 		return data_[pos];
 	}
 
 	std::pair<iterator, bool> insert(value_type p) {
-		std::size_t pos = compress(p.first);
+		std::size_t pos = hash_.compress(p.first);
 		assert(pos < capacity_);
 		bool inserted = data_[pos] == absent();
 		data_[pos] = p.second;
@@ -118,6 +137,7 @@ public:
 		return {{*this, pos}, inserted};
 	}
 private:
+	MinimalPerfectHash<K> hash_;
 	std::unique_ptr<V[]> data_;
 	std::size_t size_;
 	std::size_t capacity_;
@@ -135,6 +155,8 @@ extern template class natural_map<unsigned short, unsigned short>;
 extern template class natural_map<unsigned int, unsigned int>;
 extern template class natural_map<unsigned long, unsigned long>;
 extern template class natural_map<unsigned long long, unsigned long long>;
+
+extern template class natural_map<std::pair<unsigned int, unsigned int>, unsigned int>;
 
 #endif /* NATURAL_MAP_HPP */
 
