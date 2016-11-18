@@ -17,6 +17,8 @@ namespace automaton {
 namespace impl {
 
 using boost::container::small_vector;
+using google::dense_hash_map;
+using google::dense_hash_set;
 
 template<unsigned int AlphabetSize>
 class Automaton {
@@ -142,8 +144,9 @@ public:
 		using state_triple = std::tuple<state_type, state_type, state_type>;
 		std::stack<state_triple> worklist;
 		//std::hash isn't provided for pair :(
-		std::unordered_map<std::pair<state_type, state_type>, state_type,
+		dense_hash_map<std::pair<state_type, state_type>, state_type,
 				boost::hash<std::pair<state_type, state_type>>> newstates;
+		newstates.set_empty_key({left->size(), right->size()});
 
 		ptr a = new Automaton;
 		a->addState();
@@ -319,7 +322,8 @@ public:
 		//If all states are live, we need only check for a cycle.
 		//We could use a dynamic_bitset or a simple byte array here instead (or
 		//a specialized 0..n set, if there's such a type).
-		natural_set<state_type> visited(static_cast<state_type>(size()));
+		dense_hash_set<state_type> visited(static_cast<state_type>(size()));
+		visited.set_empty_key(static_cast<state_type>(size()));
 		std::vector<state_type> path;
 		std::stack<boost::optional<state_type>> nexts;
 
@@ -424,7 +428,7 @@ public:
 	 * Removes dead states and transitions from this automaton.
 	 */
 	void removeDeadStates() {
-		natural_set<state_type> live = liveStates();
+		auto live = liveStates();
 		if (live.size() == size())
 			return;
 		if (live.empty()) {
@@ -696,10 +700,12 @@ private:
 	 * it is contained in a path from the initial state to an accept state.
 	 * @return the set of live states
 	 */
-	natural_set<state_type> liveStates() const {
+	dense_hash_set<state_type> liveStates() const {
 		//If for some reason we care about reachable but not live states, we're
 		//computing them here of necessity.
-		natural_set<state_type> live(static_cast<state_type>(size())), visited(static_cast<state_type>(size()));
+		dense_hash_set<state_type> live(static_cast<state_type>(size())), visited(static_cast<state_type>(size()));
+		live.set_empty_key(static_cast<state_type>(size()));
+		visited.set_empty_key(static_cast<state_type>(size()));
 		std::vector<state_type> path;
 		std::stack<boost::optional<state_type>> nexts;
 		auto markPathLive = [&]() {
