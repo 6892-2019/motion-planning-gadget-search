@@ -27,6 +27,11 @@ public:
 			//select the overload returning bool to avoid infinite recursion
 			return static_cast<const bitset&>(bitset_)[i_];
 		}
+
+		reference& operator=(bool value) {
+			bitset_.set(i_, value);
+			return *this;
+		}
 	private:
 		reference() = delete;
 		reference(bitset& bitset, size_type i) : bitset_(bitset), i_(i) {
@@ -109,7 +114,7 @@ public:
 	bitset& reset(size_type pos) {
 		assert(pos < size());
 //		bits_ = static_cast<storage_type>(bits_ & ~posmask(pos));
-		do_and(~posmask(pos));
+		do_and(static_cast<storage_type>(~posmask(pos)));
 		return *this;
 	}
 	bitset& reset(size_type startInclusive, size_type endExclusive) {
