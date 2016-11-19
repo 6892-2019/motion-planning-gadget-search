@@ -925,7 +925,16 @@ private:
 
 		void finish() {
 			state_type initialStatePart = stateToPartition_[0].first;
-			//TODO: drop memory if possible
+			//Free memory.
+			stateToPartition_.clear();
+			inv_.clear();
+			invStart_.clear();
+			decltype(L_)().swap(L_);
+			inL_.clear();
+			moveSize_.clear();
+			moveSize_.shrink_to_fit();
+			suspects_.clear();
+			suspects_.shrink_to_fit();
 
 			Automaton<AlphabetSize> newA;
 			newA.transitions_.resize(partitionBounds_.size());
@@ -945,7 +954,15 @@ private:
 				newA.accept_[beneficiary] = a_.accept_[victim];
 			}
 
-			//TODO: drop more memory
+			//Free more memory.
+			partitions_.clear();
+			partitionBounds_.clear();
+			partitionBounds_.shrink_to_fit();
+			//We're going to move-assign over these; might as well free them now.
+			a_.transitions_.clear();
+			a_.transitions_.shrink_to_fit();
+			a_.accept_.clear();
+			a_.accept_.shrink_to_fit();
 
 			//Renumber and compress redundant transitions.
 			for (auto& ts : newA.transitions_) {

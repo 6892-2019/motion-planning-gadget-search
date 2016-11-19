@@ -60,6 +60,15 @@ public:
 		assert(i < size());
 		return data_[i];
 	}
+
+	/**
+	 * Clears this dynarray and releases memory.  Because dynarray does not
+	 * support insertion, no further operations can be performed on it.
+	 */
+	void clear() {
+		data_.reset(nullptr);
+		size_ = 0;
+	}
 private:
 	std::unique_ptr<value_type[]> data_;
 	size_type size_;
