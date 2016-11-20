@@ -10,10 +10,12 @@
 #include <tuple>
 #include <boost/optional.hpp>
 #include <boost/container/small_vector.hpp>
-#include <bitset>
 #include <boost/dynamic_bitset.hpp>
 #include <sparsehash/dense_hash_map>
 #include <sparsehash/dense_hash_set>
+#include "bitset.hpp"
+#include "natural_map.hpp"
+#include "dynarray.hpp"
 
 #include <algorithm>
 #include <random>

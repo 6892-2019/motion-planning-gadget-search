@@ -9,10 +9,6 @@
 #define AUTOMATON_HPP
 
 #include "precompiled.hpp"
-#include "bitset.hpp"
-#include "natural_set.hpp"
-#include "natural_map.hpp"
-#include "dynarray.hpp"
 
 namespace automaton {
 namespace impl {

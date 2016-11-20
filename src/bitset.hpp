@@ -10,6 +10,7 @@
 
 #include <exception>
 #include <cassert>
+#include <boost/integer.hpp>
 
 namespace automaton {
 namespace impl {
