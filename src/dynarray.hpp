@@ -34,16 +34,16 @@ public:
 	}
 
 	iterator begin() {
-		return &data_[0];
+		return data_.get();
 	}
 	const_iterator begin() const {
-		return &data_[0];
+		return data_.get();
 	}
 	iterator end() {
-		return &data_[size()];
+		return data_.get() + size();
 	}
 	const_iterator end() const {
-		return &data_[size()];
+		return data_.get() + size();
 	}
 	const_iterator cbegin() const {
 		return begin();
