@@ -13,7 +13,8 @@ int main(int argc, char* argv[]) {
 	R rowWidth = R::repeat(any, static_cast<int>(puzzle->cols().size()));
 
 	std::vector<R> puzzleConstraints;
-	puzzleConstraints.push_back(R::repeat(any, static_cast<int>(puzzle->rows().size() * puzzle->cols().size())));
+	R sizeConstraint = R::repeat(any, static_cast<int>(puzzle->rows().size() * puzzle->cols().size()));
+//	puzzleConstraints.push_back(sizeConstraint);
 
 	//row constraints are concatenated (row-major order)
 	std::vector<R> rowConstraints;
@@ -59,7 +60,7 @@ int main(int argc, char* argv[]) {
 					clueConstraints.push_back(colZeroStar);
 		}
 		clueConstraints.push_back(colZeroStar);
-		puzzleConstraints.push_back(R::cat(clueConstraints));
+		puzzleConstraints.push_back(R::conj({R::cat(clueConstraints), sizeConstraint}));
 	}
 
 	R puzzleConstraint = R::conj(puzzleConstraints);

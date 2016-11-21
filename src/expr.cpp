@@ -76,14 +76,14 @@ auto Expr::conj(container&& regexes) -> ptr {
 		return all();
 	if (regexes.size() == 1)
 		return regexes.front();
-	container folder;
-	folder.reserve(regexes.size());
-	for (ptr& p : regexes)
-		if (auto q = boost::dynamic_pointer_cast<Intersection>(p))
-			folder.insert(folder.end(), q->children().begin(), q->children().end());
-		else
-			folder.push_back(std::move(p));
-	return new Intersection(std::move(folder));
+//	container folder;
+//	folder.reserve(regexes.size());
+//	for (ptr& p : regexes)
+//		if (auto q = boost::dynamic_pointer_cast<Intersection>(p))
+//			folder.insert(folder.end(), q->children().begin(), q->children().end());
+//		else
+//			folder.push_back(std::move(p));
+	return new Intersection(std::move(regexes));
 }
 auto Expr::repeat(ptr regex, int min, int max) -> ptr {
 	if (min == 0 && max == 0)
