@@ -51,9 +51,14 @@ typename Automaton<AlphabetSize>::ptr interpret(Expr::const_ptr expr) {
 			return A::range(child, r->min(), r->max());
 	} else if (auto e = cast<const Intersection>(expr)) {
 		assert(e->children().size() > 0);
+		//We minimize intersection inputs, but not outputs.
 		typename A::ptr c = recurse(e->children()[0]);
-		for (std::size_t i = 1; i < e->children().size(); ++i)
-			c = A::conj(c, recurse(e->children()[i]));
+		c->minimize();
+		for (std::size_t i = 1; i < e->children().size(); ++i) {
+			typename A::ptr child = recurse(e->children()[i]);
+			child->minimize();
+			c = A::conj(c, child);
+		}
 		return c;
 	} else if (auto e = cast<const Concatenation>(expr)) {
 		std::vector<typename A::const_ptr> children;
