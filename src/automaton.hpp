@@ -634,7 +634,7 @@ private:
 		transitions_[from].push_back({});
 		transitions_[from].back().next_ = to;
 		transitions_[from].back().symbols_.set(symbol);
-		if (!isStateDeterministic(from))
+		if (deterministic_ && !isStateDeterministic(from))
 			deterministic_ = false;
 		return true;
 	}
@@ -656,7 +656,7 @@ private:
 				return true;
 			}
 		transitions_[from].push_back(Transition(to, symbols));
-		if (!isStateDeterministic(from))
+		if (deterministic_ && !isStateDeterministic(from))
 			deterministic_ = false;
 		return true;
 	}
