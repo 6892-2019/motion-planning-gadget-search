@@ -146,6 +146,8 @@ public:
 		newstates.set_empty_key({left->size(), right->size()});
 
 		ptr a = new Automaton;
+		//TODO: are we sure?
+		a->deterministic_ = left->deterministic() && right->deterministic();
 		a->addState();
 		//TODO: assuming 0 is the initial state
 		worklist.push({0, 0, 0});
@@ -177,8 +179,6 @@ public:
 		}
 
 		a->removeDeadStates();
-		//TODO: are we sure?
-		a->deterministic_ = left->deterministic() && right->deterministic();
 		return a;
 	}
 
