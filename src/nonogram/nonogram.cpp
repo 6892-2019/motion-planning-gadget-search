@@ -119,8 +119,13 @@ int main(int argc, char* argv[]) {
 		regexes.push_back(c.regex);
 	R puzzleConstraint = R::conj(regexes);
 	std::vector<std::vector<bool>> solutions;
-	puzzleConstraint.enumerate([&](auto& v) {solutions.push_back(v);});
-	std::cout << solutions.size() << std::endl;
+	try {
+		puzzleConstraint.enumerate([&](auto& v) {solutions.push_back(v);});
+	} catch (std::bad_alloc& ex) {
+		std::cout << ex.what() << std::endl;
+		return 1;
+	}
+	std::cout << solutions.size() << " solutions" << std::endl;
 	for (auto& v : solutions) {
 		for (auto s : v)
 			std::cout << s;
