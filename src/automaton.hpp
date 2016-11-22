@@ -830,6 +830,12 @@ private:
 				auto pair = remove();
 				collect(pair.first, pair.second);
 				refine();
+				//When we get here, L_ is nearly empty and processing each pair
+				//is cheap (because partitions are singletons), so it may not be
+				//worth checking in this loop.  If not, we definitely want to
+				//check in finish() to avoid copying a bunch for no reason.
+				if (partitionBounds_.size() == a_.size())
+					return;
 			}
 			finish();
 		}
