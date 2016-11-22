@@ -547,7 +547,9 @@ public:
 		//The Java library explicitly checks for the all-strings automaton here,
 		//but it doesn't seem to be necessary.
 		totalize();
+		std::size_t oldsize = size();
 		HopcroftMinimizer(*this).minimize();
+		std::cout << "minimize: " << oldsize << " -> " << size() << std::endl;
 		removeDeadStates();
 	}
 
