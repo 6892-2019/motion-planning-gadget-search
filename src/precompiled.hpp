@@ -13,6 +13,9 @@
 #include <boost/dynamic_bitset.hpp>
 #include <sparsehash/dense_hash_map>
 #include <sparsehash/dense_hash_set>
+#include <sparsehash/sparse_hash_map>
+#include <sparsehash/sparse_hash_set>
+#include <sparsehash/sparsetable>
 #include "bitset.hpp"
 #include "natural_map.hpp"
 #include "dynarray.hpp"

@@ -22,6 +22,14 @@ class Automaton {
 public:
 	using ptr = boost::intrusive_ptr<Automaton>;
 	using const_ptr = boost::intrusive_ptr<const Automaton>;
+private:
+	using symbol_type = unsigned int; //cf. Literal
+	using symbol_mask_type = automaton::bitset<AlphabetSize>;
+	//We could save space by using a smaller type for small automata, but it's
+	//hard to know what size to use before building the automaton.  We'd only
+	//save on automata that are already small, so it's not really worth it.
+	using state_type = unsigned int;
+public:
 
 	/**
 	 * Returns a new Automaton that accepts the empty language.
@@ -136,14 +144,62 @@ public:
 		return alt(alternatives.begin(), alternatives.end());
 	}
 
-	static ptr conj(const_ptr left, const_ptr right) {
+private:
+	//We can't templatize this together with the other maps because dense_hash_map
+	//needs set_empty_key.
+	class DenseConjMap {
+	public:
+		DenseConjMap(std::size_t leftSize, std::size_t rightSize) : map_() {
+			//silent narrowing conversion: http://stackoverflow.com/q/37928951/3614835
+			map_.set_empty_key({leftSize, rightSize});
+		}
+		void insert(std::pair<state_type, state_type> oldstates, state_type newstate) {
+			map_.insert({oldstates, newstate});
+		}
+		template<class Callable>
+		std::pair<state_type, bool> compute_if_absent(std::pair<state_type, state_type> oldstates, Callable newstateProvider) {
+			//dense_hashtable::find_or_insert is so close to what we want :(
+			auto it = map_.find(oldstates);
+			if (it != map_.end())
+				return {it->second, false};
+			auto r = map_.insert({oldstates, newstateProvider()});
+			return {r.first->second, true};
+		}
+	private:
+		//std::hash isn't provided for pair :(
+		dense_hash_map<std::pair<state_type, state_type>, state_type,
+			boost::hash<std::pair<state_type, state_type>>> map_;
+	};
+
+	template<class BackingMap>
+	class MapConjMap {
+	public:
+		MapConjMap(std::size_t leftSize, std::size_t rightSize) : map_() {}
+		void insert(std::pair<state_type, state_type> oldstates, state_type newstate) {
+			map_.insert({oldstates, newstate});
+		}
+		template<class Callable>
+		std::pair<state_type, bool> compute_if_absent(std::pair<state_type, state_type> oldstates, Callable newstateProvider) {
+			auto it = map_.find(oldstates);
+			if (it != map_.end())
+				return {it->second, false};
+			auto r = map_.insert({oldstates, newstateProvider()});
+			return {r.first->second, true};
+		}
+	private:
+		BackingMap map_;
+	};
+	using UnorderedConjMap = MapConjMap<std::unordered_map<std::pair<state_type, state_type>,
+			state_type, boost::hash<std::pair<state_type, state_type>>>>;
+	using SparseConjMap = MapConjMap<google::sparse_hash_map<std::pair<state_type, state_type>,
+			state_type, boost::hash<std::pair<state_type, state_type>>>>;
+
+	template <class Map>
+	static ptr conj_impl(const_ptr left, const_ptr right) {
 		//(left state, right state, new state)
 		using state_triple = std::tuple<state_type, state_type, state_type>;
 		std::stack<state_triple> worklist;
-		//std::hash isn't provided for pair :(
-		dense_hash_map<std::pair<state_type, state_type>, state_type,
-				boost::hash<std::pair<state_type, state_type>>> newstates;
-		newstates.set_empty_key({left->size(), right->size()});
+		Map newstates(left->size(), right->size());
 
 		ptr a = new Automaton;
 		//TODO: are we sure?
@@ -151,7 +207,7 @@ public:
 		a->addState();
 		//TODO: assuming 0 is the initial state
 		worklist.push({0, 0, 0});
-		newstates[{0, 0}] = 0;
+		newstates.insert({0, 0}, 0);
 
 		while (!worklist.empty()) {
 			state_type ls, rs, ns;
@@ -165,19 +221,34 @@ public:
 				auto rightnexts = right->step(rs, s);
 				for (state_type leftnext : leftnexts)
 					for (state_type rightnext : rightnexts) {
-						auto it = newstates.find({leftnext, rightnext});
-						state_type newnext;
-						if (it == newstates.end()) {
-							newnext = a->addState();
-							newstates[{leftnext, rightnext}] = newnext;
-							worklist.push({leftnext, rightnext, newnext});
-						} else
-							newnext = it->second;
-						a->addTrans(ns, s, newnext);
+						auto p = newstates.compute_if_absent({leftnext, rightnext}, [&]{return a->addState();});
+						if (p.second)
+							worklist.push({leftnext, rightnext, p.first});
+						a->addTrans(ns, s, p.first);
 					}
 			}
 		}
+		return a;
+	}
 
+public:
+	static ptr conj(const_ptr left, const_ptr right) {
+		ptr a = nullptr;
+		try {
+			a = conj_impl<DenseConjMap>(left, right);
+		} catch (std::bad_alloc&) {
+			std::cout << "caught bad_alloc: conj_impl<DenseConjMap>" << std::endl;
+		}
+		if (!a)
+			try {
+				a = conj_impl<UnorderedConjMap>(left, right);
+			} catch (std::bad_alloc&) {
+				std::cout << "caught bad_alloc: conj_impl<UnorderedConjMap>" << std::endl;
+			}
+		if (!a)
+			//No try-catch here because there's no further recovery
+			a = conj_impl<SparseConjMap>(left, right);
+		std::cout << "intersection: " << left->size() << ", " << right->size() << " -> " << a->size() << std::endl;
 		a->removeDeadStates();
 		return a;
 	}
@@ -509,13 +580,6 @@ private:
 		return *this;
 	}
 
-	using symbol_type = unsigned int; //cf. Literal
-//	using symbol_mask_type = boost::uint_t<AlphabetSize>::least;
-	using symbol_mask_type = automaton::bitset<AlphabetSize>;
-	//We could save space by using a smaller type for small automata, but it's
-	//hard to know what size to use before building the automaton.  We'd only
-	//save on automata that are already small, so it's not really worth it.
-	using state_type = unsigned int;
 	struct Transition {
 		Transition() = default;
 		Transition(state_type next, symbol_mask_type symbols) : next_(next), symbols_(symbols) {}
