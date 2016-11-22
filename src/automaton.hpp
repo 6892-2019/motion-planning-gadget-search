@@ -503,6 +503,7 @@ public:
 			*this = std::move(*empty());
 			return;
 		}
+		std::size_t oldsize = size();
 		//maps old state numbers to new state numbers
 		natural_map<state_type, state_type> renumber(static_cast<state_type>(size()));
 		boost::dynamic_bitset<std::size_t> newnumbers(live.size());
@@ -540,6 +541,7 @@ public:
 		transitions_.resize(live.size());
 		accept_.resize(live.size());
 		//TODO: shrink_to_fit?
+		std::cout << "removeDeadStates: " << oldsize << " -> " << size() << std::endl;
 	}
 
 	void minimize() {
