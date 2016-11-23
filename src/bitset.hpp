@@ -217,6 +217,27 @@ private:
 	}
 };
 
+template<typename storage_type, unsigned int N>
+auto operator&(const bitset<storage_type, N>& left, const bitset<storage_type, N>& right) {
+	bitset<storage_type, N> ret(left);
+	ret &= right;
+	return ret;
+}
+
+template<typename storage_type, unsigned int N>
+auto operator|(const bitset<storage_type, N>& left, const bitset<storage_type, N>& right) {
+	bitset<storage_type, N> ret(left);
+	ret |= right;
+	return ret;
+}
+
+template<typename storage_type, unsigned int N>
+auto operator^(const bitset<storage_type, N>& left, const bitset<storage_type, N>& right) {
+	bitset<storage_type, N> ret(left);
+	ret ^= right;
+	return ret;
+}
+
 } //end namespace impl
 
 template<unsigned int N>
