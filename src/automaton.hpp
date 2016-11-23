@@ -215,18 +215,17 @@ private:
 			worklist.pop();
 			a->accept_.set(ns, left->accept_[ls] && right->accept_[rs]);
 
-			//This is a bit naive and may need to be revised for large alphabets.
-			for (symbol_type s = 0; s < AlphabetSize; ++s) {
-				auto leftnexts = left->step(ls, s);
-				auto rightnexts = right->step(rs, s);
-				for (state_type leftnext : leftnexts)
-					for (state_type rightnext : rightnexts) {
+			for (const Transition& lt : left->transitions_[ls])
+				for (const Transition& rt : right->transitions_[rs]) {
+					symbol_mask_type common = lt.symbols_ & rt.symbols_;
+					if (common.any()) {
+						state_type leftnext = lt.next_, rightnext = rt.next_;
 						auto p = newstates.compute_if_absent({leftnext, rightnext}, [&]{return a->addState();});
 						if (p.second)
 							worklist.push({leftnext, rightnext, p.first});
-						a->addTrans(ns, s, p.first);
+						a->addTrans(ns, common, p.first);
 					}
-			}
+				}
 		}
 		return a;
 	}
