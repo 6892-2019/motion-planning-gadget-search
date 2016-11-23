@@ -548,7 +548,10 @@ public:
 		determinize();
 		//The Java library explicitly checks for the all-strings automaton here,
 		//but it doesn't seem to be necessary.
-		totalize();
+		//Java totalizes the automaton here (then removes the added state in
+		//removeDeadStates).  That doesn't seem to be required.  There are papers
+		//with special algorithms for sparse automata, but they don't indicate
+		//standard Hopcroft minimization is wrong if the automaton is partial.
 		std::size_t oldsize = size();
 		HopcroftMinimizer(*this).minimize();
 		std::cout << "minimize: " << oldsize << " -> " << size() << std::endl;
@@ -818,6 +821,9 @@ private:
 	class HopcroftMinimizer final {
 	public:
 		HopcroftMinimizer(Automaton& a) : a_(a), partitions_(a.size()), partitionBounds_(),
+				//TODO: now that the automaton isn't total, inv_ should be
+				//allocated after building the inverse edge list, so that it can
+				//be sized just right.
 				stateToPartition_(a.size()), inv_(a.size() * AlphabetSize),
 				invStart_(a.size() * (AlphabetSize+1)), L_(), inL_(a.size()),
 				move_(a.size()), moveSize_(), suspects_() {}
@@ -908,7 +914,6 @@ private:
 				return false;
 			}
 
-			assert(edgelist.size() == (a_.size() * AlphabetSize + 1) && "automaton not total");
 			//TODO: use a parallel sort (beyond a size threshold)
 			std::sort(edgelist.begin(), edgelist.end());
 
@@ -924,7 +929,8 @@ private:
 				}
 				invStart_[stateIdx * (AlphabetSize+1) + AlphabetSize] = invEltsIdx;
 			}
-			assert(invEltsIdx == inv_.size());
+			//TODO: we can reassert this when inv_ is lazily sized
+//			assert(invEltsIdx == inv_.size());
 
 			partitionBounds_.push_back({0, nonfinalIdx});
 			partitionBounds_.push_back({nonfinalIdx, static_cast<state_type>(partitions_.size())});
