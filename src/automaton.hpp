@@ -754,7 +754,10 @@ private:
 			dest.push_back(t.next_);
 #ifndef NDEBUG
 		//addTrans enforces we don't have duplicate transitions; check that here.
-		std::sort(dest.begin(), dest.end());
+		//Use a copy to avoid changing the semantics of debug and release builds
+		//(though logically it shouldn't matter...).
+		small_vector<state_type, 4> destcopy(dest);
+		std::sort(destcopy.begin(), destcopy.end());
 		assert(std::adjacent_find(dest.begin(), dest.end()) == dest.end());
 #endif
 		return dest;
