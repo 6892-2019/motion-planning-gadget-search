@@ -502,6 +502,8 @@ public:
 			*this = std::move(*empty());
 			return;
 		}
+		//If any states are live, the initial state must be one of them.
+		assert(live.count(0) == 1);
 		std::size_t oldsize = size();
 		//maps old state numbers to new state numbers
 		natural_map<state_type, state_type> renumber(static_cast<state_type>(size()));
