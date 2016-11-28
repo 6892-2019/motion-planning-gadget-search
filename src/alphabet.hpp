@@ -8,16 +8,17 @@
 #ifndef ALPHABET_HPP
 #define ALPHABET_HPP
 
-#include "precompiled.hpp"
+#include <cassert>
 
 struct BooleanAlphabet {
 	using symbol_type = bool;
-	static constexpr std::array<symbol_type, 2> symbols = {false, true};
+	static constexpr unsigned int size = 2;
 	static constexpr unsigned int find(symbol_type symbol) {
-		return symbol ? 1 : 0;
+		return static_cast<unsigned int>(symbol);
 	}
 	static constexpr symbol_type at(unsigned int index) {
-		return symbols.at(index);
+		assert(index < size);
+		return static_cast<bool>(index);
 	}
 };
 

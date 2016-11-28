@@ -169,7 +169,7 @@ public:
 	 * @return true iff this regex represents the empty language
 	 */
 	bool isEmpty() const {
-		auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
+		auto automaton = impl::interpret<Alphabet::size>(pimpl_);
 		return automaton->isEmpty();
 	}
 
@@ -178,13 +178,13 @@ public:
 	 * @return true iff this regex represents an infinite language
 	 */
 	bool infinite() const {
-		auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
+		auto automaton = impl::interpret<Alphabet::size>(pimpl_);
 		return automaton->infinite();
 	}
 
 	template<class Callable>
 	void enumerate(Callable callback) const {
-		auto automaton = impl::interpret<Alphabet::symbols.size()>(pimpl_);
+		auto automaton = impl::interpret<Alphabet::size>(pimpl_);
 		automaton->enumerate<Alphabet>(callback);
 	}
 private:
