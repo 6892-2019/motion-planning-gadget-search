@@ -1,14 +1,6 @@
 #include "precompiled.hpp"
 #include "puzzle.hpp"
-
-//TODO: candidate for reuse
-static std::vector<std::string> readAllLines(std::string filename) {
-	std::vector<std::string> ret;
-	std::ifstream file(filename);
-	for (std::string line; std::getline(file, line);)
-		ret.push_back(std::move(line));
-	return ret;
-}
+#include "ioutils.hpp"
 
 /**
  * If the given string starts with the given prefix, erases that prefix.
