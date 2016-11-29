@@ -39,7 +39,7 @@ for config in configs:
       buildfile.write('{} = {}\n'.format(k, v))
     buildfile.write('\n')
 
-    buildfile.write('pch_target = $builddir/includes/precompiled.hpp.gch\n')
+    buildfile.write('pch_target = $builddir/include/precompiled.hpp.gch\n')
     buildfile.write('build $pch_target : cxx $src_dir/precompiled.hpp\n')
     buildfile.write('\n')
 
