@@ -8,6 +8,8 @@
 #ifndef EXPR_HPP
 #define EXPR_HPP
 
+#include <iosfwd>
+
 namespace automaton {
 namespace impl {
 
@@ -35,9 +37,16 @@ public:
 	//'comp' for 'complement'; 'not' is a keyword and 'comp' better matches ~ anyway
 	static ptr comp(ptr regex);
 
+	//https://isocpp.org/wiki/faq/input-output#virtual-friend-fns
+	friend std::ostream& operator<<(std::ostream& o, const Expr& e) {
+		e.print(o);
+		return o;
+	}
+
 	virtual ~Expr() = default;
 protected:
 	Expr() : refcount_(0) {}
+	virtual void print(std::ostream& o) const = 0;
 private:
 	mutable std::atomic<unsigned int> refcount_;
 	friend void intrusive_ptr_add_ref(const Expr* p) noexcept {
@@ -49,15 +58,29 @@ private:
 	}
 };
 
-class EmptyLanguage final : public Expr {};
-class AllStringsLanguage final : public Expr {};
-class Epsilon final : public Expr {};
-class Any final : public Expr {};
+class EmptyLanguage final : public Expr {
+protected:
+	virtual void print(std::ostream& o) const;
+};
+class AllStringsLanguage final : public Expr {
+protected:
+	virtual void print(std::ostream& o) const;
+};
+class Epsilon final : public Expr {
+protected:
+	virtual void print(std::ostream& o) const;
+};
+class Any final : public Expr {
+protected:
+	virtual void print(std::ostream& o) const;
+};
 
 class Literal final : public Expr {
 public:
 	Literal(unsigned int symbolIdx) : symbolIdx_(symbolIdx) {}
 	unsigned int symbol() const {return symbolIdx_;}
+protected:
+	virtual void print(std::ostream& o) const;
 private:
 	unsigned int symbolIdx_;
 };
@@ -66,6 +89,8 @@ class Concatenation final : public Expr {
 public:
 	Concatenation(container&& regexes) : regexes_(std::move(regexes)) {}
 	const container& children() const {return regexes_;}
+protected:
+	virtual void print(std::ostream& o) const;
 private:
 	container regexes_;
 };
@@ -74,6 +99,8 @@ class Alternation final : public Expr {
 public:
 	Alternation(container&& regexes) : regexes_(std::move(regexes)) {}
 	const container& children() const {return regexes_;}
+protected:
+	virtual void print(std::ostream& o) const;
 private:
 	container regexes_;
 };
@@ -82,6 +109,8 @@ class Intersection final : public Expr {
 public:
 	Intersection(container&& regexes) : regexes_(std::move(regexes)) {}
 	const container& children() const {return regexes_;}
+protected:
+	virtual void print(std::ostream& o) const;
 private:
 	container regexes_;
 };
@@ -101,6 +130,8 @@ public:
 	bool isFixed() const {return min() == max();}
 	bool isBounded() const {return max() != Expr::unlimited;}
 	bool isUnbounded() const {return max() == Expr::unlimited;}
+protected:
+	virtual void print(std::ostream& o) const;
 private:
 	ptr regex_;
 	int min_, max_;
@@ -110,6 +141,8 @@ class Complement final : public Expr {
 public:
 	Complement(ptr&& regex) : regex_(std::move(regex)) {}
 	ptr child() const {return regex_;}
+protected:
+	virtual void print(std::ostream& o) const;
 private:
 	ptr regex_;
 };

@@ -99,5 +99,59 @@ auto Expr::comp(ptr regex) -> ptr {
 	return new Complement(std::move(regex));
 }
 
+void EmptyLanguage::print(std::ostream& o) const {
+	o << "\u2205";
+}
+void AllStringsLanguage::print(std::ostream& o) const {
+	o << '@';
+}
+void Epsilon::print(std::ostream& o) const {
+	o << "\u03B5";
+}
+void Any::print(std::ostream& o) const {
+	o << '.';
+}
+void Literal::print(std::ostream& o) const {
+	//TODO: this only gives us 9 digits
+	o << this->symbolIdx_;
+}
+void Concatenation::print(std::ostream& o) const {
+	o << '(';
+	for (const auto& r : regexes_)
+		o << *r;
+	o << ')';
+}
+void Alternation::print(std::ostream& o) const {
+	o << '(' << *regexes_.at(0);
+	for (unsigned int i = 1; i < regexes_.size(); ++i)
+		o << '|' << *regexes_[i];
+	o << ')';
+}
+void Intersection::print(std::ostream& o) const {
+	o << '(' << *regexes_.at(0);
+	for (unsigned int i = 1; i < regexes_.size(); ++i)
+		o << '&' << *regexes_[i];
+	o << ')';
+}
+void Repetition::print(std::ostream& o) const {
+	if (isStar())
+		o << *regex_ << '*';
+	else if (isMaybe())
+		o << *regex_ << '?';
+	else if (isPlus())
+		o << *regex_ << '+';
+	else if (isFixed())
+		o << *regex_ << '{' << min() << '}';
+	else if (isBounded())
+		o << *regex_ << '{' << min() << ',' << max() << '}';
+	else if (isUnbounded())
+		o << *regex_ << '{' << min() << ',' << '}';
+	else
+		throw std::logic_error("impossible case in Repetition::print");
+}
+void Complement::print(std::ostream& o) const {
+	o << "(~" << *regex_ << ')';
+}
+
 } //namespace impl
 } //namespace automaton

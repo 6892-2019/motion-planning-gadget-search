@@ -187,6 +187,10 @@ public:
 		auto automaton = impl::interpret<Alphabet::size>(pimpl_);
 		automaton->enumerate<Alphabet>(callback);
 	}
+
+	friend std::ostream& operator<<(std::ostream& o, const Regex& r) {
+		return o << *r.pimpl_;
+	}
 private:
 	impl::Expr::ptr pimpl_;
 	Regex(impl::Expr::ptr pimpl) : pimpl_(pimpl) {
