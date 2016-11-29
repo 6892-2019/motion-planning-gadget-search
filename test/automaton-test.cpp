@@ -450,6 +450,26 @@ TEST(AutomatonTest, Determinize) {
 	auto gc = g->clone();
 	gc->determinize();
 	equivalentOnAllStrings<2>(g, gc, 8);
+
+	auto multOf3 = Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3));
+	auto multOf3Clone = multOf3->clone();
+	multOf3Clone->determinize();
+	equivalentOnAllStrings<2>(multOf3, multOf3Clone, 8, __LINE__);
+
+	auto finiteMultOf3 = Automaton<2>::conj(multOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
+	auto finiteMultOf3Clone = finiteMultOf3->clone();
+	finiteMultOf3Clone->determinize();
+	equivalentOnAllStrings<2>(finiteMultOf3, finiteMultOf3Clone, 8, __LINE__);
+
+	auto posMultOf3 = Automaton<2>::plus(Automaton<2>::nCopies(Automaton<2>::any(), 3));
+	auto posMultOf3Clone = posMultOf3->clone();
+	posMultOf3Clone->determinize();
+	equivalentOnAllStrings<2>(posMultOf3, posMultOf3Clone, 8, __LINE__);
+
+	auto finitePosMultOf3 = Automaton<2>::conj(posMultOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
+	auto finitePosMultOf3Clone = finitePosMultOf3->clone();
+	finitePosMultOf3Clone->determinize();
+	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, Totalize) {
@@ -597,4 +617,24 @@ TEST(AutomatonTest, Minimize) {
 	hc = h->clone();
 	hc->minimize();
 	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
+
+	auto multOf3 = Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3));
+	auto multOf3Clone = multOf3->clone();
+	multOf3Clone->minimize();
+	equivalentOnAllStrings<2>(multOf3, multOf3Clone, 8, __LINE__);
+
+	auto finiteMultOf3 = Automaton<2>::conj(multOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
+	auto finiteMultOf3Clone = finiteMultOf3->clone();
+	finiteMultOf3Clone->minimize();
+	equivalentOnAllStrings<2>(finiteMultOf3, finiteMultOf3Clone, 8, __LINE__);
+
+	auto posMultOf3 = Automaton<2>::plus(Automaton<2>::nCopies(Automaton<2>::any(), 3));
+	auto posMultOf3Clone = posMultOf3->clone();
+	posMultOf3Clone->minimize();
+	equivalentOnAllStrings<2>(posMultOf3, posMultOf3Clone, 8, __LINE__);
+
+	auto finitePosMultOf3 = Automaton<2>::conj(posMultOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
+	auto finitePosMultOf3Clone = finitePosMultOf3->clone();
+	finitePosMultOf3Clone->minimize();
+	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
 }
