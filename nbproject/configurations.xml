@@ -28,6 +28,7 @@
     </df>
     <df root="test" name="1">
       <in>automaton-test.cpp</in>
+      <in>expr-test.cpp</in>
     </df>
     <logicalFolder name="ExternalFiles"
                    displayName="Important Files"
@@ -117,6 +118,8 @@
       <item path="src/regex.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="test/automaton-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="test/expr-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
     </conf>
   </confs>
