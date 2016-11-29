@@ -185,11 +185,26 @@ public:
 	template<class Callable>
 	void enumerate(Callable callback) const {
 		auto automaton = impl::interpret<Alphabet::size>(pimpl_);
+		std::cout << "beginning enumeration" << std::endl;
 		automaton->enumerate<Alphabet>(callback);
 	}
 
 	friend std::ostream& operator<<(std::ostream& o, const Regex& r) {
 		return o << *r.pimpl_;
+	}
+
+	/**
+	 * Returns an object of unspecified type that, when streamed to a
+	 * std::ostream, outputs a C++ expression that constructs the Expr tree
+	 * contained within this Regex.  Use this like {@code std::cout << r.repr() <<
+	 * std::endl}.
+	 *
+	 * This function is for debugging purposes only; its output is not generally
+	 * useful to clients.
+	 * @return a streamable object that outputs a repr string
+	 */
+	auto repr() const {
+		return ReprStreamer{*this};
 	}
 private:
 	impl::Expr::ptr pimpl_;
@@ -206,6 +221,13 @@ private:
 		for (; begin != end; ++begin)
 			v.push_back(begin->pimpl_);
 		return acceptor(std::move(v));
+	}
+
+	struct ReprStreamer {
+		const Regex& r;
+	};
+	friend std::ostream& operator<<(std::ostream& o, const ReprStreamer& rs) {
+		return o << rs.r.pimpl_->repr();
 	}
 };
 

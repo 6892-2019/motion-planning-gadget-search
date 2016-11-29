@@ -43,11 +43,30 @@ public:
 		return o;
 	}
 
+	/**
+	 * Returns an object of unspecified type that, when streamed to a
+	 * std::ostream, outputs a C++ expression that constructs the Expr tree
+	 * rooted at this Expr.  Use this like "std::cout << r.repr() << std::endl".
+	 * @return a streamable object that outputs a repr string
+	 */
+	auto repr() const {
+		return ReprStreamer{*this};
+	}
 	virtual ~Expr() = default;
 protected:
 	Expr() : refcount_(0) {}
 	virtual void print(std::ostream& o) const = 0;
+	virtual void repr(std::ostream& o) const = 0;
 private:
+	/** A dummy type for streaming. */
+	struct ReprStreamer {
+		const Expr& e;
+	};
+	friend std::ostream& operator<<(std::ostream& o, const ReprStreamer& rs) {
+		rs.e.repr(o);
+		return o;
+	}
+
 	mutable std::atomic<unsigned int> refcount_;
 	friend void intrusive_ptr_add_ref(const Expr* p) noexcept {
 		++p->refcount_;
@@ -61,18 +80,22 @@ private:
 class EmptyLanguage final : public Expr {
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 };
 class AllStringsLanguage final : public Expr {
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 };
 class Epsilon final : public Expr {
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 };
 class Any final : public Expr {
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 };
 
 class Literal final : public Expr {
@@ -81,6 +104,7 @@ public:
 	unsigned int symbol() const {return symbolIdx_;}
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 private:
 	unsigned int symbolIdx_;
 };
@@ -91,6 +115,7 @@ public:
 	const container& children() const {return regexes_;}
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 private:
 	container regexes_;
 };
@@ -101,6 +126,7 @@ public:
 	const container& children() const {return regexes_;}
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 private:
 	container regexes_;
 };
@@ -111,6 +137,7 @@ public:
 	const container& children() const {return regexes_;}
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 private:
 	container regexes_;
 };
@@ -132,6 +159,7 @@ public:
 	bool isUnbounded() const {return max() == Expr::unlimited;}
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 private:
 	ptr regex_;
 	int min_, max_;
@@ -143,6 +171,7 @@ public:
 	ptr child() const {return regex_;}
 protected:
 	virtual void print(std::ostream& o) const;
+	virtual void repr(std::ostream& o) const;
 private:
 	ptr regex_;
 };

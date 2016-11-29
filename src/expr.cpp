@@ -153,5 +153,55 @@ void Complement::print(std::ostream& o) const {
 	o << "(~" << *regex_ << ')';
 }
 
+void EmptyLanguage::repr(std::ostream& o) const {
+	o << "Expr::empty()";
+}
+void AllStringsLanguage::repr(std::ostream& o) const {
+	o << "Expr::all()";
+}
+void Epsilon::repr(std::ostream& o) const {
+	o << "Expr::epsilon()";
+}
+void Any::repr(std::ostream& o) const {
+	o << "Expr::any()";
+}
+void Literal::repr(std::ostream& o) const {
+	o << "Expr::lit(" << symbolIdx_ << ")";
+}
+void Concatenation::repr(std::ostream& o) const {
+	o << "Expr::cat({";
+	for (const auto& r : regexes_)
+		o << r->repr() << ", ";
+	o << "})";
+}
+void Alternation::repr(std::ostream& o) const {
+	o << "Expr::alt({";
+	for (const auto& r : regexes_)
+		o << r->repr() << ", ";
+	o << "})";
+}
+void Intersection::repr(std::ostream& o) const {
+	o << "Expr::conj({";
+	for (const auto& r : regexes_)
+		o << r->repr() << ", ";
+	o << "})";
+}
+void Repetition::repr(std::ostream& o) const {
+	o << "Expr::repeat(" << regex_->repr() << ", ";
+	if (min() == Expr::unlimited)
+		o << "Expr::unlimited";
+	else
+		o << min();
+	o << ", ";
+	if (max() == Expr::unlimited)
+		o << "Expr::unlimited";
+	else
+		o << max();
+	o << ")";
+}
+void Complement::repr(std::ostream& o) const {
+	o << "Expr::comp(" << regex_->repr() << ")";
+}
+
 } //namespace impl
 } //namespace automaton
