@@ -315,6 +315,46 @@ TEST(AutomatonTest, NCopies) {
 	EXPECT_FALSE(s->run({1, 0, 0}));
 }
 
+TEST(AutomatonTest, StarNCopies) {
+	//any multiple of 3, including 0
+	auto s = Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3));
+	EXPECT_FALSE(s->isEmpty());
+	EXPECT_TRUE(s->infinite());
+	EXPECT_TRUE(s->run({}));
+	EXPECT_FALSE(s->run({0}));
+	EXPECT_FALSE(s->run({1}));
+	EXPECT_FALSE(s->run({0, 0}));
+	EXPECT_FALSE(s->run({1, 1}));
+	EXPECT_TRUE(s->run({0, 0, 0}));
+	EXPECT_TRUE(s->run({1, 0, 1}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0, 0, 0}));
+}
+
+TEST(AutomatonTest, PlusNCopies) {
+	//any multiple of 3 except 0
+	auto s = Automaton<2>::plus(Automaton<2>::nCopies(Automaton<2>::any(), 3));
+	EXPECT_FALSE(s->isEmpty());
+	EXPECT_TRUE(s->infinite());
+	EXPECT_FALSE(s->run({}));
+	EXPECT_FALSE(s->run({0}));
+	EXPECT_FALSE(s->run({1}));
+	EXPECT_FALSE(s->run({0, 0}));
+	EXPECT_FALSE(s->run({1, 1}));
+	EXPECT_TRUE(s->run({0, 0, 0}));
+	EXPECT_TRUE(s->run({1, 0, 1}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0, 0, 0}));
+}
+
 TEST(AutomatonTest, NOrMore) {
 	auto a = Automaton<2>::lit(0);
 	auto s = Automaton<2>::nOrMore(a, 3);
