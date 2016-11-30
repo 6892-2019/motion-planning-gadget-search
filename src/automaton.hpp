@@ -1151,8 +1151,9 @@ private:
 
 		void checkRep() const {
 #ifndef NDEBUG
-			//TODO: we should exit immediately in trivial cases, so this can be >= 2
-			assert(partitionBounds_.size() >= 1);
+			//We exit early in the trivial empty/all cases, so we always have at
+			//least accept/reject partitions.
+			assert(partitionBounds_.size() >= 2);
 			for (const auto& p : partitionBounds_)
 				assert(p.second - p.first > 0);
 			assert(moveSize_.size() == partitionBounds_.size());
