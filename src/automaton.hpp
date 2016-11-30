@@ -1157,6 +1157,13 @@ private:
 				assert(p.second - p.first > 0);
 			assert(moveSize_.size() == partitionBounds_.size());
 			assert(suspects_.size() <= partitionBounds_.size());
+
+			//All states in each partition should have the same accept status.
+			//(Established in the very first split.)
+			for (state_type i = 0; i < partitionBounds_.size(); ++i)
+				for (state_type j = partitionBounds_[i].first; j < partitionBounds_[i].second - 1; ++j)
+					assert(a_.accept_[partitions_[j]] == a_.accept_[partitions_[j+1]]);
+
 			//TODO: every element in partitions_ is within a parititionBounds_ element
 			//TODO: partitions_ is a permutation of [0..n) (is there a cheap way to check?)
 			//TODO: inL is true iff L contains the state-symbol pair (if is cheap, only-if is costly)
