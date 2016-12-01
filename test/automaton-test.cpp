@@ -11,10 +11,7 @@ namespace {
 std::string to_string(const std::vector<unsigned int>& v) {
 	std::string str;
     str += '(';
-	auto i = v.cbegin();
-	if (i != v.cend())
-		str += std::to_string(*i);
-    for (; i != v.cend(); ++i)
+    for (auto i = v.cbegin(); i != v.cend(); ++i)
         str += std::to_string(*i);
     str += ')';
     return str;
