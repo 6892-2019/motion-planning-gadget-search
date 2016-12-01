@@ -84,20 +84,20 @@ R require(R regex, std::initializer_list<unsigned int> positions) {
 
 /**
  * @returns a regex that constrains the given regex to match the given number of
- * times within the given total string length
+ * times within the given total number of occurrences
  */
-R subset(R regex, unsigned int required, unsigned int total) {
+R subset(R regex, unsigned int required, unsigned int total, unsigned int stride = 1) {
 	//There's a straightforward automata representation for this that we might
 	//prefer to have as a primitive.
 	vector<R> constraint;
 	constraint.reserve(2*required + 1);
-	R anyStar = R::star(R::any());
+	R anyStar = R::star(R::repeat(R::any(), stride));
 	for (unsigned int i = 0; i < required; ++i) {
 		constraint.push_back(anyStar);
 		constraint.push_back(regex);
 	}
 	constraint.push_back(anyStar);
-	return R::conj({R::cat(constraint), R::repeat(R::any(), total)});
+	return R::conj({R::cat(constraint), R::repeat(R::any(), total * stride)});
 }
 
 int main(int argc, char* argv[]) {
@@ -128,15 +128,24 @@ int main(int argc, char* argv[]) {
 	R present = R::alt({R::lit(1), R::lit(2)});
 	for (unsigned int row = 0; row < p.rows.size(); ++row) {
 		if (p.rows[row])
-			constraints.push_back(R::cat({R::repeat(R::any(), row * width),
-					subset(present, *(p.rows[row]), width), R::star(R::any())}));
+			constraints.push_back(R::cat({
+				R::repeat(R::any(), row * width),
+				R::conj({
+					subset(present, *(p.rows[row]), width),
+					subset(R::lit(0), width - *(p.rows[row]), width)
+				}),
+				R::star(R::any()),
+			}));
 	}
 	for (unsigned int col = 0; col < p.cols.size(); ++col) {
 		if (p.cols[col]) {
-			R colSelect = R::conj({require(present, {col}), R::repeat(R::any(), width)});
-			//TODO: subset doesn't force colSelect to match at the beginning of the row
-			//May not be possible without an explicit start-of-row character
-			constraints.push_back(subset(colSelect, *(p.cols[col]), width * height));
+			R colSelect = R::cat({R::repeat(R::any(), col), present, R::repeat(R::any(), width - col - 1)});
+			R colUnselect = R::cat({R::repeat(R::any(), col), R::lit(0), R::repeat(R::any(), width - col - 1)});
+			R colConstraint = R::conj({
+				subset(colSelect, *(p.cols[col]), height, width),
+				subset(colUnselect, height - *(p.cols[col]), height, width),
+			});
+			constraints.push_back(colConstraint);
 		}
 	}
 
