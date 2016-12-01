@@ -826,42 +826,53 @@ private:
 	 * @return the set of live states
 	 */
 	dense_hash_set<state_type> liveStates() const {
-		//If for some reason we care about reachable but not live states, we're
-		//computing them here of necessity.
-		dense_hash_set<state_type> live(static_cast<state_type>(size())), visited(static_cast<state_type>(size()));
-		live.set_empty_key(static_cast<state_type>(size()));
-		visited.set_empty_key(static_cast<state_type>(size()));
-		std::vector<state_type> path;
-		std::stack<boost::optional<state_type>> nexts;
-		auto markPathLive = [&]() {
-			//Add path elements to the live set until we find a state
-			//already in the live set, after which all previous states
-			//have already been marked live.
-			for (auto i = path.rbegin(); i != path.rend(); ++i)
-				if (!live.insert(*i).second)
-					return;
+		//TODO: there's not yet a good way to use std::sort on separate vectors
+		//See http://stackoverflow.com/q/13840998/3614835.
+		std::vector<std::pair<state_type, state_type>> inverseEdgelist;
+		//Exact sizing (counting transitions) is probably not worth it, but we
+		//know there's at least this much.
+		inverseEdgelist.reserve(size());
+		for (state_type s = 0; s < size(); ++s)
+			for (const Transition& t : transitions_[s])
+				inverseEdgelist.push_back({t.next_, s});
+		std::sort(inverseEdgelist.begin(), inverseEdgelist.end());
+		std::vector<state_type> inverse;
+		inverse.reserve(inverseEdgelist.size());
+		std::transform(inverseEdgelist.begin(), inverseEdgelist.end(),
+			std::back_inserter(inverse), [](const auto& p){return p.second;});
+		std::vector<decltype(inverse)::iterator> inverseIdx;
+		inverseIdx.reserve(size() + 1);
+		inverseIdx.push_back(inverse.begin());
+		decltype(inverseEdgelist)::iterator edgelistPos = inverseEdgelist.begin();
+		for (state_type s = 0; s < size(); ++s) {
+			edgelistPos = std::find_if_not(edgelistPos, inverseEdgelist.end(), [s](auto& p){return p.first == s;});
+			inverseIdx.push_back(inverse.begin() + std::distance(inverseEdgelist.begin(), edgelistPos));
+		}
+		inverseEdgelist.clear();
+		inverseEdgelist.shrink_to_fit();
+
+		auto inverseDestinations = [&](state_type s) {
+			assert(s < inverseIdx.size());
+			return boost::make_iterator_range(inverseIdx[s], inverseIdx[s+1]);
 		};
 
-		nexts.push(boost::make_optional(0U));
+		//This assumes the automaton is connected.  If we ever support removing
+		//transitions, we could set a flag that triggers a connectivity check.
+		dense_hash_set<state_type> live(static_cast<state_type>(size()));
+		live.set_empty_key(static_cast<state_type>(size()));
+		std::stack<state_type> nexts;
+		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s)) {
+			assert(s < size());
+			state_type state = static_cast<state_type>(s);
+			live.insert(state);
+			nexts.push(state);
+		}
 		while (!nexts.empty()) {
-			boost::optional<state_type> n = nexts.top();
+			state_type n = nexts.top();
 			nexts.pop();
-			if (n) {
-				//We might have already visited this state while it was waiting
-				//on the stack.
-				if (!visited.insert(*n).second) {
-					if (live.find(*n) != live.end())
-						markPathLive();
-					continue;
-				}
-				path.push_back(*n);
-				if (accept_[path.back()])
-					markPathLive();
-				nexts.push(boost::optional<state_type>(boost::none));
-				for (state_type next : destinations(path.back()))
-					nexts.push(boost::make_optional(next));
-			} else
-				path.pop_back();
+			for (state_type next : inverseDestinations(n))
+				if (live.insert(next).second)
+					nexts.push(next);
 		}
 		return live;
 	}
