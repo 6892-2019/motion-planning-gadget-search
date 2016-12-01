@@ -44,31 +44,35 @@ auto Expr::lit(unsigned int symbolIdx) -> ptr {
 	return new Literal(symbolIdx);
 }
 auto Expr::cat(container&& regexes) -> ptr {
-	if (regexes.empty())
-		return epsilon();
-	if (regexes.size() == 1)
-		return regexes.front();
 	container folder;
 	folder.reserve(regexes.size());
 	for (ptr& p : regexes)
-		if (auto q = boost::dynamic_pointer_cast<Concatenation>(p))
+		if (auto q = boost::dynamic_pointer_cast<Epsilon>(p))
+			;
+		else if (auto q = boost::dynamic_pointer_cast<Concatenation>(p))
 			folder.insert(folder.end(), q->children().begin(), q->children().end());
 		else
 			folder.push_back(std::move(p));
+	if (folder.empty())
+		return epsilon();
+	if (folder.size() == 1)
+		return folder.front();
 	return new Concatenation(std::move(folder));
 }
 auto Expr::alt(container&& regexes) -> ptr {
-	if (regexes.empty())
-		return empty();
-	if (regexes.size() == 1)
-		return regexes.front();
 	container folder;
 	folder.reserve(regexes.size());
 	for (ptr& p : regexes)
-		if (auto q = boost::dynamic_pointer_cast<Alternation>(p))
+		if (auto q = boost::dynamic_pointer_cast<EmptyLanguage>(p))
+			;
+		else if (auto q = boost::dynamic_pointer_cast<Alternation>(p))
 			folder.insert(folder.end(), q->children().begin(), q->children().end());
 		else
 			folder.push_back(std::move(p));
+	if (folder.empty())
+		return empty();
+	if (folder.size() == 1)
+		return folder.front();
 	return new Alternation(std::move(folder));
 }
 auto Expr::conj(container&& regexes) -> ptr {
@@ -76,6 +80,7 @@ auto Expr::conj(container&& regexes) -> ptr {
 		return all();
 	if (regexes.size() == 1)
 		return regexes.front();
+	//TODO in fold: remove all-strings choices
 //	container folder;
 //	folder.reserve(regexes.size());
 //	for (ptr& p : regexes)
