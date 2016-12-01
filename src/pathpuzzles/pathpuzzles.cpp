@@ -10,6 +10,8 @@ using std::string;
 using boost::optional;
 using boost::make_optional;
 
+using Coord = std::pair<unsigned int, unsigned int>;
+
 struct Puzzle {
 	static vector<optional<unsigned int>> parseRowCol(string rowcol) {
 		vector<optional<unsigned int>> ret;
@@ -25,7 +27,7 @@ struct Puzzle {
 	static Puzzle parse(string filename) {
 		vector<string> lines = readAllLines(filename);
 		vector<optional<unsigned int>> rs, cs;
-		vector<pair<unsigned int, unsigned int>> ts;
+		vector<Coord> ts;
 		for (auto& line : lines) {
 			if (removePrefix(line, "rows ")) {
 				if (!rs.empty())
@@ -47,8 +49,47 @@ struct Puzzle {
 		return {rs, cs, ts};
 	}
 	vector<optional<unsigned int>> rows, cols;
-	vector<pair<unsigned int, unsigned int>> terminals;
+	vector<Coord> terminals;
 };
+
+using CoordSet = std::unordered_set<Coord, boost::hash<const Coord>>;
+void findPathsRecurse(const CoordSet& vertices, Coord target, vector<Coord>& path,
+		CoordSet& pathSet, vector<vector<Coord>>& results) {
+	if (path.back() == target) {
+		if (path.size() == vertices.size())
+			results.push_back(path);
+		//solution or not, we're done with this recursion branch
+		return;
+	}
+	Coord cur = path.back();
+	std::array<Coord, 4> neighbors = {{
+		{cur.first-1U, cur.second}, {cur.first+1U, cur.second},
+		{cur.first, cur.second-1U}, {cur.first, cur.second+1U}
+	}};
+	for (Coord n : neighbors) {
+		if (vertices.count(n) && pathSet.insert(n).second) {
+			path.push_back(n);
+			findPathsRecurse(vertices, target, path, pathSet, results);
+			assert(path.back() == n);
+			path.pop_back();
+			//TODO: [[maybe_unused]]
+			bool erased = pathSet.erase(n);
+			assert(erased);
+		}
+	}
+}
+
+vector<vector<Coord>> findPaths(const CoordSet& vertices, Coord source, Coord target) {
+	vector<vector<Coord>> results;
+	vector<Coord> path;
+	path.reserve(vertices.size());
+	path.push_back(source);
+	CoordSet pathSet;
+	pathSet.reserve(vertices.size());
+	pathSet.insert(source);
+	findPathsRecurse(vertices, target, path, pathSet, results);
+	return results;
+}
 
 using R = automaton::Regex<ByteAlphabet<3>>;
 
@@ -169,15 +210,34 @@ int main(int argc, char* argv[]) {
 	R overall = R::conj(constraints);
 	std::size_t count = 0;
 	overall.enumerate([&](const vector<uint8_t>& vec) {
-		++count;
+		CoordSet vertices;
+		vector<Coord> terminals;
 		for (unsigned int r = 0; r < height; ++r) {
-			for (unsigned int c = 0; c < width; ++c)
-				std::cout << static_cast<unsigned int>(vec[r * width + c]);
+			for (unsigned int c = 0; c < width; ++c) {
+				if (vec[r * width + c] != 0)
+					vertices.insert({r, c});
+				if (vec[r * width + c] == 2)
+					terminals.push_back({r, c});
+			}
+		}
+
+		vector<vector<Coord>> paths;
+		for (unsigned int i = 0; i < terminals.size(); ++i)
+			for (unsigned int j = i+1; j < terminals.size(); ++j) {
+				const auto& these = findPaths(vertices, terminals[i], terminals[j]);
+				paths.insert(paths.end(), these.begin(), these.end());
+			}
+
+		if (!paths.empty()) {
+			++count;
+			for (unsigned int r = 0; r < height; ++r) {
+				for (unsigned int c = 0; c < width; ++c)
+					std::cout << static_cast<unsigned int>(vec[r * width + c]);
+				std::cout << '\n';
+			}
+			std::cout << paths.size() << '\n';
 			std::cout << '\n';
 		}
-		std::cout << '\n';
-		if (count == 1000)
-			std::exit(0);
 	});
 	std::cout << count << " solutions" << std::endl;
 //	vector<vector<uint8_t>> solutions;
