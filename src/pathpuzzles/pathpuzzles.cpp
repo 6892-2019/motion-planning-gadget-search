@@ -160,7 +160,8 @@ int main(int argc, char* argv[]) {
 			R::lit(1),
 			R::lit(0),
 			R::repeat(R::any(), width - 2),
-			R::lit(0)
+			R::lit(0),
+			R::star(R::any())
 		}));
 		constraints.push_back(nonisolation);
 	}
