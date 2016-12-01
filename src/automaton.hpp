@@ -1201,6 +1201,17 @@ private:
 		}
 	}
 
+	friend std::ostream& operator<<(std::ostream& o, const Automaton& a) {
+		o << a.size() << " states, " << a.numTransitions() << " transitions, "
+				<< (a.deterministic() ? "" : "non") << "deterministic\n";
+		for (state_type i = 0; i < a.size(); ++i) {
+			o << "state " << i << (a.accept_[i] ? " [accept]:\n" : ":\n");
+			for (const Transition& t : a.transitions_[i])
+				o << "  to " << t.next_ << " on " << t.symbols_ << '\n';
+		}
+		return o;
+	}
+
 	//mutable == thread-safe in C++11+
 	mutable std::atomic<unsigned int> refcount_;
 	friend void intrusive_ptr_add_ref(const Automaton* p) noexcept {

@@ -8,6 +8,7 @@
 #ifndef BITSET_HPP
 #define BITSET_HPP
 
+#include <iostream>
 #include <exception>
 #include <cassert>
 #include <boost/integer.hpp>
@@ -214,6 +215,12 @@ private:
 		assert(endExclusive <= N);
 		assert(startInclusive <= endExclusive);
 		return lowmask(endExclusive) & ~lowmask(startInclusive);
+	}
+
+	friend std::ostream& operator<<(std::ostream& o, const bitset& b) {
+		for (size_type i = b.size(); i-- > 0;)
+			o << (b[i] ? '1' : '0');
+		return o;
 	}
 };
 
