@@ -623,6 +623,16 @@ TEST(AutomatonTest, Minimize) {
 	multOf3Clone->minimize();
 	equivalentOnAllStrings<2>(multOf3, multOf3Clone, 8, __LINE__);
 
+	auto multOf3Zero = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3)), Automaton<2>::lit(0)});
+	auto multOf3ZeroClone = multOf3Zero->clone();
+	multOf3ZeroClone->minimize();
+	equivalentOnAllStrings<2>(multOf3Zero, multOf3ZeroClone, 8, __LINE__);
+
+	auto multOf3One = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3)), Automaton<2>::lit(1)});
+	auto multOf3OneClone = multOf3One->clone();
+	multOf3OneClone->minimize();
+	equivalentOnAllStrings<2>(multOf3One, multOf3OneClone, 8, __LINE__);
+
 	auto finiteMultOf3 = Automaton<2>::conj(multOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
 	auto finiteMultOf3Clone = finiteMultOf3->clone();
 	finiteMultOf3Clone->minimize();
@@ -637,4 +647,19 @@ TEST(AutomatonTest, Minimize) {
 	auto finitePosMultOf3Clone = finitePosMultOf3->clone();
 	finitePosMultOf3Clone->minimize();
 	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
+
+	auto zeroStarOne = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::lit(0)), Automaton<2>::lit(1)});
+	auto zeroStarOneClone = zeroStarOne->clone();
+	zeroStarOneClone->minimize();
+	equivalentOnAllStrings<2>(zeroStarOne, zeroStarOneClone, 8, __LINE__);
+
+	auto zeroZeroStarOne = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(0)})), Automaton<2>::lit(1)});
+	auto zeroZeroStarOneClone = zeroZeroStarOne->clone();
+	zeroZeroStarOneClone->minimize();
+	equivalentOnAllStrings<2>(zeroZeroStarOne, zeroZeroStarOneClone, 8, __LINE__);
+
+	auto zeroOneStarOne = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)})), Automaton<2>::lit(1)});
+	auto zeroOneStarOneClone = zeroOneStarOne->clone();
+	zeroOneStarOneClone->minimize();
+	equivalentOnAllStrings<2>(zeroOneStarOne, zeroOneStarOneClone, 8, __LINE__);
 }
