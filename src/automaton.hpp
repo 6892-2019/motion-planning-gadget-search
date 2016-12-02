@@ -945,12 +945,15 @@ private:
 
 			std::vector<InverseEntry> edgelist;
 			edgelist.reserve(a_.size() * AlphabetSize + 1);
+			bool crashed = false;
 			unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
 			for (state_type s = 0; s < a_.size(); ++s) {
 				for (symbol_type a = 0; a < AlphabetSize; ++a) {
 					auto target = a_.step(s, a);
 					assert(target.size() <= 1 && "nondeterministic?");
-					if (!target.empty())
+					if (target.empty())
+						crashed = true;
+					else
 						edgelist.push_back(InverseEntry{s, a, target.front()});
 				}
 
@@ -968,7 +971,7 @@ private:
 			if (nonfinalIdx == partitions_.size()) {
 				a_ = std::move(*Automaton<AlphabetSize>::empty());
 				return false;
-			} else if ((finalIdx+1) == 0U) {
+			} else if ((finalIdx+1) == 0U && !crashed) {
 				a_ = std::move(*Automaton<AlphabetSize>::all());
 				return false;
 			}
