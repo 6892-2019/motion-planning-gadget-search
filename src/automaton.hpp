@@ -1053,6 +1053,10 @@ private:
 			for (state_type target : partition(part))
 				for (state_type source : inverseStep(target, symbol)) {
 					state_type invPart = stateToPartition_[source].first;
+					//TODO: if partitionSize(invPart) == 1, we shouldn't bother
+					//adding it to suspects (and checking it later).  This might
+					//be important for no-op re-minimization of large automata,
+					//to avoid unnecessarily growing suspects_.  (Test first.)
 					if (moveSize_[invPart] == 0) //only add to suspects if not already present
 						suspects_.push_back(invPart);
 					move_[partitionBounds_[invPart].first + (moveSize_[invPart]++)] = source;
