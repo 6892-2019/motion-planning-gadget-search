@@ -594,9 +594,9 @@ public:
 		//The Java library explicitly checks for the all-strings automaton here,
 		//but it doesn't seem to be necessary.
 		//Java totalizes the automaton here (then removes the added state in
-		//removeDeadStates).  That doesn't seem to be required.  There are papers
-		//with special algorithms for sparse automata, but they don't indicate
-		//standard Hopcroft minimization is wrong if the automaton is partial.
+		//removeDeadStates).  That isn't required; our Hopcroft implementation
+		//understands states are not equivalent if one crashes and the other
+		//doesn't.
 		std::size_t oldsize = size();
 		HopcroftMinimizer(*this).minimize();
 		std::cout << "minimize: " << oldsize << " -> " << size() << std::endl;
@@ -889,8 +889,7 @@ private:
 
 		void minimize() {
 			if (!buildInverseAndInitializePartitions()) return;
-			for (symbol_type i = 0; i < AlphabetSize; ++i)
-				addBetter(0, 1, i);
+			initializeWaitingSet();
 			while (!L_.empty()) {
 				auto pair = remove();
 				collect(pair.first, pair.second);
@@ -957,13 +956,10 @@ private:
 						edgelist.push_back(InverseEntry{s, a, target.front()});
 				}
 
-				if (a_.accept_[s]) {
-					stateToPartition_[s] = {1, finalIdx};
+				if (a_.accept_[s])
 					partitions_[finalIdx--] = s;
-				} else {
-					stateToPartition_[s] = {0, nonfinalIdx};
+				else
 					partitions_[nonfinalIdx++] = s;
-				}
 			}
 			edgelist.push_back(InverseEntry{std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max(), std::numeric_limits<state_type>::max()});
 
@@ -976,9 +972,48 @@ private:
 				return false;
 			}
 
+			if (crashed) {
+				//Because we didn't totalize, we need to manually partition
+				//crashing vs. non-crashing on each symbol.
+				std::vector<typename decltype(partitions_)::iterator> bounds = {
+					partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
+				}, newbounds;
+				for (symbol_type s = 0; s < AlphabetSize; ++s) {
+					newbounds.clear();
+					for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
+						newbounds.push_back(bounds[i]);
+						newbounds.push_back(std::partition(bounds[i], bounds[i+1], [this, s](state_type state) {
+							//TODO: we're really just checking if we crash; may be
+							//worth adding stepDeterministic or crashes or something
+							//else that stops at the first valid transition
+							return a_.step(state, s).empty();
+						}));
+						newbounds.push_back(bounds[i+1]);
+					}
+					newbounds.erase(std::unique(newbounds.begin(), newbounds.end()), newbounds.end());
+					bounds.swap(newbounds);
+				}
+				partitionBounds_.reserve(bounds.size()-1);
+				for (state_type p = 0; p < bounds.size()-1; ++p)
+					partitionBounds_.push_back({bounds[p] - partitions_.begin(), bounds[p+1] - partitions_.begin()});
+				moveSize_.resize(partitionBounds_.size(), 0);
+			} else {
+				partitionBounds_.push_back({0, nonfinalIdx});
+				partitionBounds_.push_back({nonfinalIdx, static_cast<state_type>(partitions_.size())});
+				moveSize_.push_back(0);
+				moveSize_.push_back(0);
+			}
+
+			for (state_type p = 0; p < partitionBounds_.size(); ++p) {
+				auto bounds = partitionBounds_[p];
+				//Sort for locality when accessing stateToPartition_.
+				std::sort(partitions_.begin() + bounds.first, partitions_.begin() + bounds.second);
+				for (state_type i = bounds.first; i != bounds.second; ++i)
+					stateToPartition_[partitions_[i]] = {p, i};
+			}
+
 			//TODO: use a parallel sort (beyond a size threshold)
 			std::sort(edgelist.begin(), edgelist.end());
-
 			std::size_t invEltsIdx = 0;
 			for (state_type stateIdx = 0; stateIdx < a_.size(); ++stateIdx) {
 				for (symbol_type symbolIdx = 0; symbolIdx < AlphabetSize; ++symbolIdx) {
@@ -993,12 +1028,23 @@ private:
 			}
 			//TODO: we can reassert this when inv_ is lazily sized
 //			assert(invEltsIdx == inv_.size());
-
-			partitionBounds_.push_back({0, nonfinalIdx});
-			partitionBounds_.push_back({nonfinalIdx, static_cast<state_type>(partitions_.size())});
-			moveSize_.push_back(0);
-			moveSize_.push_back(0);
 			return true;
+		}
+
+		void initializeWaitingSet() {
+			//For each symbol, add all but the largest partition to the waiting set.
+			//TODO: factor this into max_element_transform algorithm
+			state_type maxPartition = 0, maxPartitionSize = partitionSize(0);
+			for (state_type p = 1; p < partitionBounds_.size(); ++p)
+				if (partitionSize(p) > maxPartitionSize) {
+					maxPartitionSize = partitionSize(p);
+					maxPartition = p;
+				}
+
+			for (symbol_type i = 0; i < AlphabetSize; ++i)
+				for (state_type p = 0; p < partitionBounds_.size(); ++p)
+					if (p != maxPartition)
+						add(p, i);
 		}
 
 		void collect(state_type part, symbol_type symbol) {
