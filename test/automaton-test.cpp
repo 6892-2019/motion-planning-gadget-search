@@ -120,6 +120,21 @@ TEST(AutomatonTest, Any) {
 	EXPECT_FALSE(a->run({1, 0}));
 }
 
+TEST(AutomatonTest, AnyTrinary) {
+	auto a = Automaton<3>::any();
+	EXPECT_TRUE(a->deterministic());
+	EXPECT_FALSE(a->isEmpty());
+	EXPECT_FALSE(a->infinite());
+	EXPECT_FALSE(a->run({}));
+	EXPECT_TRUE(a->run({0}));
+	EXPECT_TRUE(a->run({1}));
+	EXPECT_TRUE(a->run({2}));
+	EXPECT_FALSE(a->run({0, 1}));
+	EXPECT_FALSE(a->run({1, 0}));
+	EXPECT_FALSE(a->run({0, 1, 2}));
+	EXPECT_FALSE(a->run({2, 1, 0}));
+}
+
 TEST(AutomatonTest, Epsilon) {
 	auto a = Automaton<2>::epsilon();
 	EXPECT_TRUE(a->deterministic());
@@ -240,6 +255,44 @@ TEST(AutomatonTest, Alt) {
 	EXPECT_FALSE(alt->run({1, 0, 1}));
 	EXPECT_FALSE(alt->run({1, 1, 0}));
 	EXPECT_FALSE(alt->run({1, 1, 1}));
+}
+
+TEST(AutomatonTest, CatAlt) {
+	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto cat = Automaton<2>::cat({a, a, a});
+	equivalentOnAllStrings<2>(cat, Automaton<2>::nCopies(Automaton<2>::any(), 3), 4, __LINE__);
+	EXPECT_FALSE(cat->isEmpty());
+	EXPECT_FALSE(cat->infinite());
+}
+
+TEST(AutomatonTest, CatAltLitAlt) {
+	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a});
+	EXPECT_FALSE(cat->run({0, 0, 0}));
+	EXPECT_FALSE(cat->run({0, 0, 1}));
+	EXPECT_TRUE(cat->run({0, 1, 0}));
+	EXPECT_TRUE(cat->run({0, 1, 1}));
+	EXPECT_FALSE(cat->run({1, 0, 0}));
+	EXPECT_FALSE(cat->run({1, 0, 1}));
+	EXPECT_TRUE(cat->run({1, 1, 0}));
+	EXPECT_TRUE(cat->run({1, 1, 1}));
+	EXPECT_FALSE(cat->isEmpty());
+	EXPECT_FALSE(cat->infinite());
+}
+
+TEST(AutomatonTest, CatAltLitAltLitAlt) {
+	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a, Automaton<2>::lit(1), a});
+	EXPECT_FALSE(cat->run({0, 0, 0, 1, 0}));
+	EXPECT_FALSE(cat->run({0, 0, 1, 1, 0}));
+	EXPECT_TRUE(cat->run({0, 1, 0, 1, 0}));
+	EXPECT_TRUE(cat->run({0, 1, 1, 1, 0}));
+	EXPECT_FALSE(cat->run({1, 0, 0, 1, 0}));
+	EXPECT_FALSE(cat->run({1, 0, 1, 1, 0}));
+	EXPECT_TRUE(cat->run({1, 1, 0, 1, 0}));
+	EXPECT_TRUE(cat->run({1, 1, 1, 1, 0}));
+	EXPECT_FALSE(cat->isEmpty());
+	EXPECT_FALSE(cat->infinite());
 }
 
 TEST(AutomatonTest, Conj) {
@@ -659,4 +712,45 @@ TEST(AutomatonTest, Minimize) {
 	auto zeroOneStarOneClone = zeroOneStarOne->clone();
 	zeroOneStarOneClone->minimize();
 	equivalentOnAllStrings<2>(zeroOneStarOne, zeroOneStarOneClone, 8, __LINE__);
+}
+
+TEST(AutomatonTest, CatAltMinimize) {
+	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto cat = Automaton<2>::cat({a, a, a});
+	auto catClone = cat->clone();
+	catClone->minimize();
+	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+}
+
+TEST(AutomatonTest, CatAltLitAltMinimize) {
+	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a});
+	auto catClone = cat->clone();
+	catClone->minimize();
+	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+}
+
+TEST(AutomatonTest, CatAltLitAltLitAltMinimize) {
+	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a, Automaton<2>::lit(1), a});
+	auto catClone = cat->clone();
+	catClone->minimize();
+	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+}
+
+TEST(AutomatonTest, CatAltLitAltRemoveDeadStates) {
+	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
+	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a});
+	auto catClone = cat->clone();
+	catClone->removeDeadStates();
+	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+}
+
+TEST(AutomatonTest, CatAltMinimizeTrinary) {
+	auto a = Automaton<3>::alt({Automaton<3>::lit(0), Automaton<3>::lit(1)});
+	auto b = Automaton<3>::any();
+	auto cat = Automaton<3>::cat({a, b, a});
+	auto catClone = cat->clone();
+	catClone->minimize();
+	equivalentOnAllStrings<3>(cat, catClone, 8, __LINE__);
 }
