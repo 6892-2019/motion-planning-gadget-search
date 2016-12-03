@@ -185,7 +185,6 @@ public:
 	template<class Callable>
 	void enumerate(Callable callback) const {
 		auto automaton = impl::interpret<Alphabet::size>(pimpl_);
-		std::cout << "beginning enumeration" << std::endl;
 		automaton->enumerate<Alphabet>(callback);
 	}
 
