@@ -826,15 +826,32 @@ private:
 	 * @return the set of live states
 	 */
 	dense_hash_set<state_type> liveStates() const {
+		//This set will be used as the visited set for the forward search, then
+		//reused as the live set for the backward search.
+		dense_hash_set<state_type> live(static_cast<state_type>(size()));
+		live.set_empty_key(static_cast<state_type>(size()));
+
 		//TODO: there's not yet a good way to use std::sort on separate vectors
 		//See http://stackoverflow.com/q/13840998/3614835.
 		std::vector<std::pair<state_type, state_type>> inverseEdgelist;
 		//Exact sizing (counting transitions) is probably not worth it, but we
 		//know there's at least this much.
 		inverseEdgelist.reserve(size());
-		for (state_type s = 0; s < size(); ++s)
-			for (const Transition& t : transitions_[s])
-				inverseEdgelist.push_back({t.next_, s});
+
+		std::stack<state_type> nexts;
+		nexts.push(0);
+		live.insert(0);
+		while (!nexts.empty()) {
+			state_type n = nexts.top();
+			nexts.pop();
+			for (const Transition& t : transitions_[n])
+				inverseEdgelist.push_back({t.next_, n});
+			for (state_type next : destinations(n))
+				if (live.insert(next).second)
+					nexts.push(next);
+		}
+
+		//At this point, inverseEdgelist is complete for all reachable states.
 		std::sort(inverseEdgelist.begin(), inverseEdgelist.end());
 		std::vector<state_type> inverse;
 		inverse.reserve(inverseEdgelist.size());
@@ -856,16 +873,27 @@ private:
 			return boost::make_iterator_range(inverseIdx[s], inverseIdx[s+1]);
 		};
 
-		//This assumes the automaton is connected.  If we ever support removing
-		//transitions, we could set a flag that triggers a connectivity check.
-		dense_hash_set<state_type> live(static_cast<state_type>(size()));
-		live.set_empty_key(static_cast<state_type>(size()));
-		std::stack<state_type> nexts;
+		//We want to initialize the live set to the reachable accept states, but
+		//we can't clear it until we've decided which accept states are reachable.
+		//We'll iterate once noting any unreachable accept states, then make
+		//another pass to initialize the live set.  (It's tempting to just clear
+		//the accept flag for those states, but liveStates() is const.)
+		dense_hash_set<state_type> unreachableAccepts;
+		unreachableAccepts.set_empty_key(static_cast<state_type>(size()));
+		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s)) {
+			state_type state = static_cast<state_type>(s);
+			if (!live.count(state))
+				unreachableAccepts.insert(state);
+		}
+		live.clear_no_resize();
+		assert(nexts.empty());
 		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s)) {
 			assert(s < size());
 			state_type state = static_cast<state_type>(s);
-			live.insert(state);
-			nexts.push(state);
+			if (!unreachableAccepts.count(state)) {
+				live.insert(state);
+				nexts.push(state);
+			}
 		}
 		while (!nexts.empty()) {
 			state_type n = nexts.top();
