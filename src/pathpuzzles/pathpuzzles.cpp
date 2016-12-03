@@ -235,12 +235,12 @@ int main(int argc, char* argv[]) {
 					std::cout << static_cast<unsigned int>(vec[r * width + c]);
 				std::cout << '\n';
 			}
-			std::cout << paths.size() << '\n';
+			for (const auto& path : paths) {
+				for (Coord c : path)
+					std::cout << '(' << c.first << "," << c.second << "), ";
+				std::cout << '\n';
+			}
 			std::cout << '\n';
 		}
 	});
-	std::cout << count << " solutions" << std::endl;
-//	vector<vector<uint8_t>> solutions;
-//	overall.enumerate([&](const vector<uint8_t>& vec){solutions.push_back(vec);});
-//	std::cout << solutions.size() << " solutions" << std::endl;
 }
