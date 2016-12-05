@@ -10,6 +10,15 @@
 
 #include "precompiled.hpp"
 
+//TODO: use [[maybe_unused]] when supported
+#define MAYBE_UNUSED __attribute__((unused))
+
+//uncomment the line below to enable debugging logging expressions
+//#define AUTOMATON_DEBUG(expr) do {expr;} while(0);
+#ifndef AUTOMATON_DEBUG
+#define AUTOMATON_DEBUG(expr) do {} while(0);
+#endif
+
 namespace automaton {
 namespace impl {
 
@@ -280,18 +289,18 @@ public:
 		try {
 			a = conj_impl<DenseConjMap>(left, right);
 		} catch (std::bad_alloc&) {
-			std::cout << "caught bad_alloc: conj_impl<DenseConjMap>" << std::endl;
+			AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<DenseConjMap>" << std::endl);
 		}
 		if (!a)
 			try {
 				a = conj_impl<UnorderedConjMap>(left, right);
 			} catch (std::bad_alloc&) {
-				std::cout << "caught bad_alloc: conj_impl<UnorderedConjMap>" << std::endl;
+				AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<UnorderedConjMap>" << std::endl);
 			}
 		if (!a)
 			//No try-catch here because there's no further recovery
 			a = conj_impl<SparseConjMap>(left, right);
-		std::cout << "intersection: " << left->size() << ", " << right->size() << " -> " << a->size() << std::endl;
+		AUTOMATON_DEBUG(std::cout << "intersection: " << left->size() << ", " << right->size() << " -> " << a->size() << std::endl);
 		a->removeDeadStates();
 		return a;
 	}
@@ -512,8 +521,10 @@ public:
 			}
 		}
 
+		MAYBE_UNUSED std::size_t oldsize = size();
 		*this = std::move(*a);
 		assert(deterministic());
+		AUTOMATON_DEBUG(std::cout << "determinize: " << oldsize << " -> " << size() << std::endl);
 	}
 
 	/**
@@ -548,7 +559,7 @@ public:
 		}
 		//If any states are live, the initial state must be one of them.
 		assert(live.count(0) == 1);
-		std::size_t oldsize = size();
+		MAYBE_UNUSED std::size_t oldsize = size();
 		//maps old state numbers to new state numbers
 		natural_map<state_type, state_type> renumber(static_cast<state_type>(size()));
 		boost::dynamic_bitset<std::size_t> newnumbers(live.size());
@@ -586,7 +597,7 @@ public:
 		transitions_.resize(live.size());
 		accept_.resize(live.size());
 		//TODO: shrink_to_fit?
-		std::cout << "removeDeadStates: " << oldsize << " -> " << size() << std::endl;
+		AUTOMATON_DEBUG(std::cout << "removeDeadStates: " << oldsize << " -> " << size() << std::endl);
 	}
 
 	void minimize() {
@@ -597,9 +608,9 @@ public:
 		//removeDeadStates).  That isn't required; our Hopcroft implementation
 		//understands states are not equivalent if one crashes and the other
 		//doesn't.
-		std::size_t oldsize = size();
+		MAYBE_UNUSED std::size_t oldsize = size();
 		HopcroftMinimizer(*this).minimize();
-		std::cout << "minimize: " << oldsize << " -> " << size() << std::endl;
+		AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << size() << std::endl);
 		removeDeadStates();
 	}
 
