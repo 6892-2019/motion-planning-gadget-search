@@ -72,8 +72,7 @@ void findPathsRecurse(const CoordSet& vertices, Coord target, vector<Coord>& pat
 			findPathsRecurse(vertices, target, path, pathSet, results);
 			assert(path.back() == n);
 			path.pop_back();
-			//TODO: [[maybe_unused]]
-			bool erased = pathSet.erase(n);
+			MAYBE_UNUSED bool erased = pathSet.erase(n);
 			assert(erased);
 		}
 	}

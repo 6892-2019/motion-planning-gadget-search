@@ -10,9 +10,6 @@
 
 #include "precompiled.hpp"
 
-//TODO: use [[maybe_unused]] when supported
-#define MAYBE_UNUSED __attribute__((unused))
-
 //uncomment the line below to enable debugging logging expressions
 //#define AUTOMATON_DEBUG(expr) do {expr;} while(0);
 #ifndef AUTOMATON_DEBUG

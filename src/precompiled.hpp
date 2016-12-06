@@ -43,3 +43,6 @@
 
 #include <exception>
 #include <cassert>
+
+//TODO: use [[maybe_unused]] when supported
+#define MAYBE_UNUSED __attribute__((unused))
