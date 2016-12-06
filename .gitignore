@@ -14,3 +14,6 @@ debug.ninja
 sanitize.ninja
 fastdebug.ninja
 release.ninja
+
+# managed in a separate repo
+/data/
