@@ -7,10 +7,15 @@
 using R = automaton::Regex<BooleanAlphabet>;
 
 /**
- * Counts solutions to a row.
- * @return the number of solutions to a row with the given clues and width
+ * Counts solutions to a row.  As part of that computation, also computes the
+ * number of "floating 0s" that can appear between any of the clues in that row.
+ * If there are variable-length clues in the row, the returned number of
+ * floating 0s is a maximum (some may instead be part of the variable-length
+ * clues).
+ * @return the number of solutions to a row with the given clues and width, and
+ * the maximum number of floating 0s in the row
  */
-static std::size_t countSolutions(const std::vector<Puzzle::Clue>& row, std::size_t width) {
+static std::pair<std::size_t, std::size_t> countSolutions(const std::vector<Puzzle::Clue>& row, std::size_t width) {
 	//TODO: empty rows?
 	std::size_t spaces = width, bins = static_cast<unsigned int>(row.size() + 1);
 	for (decltype(row.size()) i = 0; i < row.size(); ++i) {
@@ -36,7 +41,7 @@ static std::size_t countSolutions(const std::vector<Puzzle::Clue>& row, std::siz
 	for (std::size_t x = bins - 1; x > 0; --x)
 		denominator *= x;
 	std::size_t ways = numerator/denominator;
-	return ways;
+	return {ways, spaces};
 }
 
 int main(int argc, char* argv[]) {
@@ -44,13 +49,13 @@ int main(int argc, char* argv[]) {
 	std::cout << puzzle->name() << std::endl;
 
 	R zero = R::lit(false), one = R::lit(true), any = R::any();
-	R zeroStar = R::star(zero), zeroPlus = R::plus(zero);
 	R rowWidth = R::repeat(any, static_cast<int>(puzzle->cols().size()));
 	R sizeConstraint = R::repeat(any, static_cast<int>(puzzle->rows().size() * puzzle->cols().size()));
 
 	struct Constraint {
 		R regex;
 		std::size_t solutions;
+		std::size_t floatingZeroes;
 		bool isCol;
 	};
 	std::vector<Constraint> puzzleConstraints;
@@ -59,10 +64,15 @@ int main(int argc, char* argv[]) {
 	//somehow treating them separately is faster.
 	for (decltype(puzzle->cols().size()) r = 0; r < puzzle->rows().size(); ++r) {
 		const std::vector<Puzzle::Clue>& row = puzzle->rows()[r];
+		std::size_t solutions, floatingZeroes;
+		std::tie(solutions, floatingZeroes) = countSolutions(row, puzzle->cols().size());
 		R prefix = R::repeat(any, static_cast<int>(r * puzzle->cols().size())), suffix = R::repeat(any, static_cast<int>((puzzle->rows().size() - 1 - r) * puzzle->cols().size()));
+		R paddingZero = R::range(R::lit(0), 0, static_cast<int>(floatingZeroes));
+		R separatorZero = R::range(R::lit(0), 1, static_cast<int>(floatingZeroes + 1));
+
 		std::vector<R> clueConstraints;
 		clueConstraints.reserve(2 * row.size() + 1);
-		clueConstraints.push_back(zeroStar);
+		clueConstraints.push_back(paddingZero);
 		for (decltype(row.size()) i = 0; i < row.size(); ++i) {
 			const Puzzle::Clue& clue = row[i];
 			if (clue.length)
@@ -71,28 +81,32 @@ int main(int argc, char* argv[]) {
 				clueConstraints.push_back(R::plus(R::lit(clue.color ? true : false)));
 			if ((i+1) < row.size())
 				if (clue.color == row[i+1].color)
-					clueConstraints.push_back(zeroPlus);
+					clueConstraints.push_back(separatorZero);
 				else
-					clueConstraints.push_back(zeroStar);
+					clueConstraints.push_back(paddingZero);
 		}
-		clueConstraints.push_back(zeroStar);
+		clueConstraints.push_back(paddingZero);
 		R thisRow = R::conj({rowWidth, R::cat(clueConstraints)});
 		clueConstraints.clear();
 		clueConstraints.push_back(prefix);
 		clueConstraints.push_back(thisRow);
 		clueConstraints.push_back(suffix);
 		puzzleConstraints.push_back(Constraint{R::cat(clueConstraints),
-				countSolutions(row, puzzle->cols().size()), false});
+				solutions, floatingZeroes, false});
 	}
 
 	for (decltype(puzzle->cols().size()) c = 0; c < puzzle->cols().size(); ++c) {
 		const std::vector<Puzzle::Clue>& col = puzzle->cols()[c];
+		std::size_t solutions, floatingZeroes;
+		std::tie(solutions, floatingZeroes) = countSolutions(col, puzzle->rows().size());
 		//prefix and suffix consume the parts of the row not in this column
 		R prefix = R::repeat(any, static_cast<int>(c)), suffix = R::repeat(any, static_cast<int>(puzzle->cols().size() - 1 - c));
-		R colZero = R::cat({prefix, zero, suffix}), colZeroStar = R::star(colZero), colZeroPlus = R::plus(colZero);
+		R colZero = R::cat({prefix, zero, suffix});
+		R paddingZero = R::range(colZero, 0, static_cast<int>(floatingZeroes));
+		R separatorZero = R::range(colZero, 1, static_cast<int>(floatingZeroes + 1));
 		std::vector<R> clueConstraints;
 		clueConstraints.reserve(2 * col.size() + 1);
-		clueConstraints.push_back(colZeroStar);
+		clueConstraints.push_back(paddingZero);
 		for (decltype(col.size()) i = 0; i < col.size(); ++i) {
 			const Puzzle::Clue& clue = col[i];
 			if (clue.length)
@@ -101,13 +115,13 @@ int main(int argc, char* argv[]) {
 				clueConstraints.push_back(R::plus(R::cat({prefix, R::lit(clue.color ? true : false), suffix})));
 			if ((i+1) < col.size())
 				if (clue.color == col[i+1].color)
-					clueConstraints.push_back(colZeroPlus);
+					clueConstraints.push_back(separatorZero);
 				else
-					clueConstraints.push_back(colZeroStar);
+					clueConstraints.push_back(paddingZero);
 		}
-		clueConstraints.push_back(colZeroStar);
+		clueConstraints.push_back(paddingZero);
 		puzzleConstraints.push_back(Constraint{R::conj({R::cat(clueConstraints), sizeConstraint}),
-				countSolutions(col, puzzle->rows().size()), true});
+				solutions, floatingZeroes, true});
 	}
 
 	std::stable_sort(puzzleConstraints.begin(), puzzleConstraints.end(), [](const Constraint& l, const Constraint& r) {
