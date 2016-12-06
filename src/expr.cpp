@@ -81,6 +81,9 @@ auto Expr::conj(container&& regexes) -> ptr {
 	if (regexes.size() == 1)
 		return regexes.front();
 	//TODO in fold: remove all-strings choices
+	//If one arg is any(){n}, and the other arg has known fixed length n, we can
+	//just return that arg.  (This is an important case for nonogram, though we
+	//could just handle it in the frontend there.)
 //	container folder;
 //	folder.reserve(regexes.size());
 //	for (ptr& p : regexes)
@@ -124,6 +127,10 @@ auto Expr::repeat(ptr regex, int min, int max) -> ptr {
 auto Expr::comp(ptr regex) -> ptr {
 	if (auto q = boost::dynamic_pointer_cast<Complement>(regex))
 		return q->child();
+	//comp(all()) -> empty()
+	//comp(empty()) -> all()
+	//comp(epsilon()) -> plus(any())
+	//comp(plus(any())) -> epsilon()
 	return new Complement(std::move(regex));
 }
 
