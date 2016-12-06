@@ -95,6 +95,29 @@ auto Expr::repeat(ptr regex, int min, int max) -> ptr {
 		return epsilon();
 	if (min == 1 && max == 1)
 		return regex;
+	if (auto q = boost::dynamic_pointer_cast<AllStringsLanguage>(regex))
+		return all();
+	if (auto q = boost::dynamic_pointer_cast<Epsilon>(regex))
+		return epsilon();
+	if (min == 0 && max == unlimited) {
+		//star(any()) -> all()
+		if (auto q = boost::dynamic_pointer_cast<Any>(regex))
+			return all();
+		if (auto q = boost::dynamic_pointer_cast<Repetition>(regex)) {
+			//star(star(p)) -> star(p)
+			if (q->isStar())
+				return q;
+			//star(plus(p)) -> star(p)
+			//star(maybe(p)) -> star(p)
+			//star(p{0,n}) -> star(p)
+			if (q->min() == 0)
+				return new Repetition(q->child(), 0, unlimited);
+		}
+	}
+	if (min == max) {
+		if (auto q = boost::dynamic_pointer_cast<Repetition>(regex))
+			return new Repetition(q->child(), min * q->min(), max * q->max());
+	}
 	//TODO: more folds
 	return new Repetition(std::move(regex), min, max);
 }
