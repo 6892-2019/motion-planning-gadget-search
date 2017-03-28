@@ -17,7 +17,6 @@
 #endif
 
 namespace automaton {
-namespace impl {
 
 template<unsigned int AlphabetSize>
 class Automaton {
@@ -1328,7 +1327,6 @@ private:
 	}
 };
 
-} //namespace impl
 } //namespace automaton
 
 #endif /* AUTOMATON_HPP */

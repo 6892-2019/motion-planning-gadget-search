@@ -6,7 +6,7 @@
 
 using automaton::impl::Expr;
 using automaton::impl::interpret;
-using automaton::impl::Automaton;
+using automaton::Automaton;
 
 TEST(ExprTest, PathPuzzleColConstraint) {
 	//((.{3}*(1|2).{2}.{3}*(1|2).{2}.{3}*)&.{9})
