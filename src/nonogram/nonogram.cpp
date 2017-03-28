@@ -54,6 +54,7 @@ int main(int argc, char* argv[]) {
 
 	struct Constraint {
 		R regex;
+		std::size_t clues;
 		std::size_t solutions;
 		std::size_t floatingZeroes;
 		bool isCol;
@@ -92,7 +93,7 @@ int main(int argc, char* argv[]) {
 		clueConstraints.push_back(thisRow);
 		clueConstraints.push_back(suffix);
 		puzzleConstraints.push_back(Constraint{R::cat(clueConstraints),
-				solutions, floatingZeroes, false});
+				row.size(), solutions, floatingZeroes, false});
 	}
 
 	for (decltype(puzzle->cols().size()) c = 0; c < puzzle->cols().size(); ++c) {
@@ -121,16 +122,21 @@ int main(int argc, char* argv[]) {
 		}
 		clueConstraints.push_back(paddingZero);
 		puzzleConstraints.push_back(Constraint{R::conj({R::cat(clueConstraints), sizeConstraint}),
-				solutions, floatingZeroes, true});
+				col.size(), solutions, floatingZeroes, true});
 	}
 
-	std::stable_sort(puzzleConstraints.begin(), puzzleConstraints.end(), [](const Constraint& l, const Constraint& r) {
-		return std::tie(l.isCol, l.solutions) < std::tie(r.isCol, r.solutions);
-	});
+//	std::stable_sort(puzzleConstraints.begin(), puzzleConstraints.end(), [](const Constraint& l, const Constraint& r) {
+////		return std::tie(l.isCol, l.clues, l.solutions) < std::tie(r.isCol, r.clues, r.solutions);
+//		std::size_t ls = std::numeric_limits<std::size_t>::max() - l.clues;
+//		std::size_t rs = std::numeric_limits<std::size_t>::max() - r.clues;
+//		return std::tie(l.isCol, ls, l.solutions) < std::tie(r.isCol, rs, r.solutions);
+//	});
 
 	std::vector<R> regexes;
-	for (const Constraint& c : puzzleConstraints)
+	for (const Constraint& c : puzzleConstraints) {
+		std::cout << c.clues << " " << c.floatingZeroes << " " << c.solutions << " " << c.regex << std::endl;
 		regexes.push_back(c.regex);
+	}
 	R puzzleConstraint = R::conj(regexes);
 	std::vector<std::vector<bool>> solutions;
 	try {
