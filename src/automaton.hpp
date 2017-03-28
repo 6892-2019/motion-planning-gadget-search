@@ -19,10 +19,6 @@
 namespace automaton {
 namespace impl {
 
-using boost::container::small_vector;
-using google::dense_hash_map;
-using google::dense_hash_set;
-
 template<unsigned int AlphabetSize>
 class Automaton {
 public:
@@ -35,6 +31,15 @@ private:
 	//hard to know what size to use before building the automaton.  We'd only
 	//save on automata that are already small, so it's not really worth it.
 	using state_type = unsigned int;
+
+	//because just "using foo;" is illegal in class scopes, and we don't want to
+	//pollute the namespace
+	template<typename T, std::size_t N>
+	using small_vector = boost::container::small_vector<T, N>;
+	template<typename K, typename V, typename Hash = std::hash<K>>
+	using dense_hash_map = google::dense_hash_map<K, V, Hash>;
+	template<typename T>
+	using dense_hash_set = google::dense_hash_set<T>;
 public:
 
 	/**
