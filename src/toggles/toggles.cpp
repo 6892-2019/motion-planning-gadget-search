@@ -4,9 +4,11 @@
 using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
 using automaton_ptr = typename automaton_type::ptr;
+using automaton_const_ptr = typename automaton_type::const_ptr;
 
-class Gadget {
-public:
+struct Gadget {
+	Gadget() = default;
+	Gadget(automaton_const_ptr a, unsigned int locations) : a_(a), locations_(locations) {}
 
 	bool operator==(const Gadget& other) const {
 		return *a_ == *other.a_;
@@ -22,9 +24,9 @@ public:
 		std::size_t ls = left.a_->size(), rs = right.a_->size();
 		return std::tie(left.locations_, ls) > std::tie(right.locations_, rs);
 	}
-private:
+
 	//TODO: const_ptr?  we shouldn't need to ever modify it
-	automaton_ptr a_;
+	automaton_const_ptr a_;
 	unsigned int locations_;
 
 	friend class std::hash<Gadget>;
@@ -136,6 +138,44 @@ private:
 constexpr Registry::index_type Registry::ABSENT;
 
 static Registry registry(9001);
+
+template<typename OutputIterator>
+OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIterator out) {
+	const Gadget& left = registry.at(l), &right = registry.at(r);
+	if (left.locations_ + right.locations_ > automaton_type::alphabet_size)
+		std::cout << "Skipping due to size\n";
+
+	for (location_type ll = 0; ll < left.locations_; ++ll)
+		for (location_type rl = 0; rl < right.locations_; ++rl) {
+			automaton_ptr combined = left.a_->clone();
+			automaton_type::state_type oldsize = combined->size();
+			combined->slideAlphabet(0, combined->size(), ll, right.locations_);
+			combined->append(right.a_);
+			combined->slideAlphabet(oldsize, combined->size(), 0, ll);
+			combined->rotateAlphabet(oldsize, combined->size(), ll, right.locations_, rl);
+
+			for (automaton_type::state_type i = 0; i < oldsize; ++i)
+				if (combined->accepts(i))
+					for (automaton_type::state_type j = 0; j < oldsize; ++j)
+						if (combined->accepts(j))
+							combined->addEpsilon(i, j);
+
+			combined->minimize();
+			//TODO: canonicalize with nauty
+			*out++ = std::make_pair(Gadget(combined, left.locations_ + right.locations_),
+					Provenance(l, ll, r, rl));
+		}
+
+	return out;
+}
+
+void mainloop() {
+	Registry::index_type i = registry.register_next();
+	std::vector<std::pair<Gadget, Provenance>> successors;
+	for (Registry::index_type j = 0; j <= i; ++j)
+		combine(i, j, std::back_inserter(successors));
+//	connect(i, std::back_inserter(successors));
+}
 
 int main(int argc, char* argv[]) {
 	return 0;

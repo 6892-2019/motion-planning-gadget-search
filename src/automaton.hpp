@@ -23,7 +23,7 @@ class Automaton {
 public:
 	using ptr = boost::intrusive_ptr<Automaton>;
 	using const_ptr = boost::intrusive_ptr<const Automaton>;
-private:
+	static constexpr unsigned int alphabet_size = AlphabetSize;
 	using symbol_type = unsigned int; //cf. Literal
 	using symbol_mask_type = automaton::bitset<AlphabetSize>;
 	//We could save space by using a smaller type for small automata, but it's
@@ -31,6 +31,7 @@ private:
 	//save on automata that are already small, so it's not really worth it.
 	using state_type = unsigned int;
 
+private:
 	//because just "using foo;" is illegal in class scopes, and we don't want to
 	//pollute the namespace
 	template<typename T, std::size_t N>
@@ -372,7 +373,7 @@ public:
 	/**
 	 * Returns the number of states in this automaton.
 	 */
-	std::size_t size() const {return transitions_.size();}
+	state_type size() const {return static_cast<state_type>(transitions_.size());}
 	/**
 	 * Returns the number of transitions in this automaton.
 	 */
@@ -616,6 +617,30 @@ public:
 	}
 
 	/**
+	 * Adjust the transitions from each state in the given range by adding
+	 * distance (which may be negative) to each symbol starting with symbolBegin.
+	 */
+	void slideAlphabet(state_type stateBegin, state_type stateEnd,
+			symbol_type symbolBegin, std::make_signed_t<symbol_type> distance) {
+		if (distance == 0) return;
+		for (state_type s = stateBegin; s != stateEnd; ++s)
+			for (Transition& t : transitions_[s])
+				t.symbols_.slide(symbolBegin, distance);
+	}
+
+	/**
+	 * Adjust the transitions from each state in the given range by rotating the
+	 * symbols in the given range right by the given distance.
+	 */
+	void rotateAlphabet(state_type stateBegin, state_type stateEnd,
+			symbol_type symbolBegin, symbol_type symbolEnd, std::make_signed_t<symbol_type> distance) {
+		if (distance == 0) return;
+		for (state_type s = stateBegin; s != stateEnd; ++s)
+			for (Transition& t : transitions_[s])
+				t.symbols_.rotate_range(symbolBegin, symbolEnd, distance);
+	}
+
+	/**
 	 * Enumerates the strings accepted by this automaton.
 	 *
 	 * This function is not const because it may need to determinize the
@@ -698,6 +723,7 @@ private:
 		return next;
 	}
 
+public:
 	/**
 	 * Reserves space in this automaton for the given number of states.
 	 */
@@ -801,6 +827,14 @@ private:
 		if (deterministic_ && !isStateDeterministic(from))
 			deterministic_ = false;
 		return true;
+	}
+
+	/**
+	 * Returns true iff the given state is an accept state.
+	 */
+	bool accepts(state_type state) const {
+		assert(state < size());
+		return accept_[state];
 	}
 
 	/**
@@ -931,6 +965,7 @@ private:
 		return live;
 	}
 
+private:
 	class HopcroftMinimizer final {
 	public:
 		HopcroftMinimizer(Automaton& a) : a_(a), partitions_(a.size()), partitionBounds_(),

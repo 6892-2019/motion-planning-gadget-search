@@ -167,6 +167,54 @@ public:
 		return test_set(pos, false);
 	}
 
+	/**
+	 * Slides all bits towards greater indices by the given distance, starting
+	 * at the given position.  Bits that end up at indices >= N are lost.
+	 */
+	bitset& slide(size_type pos, int distance) {
+		return slide_range(pos, size(), distance);
+	}
+
+	/**
+	 * Slides bits in the given range towards greater indices by the given
+	 * distance, overwriting bits to the right of the range and discarding any
+	 * bits that end up at indices >= N.
+	 */
+	bitset& slide_range(size_type startInclusive, size_type endExclusive, int distance) {
+		storage_type mask = midmask(startInclusive, endExclusive);
+		if (distance >= 0)
+			bits_ = static_cast<storage_type>((bits_ & ~mask) | ((bits_ & mask) << distance));
+		else
+			bits_ = static_cast<storage_type>((bits_ & ~mask) | ((bits_ & mask) >> distance));
+		return *this;
+	}
+
+	/**
+	 * Rotates all bits in the bitset towards greater indices by the given
+	 * distance.
+	 */
+	bitset& rotate(int distance) {
+		return rotate_range(0, size(), distance);
+	}
+
+	/**
+	 * Rotates bits in the given range towards greater indices by the given
+	 * distance.  Bits outside the range are not changed.
+	 */
+	bitset& rotate_range(size_type startInclusive, size_type endExclusive, int distance) {
+		storage_type mask = midmask(startInclusive, endExclusive);
+		storage_type block = bits_ & mask;
+		do_and_comp(mask);
+		size_type split = (endExclusive - startInclusive) - std::abs(distance);
+		storage_type firstmask = midmask(startInclusive, split);
+		storage_type restmask = midmask(split, endExclusive);
+		if (distance >= 0)
+			bits_ = static_cast<storage_type>(bits_ | (((block & firstmask) << distance) & mask) | (((block & restmask) >> distance) & mask));
+		else
+			bits_ = static_cast<storage_type>(bits_ | (((block & firstmask) >> distance) & mask) | (((block & restmask) << distance) & mask));
+		return *this;
+	}
+
 	bitset& operator&=(const bitset& other) {
 //		bits_ &= other.bits_;
 		do_and(other.bits_);
@@ -185,6 +233,14 @@ public:
 	bitset operator~() const {
 		return bitset(*this).flip();
 	}
+	bitset& operator>>=(int distance) {
+		bits_ = static_cast<storage_type>(distance >= 0 ? bits_ >> distance : bits_ << -distance);
+		return *this;
+	}
+	bitset& operator<<=(int distance) {
+		bits_ = static_cast<storage_type>(distance >= 0 ? bits_ << distance : bits_ >> -distance);
+		return *this;
+	}
 private:
 	storage_type bits_;
 
@@ -197,6 +253,9 @@ private:
 	}
 	void do_xor(storage_type x) {
 		bits_ = static_cast<storage_type>(bits_ ^ x);
+	}
+	void do_and_comp(storage_type x) {
+		bits_ = static_cast<storage_type>(bits_ & ~x);
 	}
 
 	static constexpr storage_type posmask(size_type pos) noexcept {
@@ -214,7 +273,7 @@ private:
 		assert(startInclusive < N);
 		assert(endExclusive <= N);
 		assert(startInclusive <= endExclusive);
-		return lowmask(endExclusive) & ~lowmask(startInclusive);
+		return static_cast<storage_type>(lowmask(endExclusive) & ~lowmask(startInclusive));
 	}
 
 	friend std::ostream& operator<<(std::ostream& o, const bitset& b) {
@@ -243,6 +302,20 @@ template<typename storage_type, unsigned int N>
 auto operator^(const bitset<storage_type, N>& left, const bitset<storage_type, N>& right) {
 	bitset<storage_type, N> ret(left);
 	ret ^= right;
+	return ret;
+}
+
+template<typename storage_type, unsigned int N>
+auto operator>>(const bitset<storage_type, N>& left, int distance) {
+	bitset<storage_type, N> ret(left);
+	ret >>= distance;
+	return ret;
+}
+
+template<typename storage_type, unsigned int N>
+auto operator<<(const bitset<storage_type, N>& left, int distance) {
+	bitset<storage_type, N> ret(left);
+	ret <<= distance;
 	return ret;
 }
 
