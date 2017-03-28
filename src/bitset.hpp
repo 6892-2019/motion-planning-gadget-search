@@ -222,6 +222,7 @@ private:
 			o << (b[i] ? '1' : '0');
 		return o;
 	}
+	friend class std::hash<bitset<storage_type, N>>;
 };
 
 template<typename storage_type, unsigned int N>
@@ -251,6 +252,15 @@ template<unsigned int N>
 using bitset = impl::bitset<typename boost::uint_t<N>::least, N>;
 
 } //end namespace automaton
+
+namespace std {
+template<unsigned int N>
+struct hash<automaton::bitset<N>> {
+	size_t operator()(const automaton::bitset<N>& b) const {
+		return b.bits_;
+	}
+};
+}
 
 #endif /* BITSET_HPP */
 
