@@ -754,3 +754,8 @@ TEST(AutomatonTest, CatAltMinimizeTrinary) {
 	catClone->minimize();
 	equivalentOnAllStrings<3>(cat, catClone, 8, __LINE__);
 }
+
+TEST(AutomatonTest, HashSanity) {
+	auto a = Automaton<2>::any();
+	std::hash<Automaton<2>>()(*a);
+}

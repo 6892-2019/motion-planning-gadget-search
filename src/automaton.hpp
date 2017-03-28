@@ -631,6 +631,13 @@ public:
 		enumerateRecurse<Alphabet>(stateStack, symbolString, callback);
 	}
 
+	bool operator==(const Automaton& other) const {
+		return std::tie(accept_, transitions_) == std::tie(other.accept_, other.transitions_);
+	}
+	bool operator!=(const Automaton& other) const {
+		return !(*this == other);
+	}
+
 private:
 	Automaton() : deterministic_(true), refcount_(0) {}
 	//copy everything but the refcount
@@ -649,6 +656,13 @@ private:
 		Transition(state_type next, symbol_mask_type symbols) : next_(next), symbols_(symbols) {}
 		state_type next_;
 		symbol_mask_type symbols_;
+		bool operator==(Transition other) const {
+			return std::tie(next_, symbols_) == std::tie(other.next_, other.symbols_);
+		}
+		bool operator!=(Transition other) const {
+			return !(*this == other);
+		}
+		friend class std::hash<Transition>;
 	};
 
 	/**
@@ -1316,6 +1330,8 @@ private:
 		return o;
 	}
 
+	friend class std::hash<Automaton>;
+
 	//mutable == thread-safe in C++11+
 	mutable std::atomic<unsigned int> refcount_;
 	friend void intrusive_ptr_add_ref(const Automaton* p) noexcept {
@@ -1328,6 +1344,25 @@ private:
 };
 
 } //namespace automaton
+
+namespace std {
+template<unsigned int N>
+struct hash<automaton::Automaton<N>> {
+	size_t operator()(const automaton::Automaton<N>& a) const {
+		size_t h = 13;
+		h = h * 31 + a.size();
+		for (const auto& ts : a.transitions_) {
+			h = h * 31 + ts.size();
+			for (auto t : ts) {
+				h = h * 31 + t.next_;
+				h = h * 31 + std::hash<automaton::bitset<N>>()(t.symbols_);
+			}
+		}
+		//punt on accept_ for now
+		return h;
+	}
+};
+} //namespace std
 
 #endif /* AUTOMATON_HPP */
 
