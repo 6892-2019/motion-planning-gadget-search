@@ -703,6 +703,7 @@ private:
 	 */
 	bool deterministic_;
 
+public:
 	/**
 	 * Returns the possible next states of the automaton when reading the given
 	 * symbol in the given current state.  This may be empty if the machine
@@ -723,7 +724,6 @@ private:
 		return next;
 	}
 
-public:
 	/**
 	 * Reserves space in this automaton for the given number of states.
 	 */

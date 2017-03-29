@@ -142,21 +142,24 @@ static Registry registry(9001);
 template<typename OutputIterator>
 OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIterator out) {
 	const Gadget& left = registry.at(l), &right = registry.at(r);
-	if (left.locations_ + right.locations_ > automaton_type::alphabet_size)
-		std::cout << "Skipping due to size\n";
+	if (left.locations_ + right.locations_ > automaton_type::alphabet_size) {
+		std::cout << "Skipping combine due to size\n";
+		return out;
+	}
 
+	using state_type = automaton_type::state_type;
 	for (location_type ll = 0; ll < left.locations_; ++ll)
 		for (location_type rl = 0; rl < right.locations_; ++rl) {
 			automaton_ptr combined = left.a_->clone();
-			automaton_type::state_type oldsize = combined->size();
+			state_type oldsize = combined->size();
 			combined->slideAlphabet(0, combined->size(), ll, right.locations_);
 			combined->append(right.a_);
 			combined->slideAlphabet(oldsize, combined->size(), 0, ll);
 			combined->rotateAlphabet(oldsize, combined->size(), ll, right.locations_, rl);
 
-			for (automaton_type::state_type i = 0; i < oldsize; ++i)
+			for (state_type i = 0; i < oldsize; ++i)
 				if (combined->accepts(i))
-					for (automaton_type::state_type j = 0; j < oldsize; ++j)
+					for (state_type j = 0; j < oldsize; ++j)
 						if (combined->accepts(j))
 							combined->addEpsilon(i, j);
 
@@ -169,12 +172,50 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 	return out;
 }
 
+template<typename OutputIterator>
+OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
+	const Gadget& g = registry.at(gadgetIndex);
+	if (g.locations_ <= 2) {
+		std::cout << "Skipping connect due to size\n";
+		return out;
+	}
+
+	using state_type = automaton_type::state_type;
+	for (location_type l = 0; l < g.locations_; ++l) {
+		location_type m = static_cast<location_type>((l+1) % g.locations_);
+		automaton_ptr connected = g.a_->clone();
+		//We may need to iterate to a fixpoint to deal with loops?
+		for (state_type s = 0; s < connected->size(); ++s) {
+			if (connected->accepts(s)) continue;
+			auto dests = connected->step(s, l);
+			for (state_type d : dests) {
+				assert(connected->accepts(d));
+				for (state_type e : connected->step(d, m))
+					connected->addEpsilon(s, e);
+			}
+
+			dests = connected->step(s, m);
+			for (state_type d : dests) {
+				assert(connected->accepts(d));
+				for (state_type e : connected->step(d, m))
+					connected->addEpsilon(s, e);
+			}
+		}
+
+		connected->minimize();
+		//TODO: canonicalize
+		*out++ = std::make_pair(Gadget(connected, g.locations_ - 2), Provenance(gadgetIndex, l));
+	}
+	return out;
+}
+
 void mainloop() {
 	Registry::index_type i = registry.register_next();
 	std::vector<std::pair<Gadget, Provenance>> successors;
 	for (Registry::index_type j = 0; j <= i; ++j)
 		combine(i, j, std::back_inserter(successors));
-//	connect(i, std::back_inserter(successors));
+	connect(i, std::back_inserter(successors));
+	//TODO: offer
 }
 
 int main(int argc, char* argv[]) {
