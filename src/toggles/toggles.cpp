@@ -1,5 +1,7 @@
 #include "precompiled.hpp"
 #include "../automaton.hpp"
+#include "../regex.hpp"
+#include "../alphabet.hpp"
 
 #include <nausparse.h>
 
@@ -7,6 +9,8 @@ using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
 using automaton_ptr = typename automaton_type::ptr;
 using automaton_const_ptr = typename automaton_type::const_ptr;
+using alphabet_type = ByteAlphabet<8>;
+using regex_type = automaton::Regex<alphabet_type>;
 
 struct Gadget {
 	Gadget() = default;
@@ -289,16 +293,36 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 	return out;
 }
 
-void mainloop() {
+void mainloop(const automaton_type& target) {
 	Registry::index_type i = registry.register_next();
 	std::vector<std::pair<Gadget, Provenance>> successors;
 	for (Registry::index_type j = 0; j <= i; ++j)
 		combine(i, j, std::back_inserter(successors));
 	connect(i, std::back_inserter(successors));
-	for (std::pair<Gadget, Provenance> p : successors)
+	for (std::pair<Gadget, Provenance> p : successors) {
+		if (*p.first.a_ == target)
+			std::cout << "found! " << p.second.first << " " << p.second.second << std::endl;
 		registry.offer(std::move(p.first), p.second);
+	}
 }
 
 int main(int argc, char* argv[]) {
+	using R = regex_type;
+	automaton_ptr split = R::star(R::alt({R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
+			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
+			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
+	//TODO: provenance for initial gadgets
+	registry.offer(Gadget(std::move(split), 3), Provenance(100000, 0));
+
+	automaton_ptr parallelToggle = R::star(R::cat({R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(3), R::lit(2)})}),
+			R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(2), R::lit(3)})})})).compile();
+	registry.offer(Gadget(std::move(parallelToggle), 4), Provenance(100001, 0));
+
+	automaton_ptr antiparallelToggle = R::star(R::cat({R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(2), R::lit(3)})}),
+			R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(3), R::lit(2)})})})).compile();
+
+	while (true) {
+		mainloop(*antiparallelToggle);
+	}
 	return 0;
 }

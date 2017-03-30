@@ -164,6 +164,10 @@ public:
 		return impl::Expr::comp(regex.pimpl_);
 	}
 
+	typename Automaton<Alphabet::size>::ptr compile() const {
+		return impl::interpret<Alphabet::size>(pimpl_);
+	}
+
 	/**
 	 * Returns true iff this regex represents the empty language.
 	 * @return true iff this regex represents the empty language
