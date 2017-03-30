@@ -637,8 +637,14 @@ public:
 			symbol_type symbolBegin, std::make_signed_t<symbol_type> distance) {
 		if (distance == 0) return;
 		for (state_type s = stateBegin; s != stateEnd; ++s)
-			for (Transition& t : transitions_[s])
-				t.symbols_.slide(symbolBegin, distance);
+			//We could slide the only bit off the right or overwrite the only bit while sliding left.
+			for (auto ti = transitions_[s].begin(); ti != transitions_[s].end();) {
+				ti->symbols_.slide(symbolBegin, distance);
+				if (ti->symbols_.none())
+					ti = transitions_[s].erase(ti);
+				else
+					++ti;
+			}
 	}
 
 	/**
