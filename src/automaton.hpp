@@ -375,11 +375,24 @@ public:
 	 */
 	state_type size() const {return static_cast<state_type>(transitions_.size());}
 	/**
-	 * Returns the number of transitions in this automaton.
+	 * Returns the number of transitions in this automaton.  This makes up part
+	 * of the physical size of this Automaton object.
 	 */
 	std::size_t numTransitions() const {
 		return std::accumulate(transitions_.begin(), transitions_.end(), static_cast<std::size_t>(0),
 				[](std::size_t l, const auto& r) {return l + r.size();});
+	}
+	/**
+	 * Returns the number of edges in this automaton.  An edge is a (source,
+	 * symbol, dest) triple.  This is a logical measure of size not directly
+	 * related to the physical size of this Automaton object.
+	 */
+	std::size_t edges() const {
+		std::size_t answer = 0;
+		for (auto& ts : transitions_)
+			for (auto t : ts)
+				answer += t.symbols_.count();
+		return answer;
 	}
 
 	/**
@@ -638,6 +651,25 @@ public:
 		for (state_type s = stateBegin; s != stateEnd; ++s)
 			for (Transition& t : transitions_[s])
 				t.symbols_.rotate_range(symbolBegin, symbolEnd, distance);
+	}
+
+	/**
+	 * Renumbers states and symbols.  After this method returns, state i is
+	 * numbered states[i] and symbol i is numbered symbols[i].  Both iterators
+	 * must point to permutations of the appropriate size.
+	 */
+	template<class RandomAccessIterator1, class RandomAccessIterator2>
+	void renumber(RandomAccessIterator1 states, RandomAccessIterator2 symbols) {
+		//Renumber transitions_[*].next_ and .symbols_, then swap transitions_.
+		for (auto& ts : transitions_)
+			for (Transition& t : ts) {
+				t.next_ = states[t.next_];
+				symbol_mask_type ns;
+				for (symbol_type a = 0; a < alphabet_size; ++a)
+					ns.set(a, t.symbols_[a]);
+				t.symbols_ = ns;
+			}
+		apply_permutation(transitions_.begin(), transitions_.end(), states);
 	}
 
 	/**

@@ -1,6 +1,8 @@
 #include "precompiled.hpp"
 #include "../automaton.hpp"
 
+#include <nausparse.h>
+
 using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
 using automaton_ptr = typename automaton_type::ptr;
@@ -139,6 +141,84 @@ constexpr Registry::index_type Registry::ABSENT;
 
 static Registry registry(9001);
 
+void canonicalize(automaton_ptr a, unsigned int locations) {
+	sparsegraph sg, canon;
+	SG_INIT(sg);
+	SG_INIT(canon);
+
+	using state_type = automaton_type::state_type;
+	//TODO: these could just be functions
+	std::unordered_map<std::pair<state_type, location_type>, int,
+		boost::hash<std::pair<state_type, location_type>>> towers;
+	std::unordered_map<location_type, int> edgecolors;
+	for (state_type s = 0; s < a->size(); ++s)
+		for (location_type l = 0; l < locations; ++l)
+			towers[{s, l}] = sg.nv++;
+	for (location_type l = 0; l < locations; ++l)
+		edgecolors[l] = sg.nv++;
+	sg.nde = 2 * towers.size() //undirected cycle through each tower
+			+ 2 * edgecolors.size() //undirected cycle through the colors
+			+ 2 * a->size() * edgecolors.size() //undirected edge between each color and each node in its level
+			+ a->edges();
+	SG_ALLOC(sg, sg.nv, sg.nde, "asdf");
+
+	int ei = 0;
+	for (state_type s = 0; s < a->size(); ++s)
+		for (location_type l = 0; l < locations; ++l) {
+			int vi = towers[{s, l}];
+			sg.v[vi] = ei;
+
+			//below/above in the tower
+			sg.e[ei++] = l == 0 ? towers[{s, locations-1}] : towers[{s, l-1}];
+			sg.e[ei++] = l == locations-1 ? towers[{s, 0}] : towers[{s, l+1}];
+
+			sg.e[ei++] = edgecolors[l];
+
+			auto dests = a->step(s, l);
+			assert(dests.size() <= 1 && "should already be deterministic");
+			if (!dests.empty())
+				sg.e[ei++] = towers[{dests.front(), l}];
+
+			sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
+		}
+
+	for (location_type l = 0; l < locations; ++l) {
+		int vi = edgecolors[l];
+		sg.v[vi] = ei;
+		sg.e[ei++] = l == 0 ? edgecolors[static_cast<location_type>(locations-1)] : edgecolors[static_cast<location_type>(l-1)];
+		sg.e[ei++] = l == locations-1 ? edgecolors[0] : edgecolors[static_cast<location_type>(l+1)];
+		for (state_type s = 0; s < a->size(); ++s)
+			sg.e[ei++] = towers[{s, l}];
+		sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
+	}
+
+	dynarray<int> lab(sg.nv), ptn(sg.nv);
+	std::iota(lab.begin(), lab.end(), 0);
+	std::fill(ptn.begin(), ptn.end(), 1); //counter-intuitively, partitions end at 0
+	ptn[towers.size()] = 0;
+	ptn[ptn.size()-1] = 0;
+
+	DEFAULTOPTIONS_SPARSEDIGRAPH(options);
+	options.getcanon = TRUE;
+	options.defaultptn = FALSE;
+	dynarray<int> orbits(sg.nv);
+	sparsenauty(&sg, lab.begin(), ptn.begin(), orbits.begin(), &options, nullptr, &canon);
+	//we don't actually need the graphs at all, just the labeling
+	SG_FREE(canon);
+	SG_FREE(sg);
+
+	dynarray<state_type> stateperm(a->size());
+	std::iota(stateperm.begin(), stateperm.end(), 0);
+	std::sort(stateperm.begin(), stateperm.end(), [&](auto l, auto r){return lab[towers[{l, 0}]] < lab[towers[{r, 0}]];});
+	//state 0 is the initial state, we can't renumber it
+	std::iter_swap(stateperm.begin(), std::find(stateperm.begin(), stateperm.end(), 0));
+	dynarray<location_type> locationperm(locations);
+	std::iota(locationperm.begin(), locationperm.end(), 0);
+	std::sort(locationperm.begin(), locationperm.end(), [&](auto l, auto r){return lab[edgecolors[l]] < lab[edgecolors[r]];});
+	//TODO: assert new location numbering is a cycle
+	a->renumber(stateperm.begin(), locationperm.begin());
+}
+
 template<typename OutputIterator>
 OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIterator out) {
 	const Gadget& left = registry.at(l), &right = registry.at(r);
@@ -164,7 +244,7 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 							combined->addEpsilon(i, j);
 
 			combined->minimize();
-			//TODO: canonicalize with nauty
+			canonicalize(combined, left.locations_ + right.locations_);
 			*out++ = std::make_pair(Gadget(combined, left.locations_ + right.locations_),
 					Provenance(l, ll, r, rl));
 		}
@@ -203,7 +283,7 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 		}
 
 		connected->minimize();
-		//TODO: canonicalize
+		canonicalize(connected, g.locations_ - 2);
 		*out++ = std::make_pair(Gadget(connected, g.locations_ - 2), Provenance(gadgetIndex, l));
 	}
 	return out;
@@ -215,7 +295,8 @@ void mainloop() {
 	for (Registry::index_type j = 0; j <= i; ++j)
 		combine(i, j, std::back_inserter(successors));
 	connect(i, std::back_inserter(successors));
-	//TODO: offer
+	for (std::pair<Gadget, Provenance> p : successors)
+		registry.offer(std::move(p.first), p.second);
 }
 
 int main(int argc, char* argv[]) {
