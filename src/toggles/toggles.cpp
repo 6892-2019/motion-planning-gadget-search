@@ -148,7 +148,11 @@ static Registry registry(9001);
 void canonicalize(automaton_ptr a, unsigned int locations) {
 	sparsegraph sg, canon;
 	SG_INIT(sg);
+	sg.nv = 0;
+	sg.nde = 0;
 	SG_INIT(canon);
+	canon.nv = 0;
+	canon.nde = 0;
 
 	using state_type = automaton_type::state_type;
 	//TODO: these could just be functions
