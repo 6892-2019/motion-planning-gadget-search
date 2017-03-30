@@ -240,7 +240,7 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 			combined->slideAlphabet(0, combined->size(), ll, right.locations_);
 			combined->append(right.a_);
 			combined->slideAlphabet(oldsize, combined->size(), 0, ll);
-			combined->rotateAlphabet(oldsize, combined->size(), ll, right.locations_, rl);
+			combined->rotateAlphabet(oldsize, combined->size(), ll, ll+right.locations_, rl);
 
 			for (state_type i = 0; i < oldsize; ++i)
 				if (combined->accepts(i))
