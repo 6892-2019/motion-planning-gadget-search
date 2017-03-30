@@ -312,16 +312,21 @@ int main(int argc, char* argv[]) {
 	automaton_ptr split = R::star(R::alt({R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
 			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
 			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
+	split->minimize();
+	canonicalize(split, 3);
 	//TODO: provenance for initial gadgets
 	registry.offer(Gadget(std::move(split), 3), Provenance(100000, 0));
 
 	automaton_ptr parallelToggle = R::star(R::cat({R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(3), R::lit(2)})}),
 			R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(2), R::lit(3)})})})).compile();
+	parallelToggle->minimize();
+	canonicalize(parallelToggle, 4);
 	registry.offer(Gadget(std::move(parallelToggle), 4), Provenance(100001, 0));
 
 	automaton_ptr antiparallelToggle = R::star(R::cat({R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(2), R::lit(3)})}),
 			R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(3), R::lit(2)})})})).compile();
-
+	antiparallelToggle->minimize();
+	canonicalize(antiparallelToggle, 4);
 	while (true) {
 		mainloop(*antiparallelToggle);
 	}
