@@ -181,11 +181,12 @@ public:
 	 * bits that end up at indices >= N.
 	 */
 	bitset& slide_range(size_type startInclusive, size_type endExclusive, int distance) {
-		storage_type mask = midmask(startInclusive, endExclusive);
+		storage_type source = midmask(startInclusive, endExclusive);
+		storage_type target = midmask(std::max(startInclusive + distance, 0u), std::min(endExclusive + distance, N));
 		if (distance >= 0)
-			bits_ = static_cast<storage_type>((bits_ & ~mask) | ((bits_ & mask) << distance));
+			bits_ = static_cast<storage_type>((bits_ & ~(source | target)) | ((bits_ & source) << distance));
 		else
-			bits_ = static_cast<storage_type>((bits_ & ~mask) | ((bits_ & mask) >> distance));
+			bits_ = static_cast<storage_type>((bits_ & ~(source | target)) | ((bits_ & source) >> distance));
 		return *this;
 	}
 
