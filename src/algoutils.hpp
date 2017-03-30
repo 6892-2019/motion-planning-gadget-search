@@ -12,6 +12,8 @@
 
 //by Raymond Chen: https://blogs.msdn.microsoft.com/oldnewthing/20170104-00/?p=95115
 //typos corrected, reformatted
+//thinking about it, maybe just "permute" would be a better name, should I
+//actually write a standards paper for this
 template<typename Iter1, typename Iter2>
 void apply_permutation(Iter1 first, Iter1 last, Iter2 indices) {
 	using T = typename std::iterator_traits<Iter1>::value_type;
