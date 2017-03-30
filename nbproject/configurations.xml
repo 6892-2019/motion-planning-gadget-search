@@ -56,9 +56,8 @@
         <rebuildPropChanged>false</rebuildPropChanged>
       </toolsSet>
       <flagsDictionary>
-        <element flagsID="0" commonFlags="-std=c++14"/>
-        <element flagsID="1" commonFlags="-std=c++14 -Og -march=native -pedantic"/>
-        <element flagsID="2" commonFlags="-std=c++14 -march=native -pedantic"/>
+        <element flagsID="0" commonFlags="-std=c++14 -Og -march=native -pedantic"/>
+        <element flagsID="1" commonFlags="-std=c++14 -march=native -pedantic"/>
       </flagsDictionary>
       <codeAssistance>
       </codeAssistance>
@@ -73,7 +72,6 @@
             <incDir>
               <pElem>build/debug/include</pElem>
               <pElem>src</pElem>
-              <pElem>.</pElem>
             </incDir>
           </ccTool>
         </makeTool>
@@ -83,52 +81,109 @@
           <preBuildFirst>true</preBuildFirst>
         </preBuild>
       </makefileType>
+      <folder path="0/nonogram">
+        <ccTool>
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
+        </ccTool>
+      </folder>
+      <folder path="0/pathpuzzles">
+        <ccTool>
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
+        </ccTool>
+      </folder>
+      <folder path="0/toggles">
+        <ccTool>
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
+        </ccTool>
+      </folder>
+      <folder path="2">
+        <ccTool>
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
+        </ccTool>
+      </folder>
+      <item path="src/algoutils.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/alphabet.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="0">
+        <ccTool flags="1">
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
         </ccTool>
       </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="2">
+        <ccTool flags="1">
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
         </ccTool>
       </item>
       <item path="src/ioutils.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="0">
+        <ccTool flags="1">
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
         </ccTool>
       </item>
       <item path="src/main.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
+        <ccTool flags="0">
+          <incDir>
+            <pElem>.</pElem>
+          </incDir>
         </ccTool>
       </item>
       <item path="src/natural_map.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="0">
+        <ccTool flags="1">
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
         </ccTool>
       </item>
       <item path="src/natural_set.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="0">
+        <ccTool flags="1">
+          <incDir>
+            <pElem>../nauty</pElem>
+            <pElem>.</pElem>
+          </incDir>
         </ccTool>
       </item>
       <item path="src/nonogram/nonogram.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="2">
+        <ccTool flags="1">
         </ccTool>
       </item>
       <item path="src/nonogram/puzzle.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="0">
+        <ccTool flags="1">
         </ccTool>
       </item>
       <item path="src/pathpuzzles/pathpuzzles.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="2">
+        <ccTool flags="1">
         </ccTool>
       </item>
       <item path="src/toggles/toggles.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="2">
+        <ccTool flags="1">
         </ccTool>
       </item>
       <item path="test/automaton-test.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="2">
+        <ccTool flags="1">
         </ccTool>
       </item>
       <item path="test/expr-test.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="2">
+        <ccTool flags="1">
         </ccTool>
       </item>
     </conf>
