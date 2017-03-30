@@ -287,6 +287,11 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 			}
 		}
 
+		if (l == g.locations_-1) {
+			connected->slideAlphabet(0, connected->size(), 0, -1);
+			connected->slideAlphabet(0, connected->size(), g.locations_-1, -1);
+		} else
+			connected->slideAlphabet(0, connected->size(), l, -2);
 		connected->minimize();
 		canonicalize(connected, g.locations_ - 2);
 		*out++ = std::make_pair(Gadget(connected, g.locations_ - 2), Provenance(gadgetIndex, l));
