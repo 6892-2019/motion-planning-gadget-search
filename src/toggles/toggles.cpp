@@ -205,8 +205,9 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	DEFAULTOPTIONS_SPARSEDIGRAPH(options);
 	options.getcanon = TRUE;
 	options.defaultptn = FALSE;
+	statsblk stats;
 	dynarray<int> orbits(sg.nv);
-	sparsenauty(&sg, lab.begin(), ptn.begin(), orbits.begin(), &options, nullptr, &canon);
+	sparsenauty(&sg, lab.begin(), ptn.begin(), orbits.begin(), &options, &stats, &canon);
 	//we don't actually need the graphs at all, just the labeling
 	SG_FREE(canon);
 	SG_FREE(sg);
