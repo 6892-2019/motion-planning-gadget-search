@@ -204,7 +204,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	dynarray<int> lab(sg.nv), ptn(sg.nv);
 	std::iota(lab.begin(), lab.end(), 0);
 	std::fill(ptn.begin(), ptn.end(), 1); //counter-intuitively, partitions end at 0
-	ptn[towers.size()] = 0;
+	ptn[towers.size()-1] = 0;
 	ptn[ptn.size()-1] = 0;
 
 	DEFAULTOPTIONS_SPARSEDIGRAPH(options);
