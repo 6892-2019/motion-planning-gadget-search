@@ -156,13 +156,13 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 
 	using state_type = automaton_type::state_type;
 	//TODO: these could just be functions
-	std::unordered_map<std::pair<state_type, location_type>, int,
-		boost::hash<std::pair<state_type, location_type>>> towers;
-	std::unordered_map<location_type, int> edgecolors;
+	std::unordered_map<std::pair<state_type, unsigned int>, int,
+		boost::hash<std::pair<state_type, unsigned int>>> towers;
+	std::unordered_map<unsigned int, int> edgecolors;
 	for (state_type s = 0; s < a->size(); ++s)
-		for (location_type l = 0; l < locations; ++l)
+		for (unsigned int l = 0; l < locations; ++l)
 			towers[{s, l}] = sg.nv++;
-	for (location_type l = 0; l < locations; ++l)
+	for (unsigned int l = 0; l < locations; ++l)
 		edgecolors[l] = sg.nv++;
 	sg.nde = 2 * towers.size() //undirected cycle through each tower
 			+ 2 * edgecolors.size() //undirected cycle through the colors
@@ -172,7 +172,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 
 	int ei = 0;
 	for (state_type s = 0; s < a->size(); ++s)
-		for (location_type l = 0; l < locations; ++l) {
+		for (unsigned int l = 0; l < locations; ++l) {
 			int vi = towers[{s, l}];
 			sg.v[vi] = ei;
 
@@ -190,7 +190,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 			sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 		}
 
-	for (location_type l = 0; l < locations; ++l) {
+	for (unsigned int l = 0; l < locations; ++l) {
 		int vi = edgecolors[l];
 		sg.v[vi] = ei;
 		sg.e[ei++] = l == 0 ? edgecolors[static_cast<location_type>(locations-1)] : edgecolors[static_cast<location_type>(l-1)];
