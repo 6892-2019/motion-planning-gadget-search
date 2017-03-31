@@ -629,35 +629,74 @@ public:
 		removeDeadStates();
 	}
 
-	/**
-	 * Adjust the transitions from each state in the given range by adding
-	 * distance (which may be negative) to each symbol starting with symbolBegin.
-	 */
-	void slideAlphabet(state_type stateBegin, state_type stateEnd,
-			symbol_type symbolBegin, std::make_signed_t<symbol_type> distance) {
-		if (distance == 0) return;
-		for (state_type s = stateBegin; s != stateEnd; ++s)
-			//We could slide the only bit off the right or overwrite the only bit while sliding left.
-			for (auto ti = transitions_[s].begin(); ti != transitions_[s].end();) {
-				ti->symbols_.slide(symbolBegin, distance);
-				if (ti->symbols_.none())
-					ti = transitions_[s].erase(ti);
-				else
-					++ti;
-			}
+private:
+	template<class RandomAccessIterator>
+	static symbol_mask_type renumberAlphabet(symbol_mask_type cur, RandomAccessIterator map) {
+		symbol_mask_type ns;
+		for (symbol_type a = 0; a < alphabet_size; ++a) {
+			symbol_type i = map[a];
+			if (i == std::numeric_limits<symbol_type>::max())
+				ns.reset(a); //no-op, because we initialized to 0 above
+			else if (i == (std::numeric_limits<symbol_type>::max()-1))
+				ns.set(a);
+			else
+				ns.set(a, cur[i]);
+		}
+		return ns;
 	}
 
+public:
 	/**
-	 * Adjust the transitions from each state in the given range by rotating the
-	 * symbols in the given range right by the given distance.
+	 * Renumbers the symbols on transitions out of the states in the given range
+	 * by looking up through the given iterator.  Mapping a symbol to
+	 * std::numeric_limits<symbol_type>::max() stores a constant 0 (no
+	 * transition for that symbol); mapping to max()-1 stores a constant 1
+	 * (transition on that symbol).
 	 */
-	void rotateAlphabet(state_type stateBegin, state_type stateEnd,
-			symbol_type symbolBegin, symbol_type symbolEnd, std::make_signed_t<symbol_type> distance) {
-		if (distance == 0) return;
-		for (state_type s = stateBegin; s != stateEnd; ++s)
+	template<class RandomAccessIterator>
+	void renumberAlphabet(state_type stateBegin, state_type stateEnd, RandomAccessIterator symbols) {
+		for (state_type s = stateBegin; s != stateEnd; ++s) {
 			for (Transition& t : transitions_[s])
-				t.symbols_.rotate_range(symbolBegin, symbolEnd, distance);
+				t.symbols_ = renumberAlphabet(t.symbols_, symbols);
+			//we may have emptied a transition
+			transitions_[s].erase(std::remove_if(transitions_[s].begin(), transitions_[s].end(),
+					[](Transition& t){return t.symbols_.none();}), transitions_[s].end());
+			if (deterministic() && !isStateDeterministic(s))
+				deterministic_ = false;
+		}
 	}
+
+//	/**
+//	 * Adjust the transitions from each state in the given range by adding
+//	 * distance (which may be negative) to each symbol starting with symbolBegin.
+//	 */
+//	void slideAlphabet(state_type stateBegin, state_type stateEnd,
+//			symbol_type symbolBegin, std::make_signed_t<symbol_type> distance) {
+//		if (distance == 0) return;
+//		for (state_type s = stateBegin; s != stateEnd; ++s)
+//			//We could slide the only bit off the right or overwrite the only bit while sliding left.
+//			for (auto ti = transitions_[s].begin(); ti != transitions_[s].end();) {
+//				ti->symbols_.slide(symbolBegin, distance);
+//				if (ti->symbols_.none())
+//					ti = transitions_[s].erase(ti);
+//				else
+//					++ti;
+//			}
+//		//TODO: update determinism flag
+//	}
+//
+//	/**
+//	 * Adjust the transitions from each state in the given range by rotating the
+//	 * symbols in the given range right by the given distance.
+//	 */
+//	void rotateAlphabet(state_type stateBegin, state_type stateEnd,
+//			symbol_type symbolBegin, symbol_type symbolEnd, std::make_signed_t<symbol_type> distance) {
+//		if (distance == 0) return;
+//		for (state_type s = stateBegin; s != stateEnd; ++s)
+//			for (Transition& t : transitions_[s])
+//				t.symbols_.rotate_range(symbolBegin, symbolEnd, distance);
+//		//TODO: update determinism flag
+//	}
 
 	/**
 	 * Renumbers states and symbols.  After this method returns, state i is
@@ -670,10 +709,9 @@ public:
 		for (auto& ts : transitions_)
 			for (Transition& t : ts) {
 				t.next_ = states[t.next_];
-				symbol_mask_type ns;
-				for (symbol_type a = 0; a < alphabet_size; ++a)
-					ns.set(a, t.symbols_[a]);
-				t.symbols_ = ns;
+				t.symbols_ = renumberAlphabet(t.symbols_, symbols);
+				//We're assuming it's actually a permutation, and so not checking
+				//for transitions becoming empty or determinism changing.
 			}
 		apply_permutation(transitions_.begin(), transitions_.end(), states);
 	}

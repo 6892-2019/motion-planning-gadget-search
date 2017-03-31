@@ -221,9 +221,10 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	std::sort(stateperm.begin(), stateperm.end(), [&](auto l, auto r){return lab[towers[{l, 0}]] < lab[towers[{r, 0}]];});
 	//state 0 is the initial state, we can't renumber it
 	std::iter_swap(stateperm.begin(), std::find(stateperm.begin(), stateperm.end(), 0));
-	dynarray<location_type> locationperm(locations);
-	std::iota(locationperm.begin(), locationperm.end(), 0);
-	std::sort(locationperm.begin(), locationperm.end(), [&](auto l, auto r){return lab[edgecolors[l]] < lab[edgecolors[r]];});
+	dynarray<automaton_type::symbol_type> locationperm(automaton_type::alphabet_size);
+	std::iota(locationperm.begin(), locationperm.begin()+locations, 0);
+	std::sort(locationperm.begin(), locationperm.begin()+locations, [&](auto l, auto r){return lab[edgecolors[l]] < lab[edgecolors[r]];});
+	std::fill(locationperm.begin()+locations, locationperm.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 	//TODO: assert new location numbering is a cycle
 	a->renumber(stateperm.begin(), locationperm.begin());
 }
@@ -237,14 +238,22 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 	}
 
 	using state_type = automaton_type::state_type;
-	for (location_type ll = 0; ll < left.locations_; ++ll)
+	std::vector<automaton_type::symbol_type> slide(automaton_type::alphabet_size);
+	std::vector<automaton_type::symbol_type> sliderotate(automaton_type::alphabet_size);
+	for (location_type ll = 0; ll < left.locations_; ++ll) {
+		std::iota(slide.begin(), slide.end(), 0);
+		std::fill(sliderotate.begin(), sliderotate.end(), 0);
+		std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_, 0);
 		for (location_type rl = 0; rl < right.locations_; ++rl) {
 			automaton_ptr combined = left.a_->clone();
 			state_type oldsize = combined->size();
-			combined->slideAlphabet(0, combined->size(), ll, right.locations_);
+			slide.pop_back();
+			slide.insert(slide.begin()+ll, std::numeric_limits<automaton_type::symbol_type>::max());
+			combined->renumberAlphabet(0, combined->size(), slide);
+
 			combined->append(right.a_);
-			combined->slideAlphabet(oldsize, combined->size(), 0, ll);
-			combined->rotateAlphabet(oldsize, combined->size(), ll, ll+right.locations_, rl);
+			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_-1, sliderotate.begin()+ll+right.locations_);
+			combined->renumberAlphabet(oldsize, combined->size(), sliderotate);
 
 			for (state_type i = 0; i < oldsize; ++i)
 				if (combined->accepts(i))
@@ -257,6 +266,7 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 			*out++ = std::make_pair(Gadget(combined, left.locations_ + right.locations_),
 					Provenance(l, ll, r, rl));
 		}
+	}
 
 	return out;
 }
@@ -270,6 +280,7 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 	}
 
 	using state_type = automaton_type::state_type;
+	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size);
 	for (location_type l = 0; l < g.locations_; ++l) {
 		location_type m = static_cast<location_type>((l+1) % g.locations_);
 		automaton_ptr connected = g.a_->clone();
@@ -291,11 +302,14 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 			}
 		}
 
-		if (l == g.locations_-1) {
-			connected->slideAlphabet(0, connected->size(), 0, -1);
-			connected->slideAlphabet(0, connected->size(), g.locations_-1, -1);
-		} else
-			connected->slideAlphabet(0, connected->size(), l, -2);
+		std::iota(alphamap.begin(), alphamap.end(), 0);
+		//remove larger first to avoid off-by-one
+		alphamap.erase(alphamap.begin()+std::max(l, m));
+		alphamap.erase(alphamap.begin()+std::min(l, m));
+		//pad with 0
+		alphamap.push_back(std::numeric_limits<automaton_type::symbol_type>::max());
+		alphamap.push_back(std::numeric_limits<automaton_type::symbol_type>::max());
+		connected->renumberAlphabet(0, connected->size(), alphamap.begin());
 		connected->minimize();
 		canonicalize(connected, g.locations_ - 2);
 		*out++ = std::make_pair(Gadget(connected, g.locations_ - 2), Provenance(gadgetIndex, l));
