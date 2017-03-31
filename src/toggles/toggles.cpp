@@ -199,6 +199,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 			sg.e[ei++] = towers[{s, l}];
 		sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 	}
+	assert(ei == sg.nde && "wrong number of edges");
 
 	dynarray<int> lab(sg.nv), ptn(sg.nv);
 	std::iota(lab.begin(), lab.end(), 0);
