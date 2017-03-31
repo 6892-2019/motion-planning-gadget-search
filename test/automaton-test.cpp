@@ -759,3 +759,26 @@ TEST(AutomatonTest, HashSanity) {
 	auto a = Automaton<2>::any();
 	std::hash<Automaton<2>>()(*a);
 }
+
+template<class A>
+bool eq(const A& left, const A& right) {
+	bool e = left == right;
+	if (e)
+		//ASSERT_EQ can only be used in functions returning void, for whatever reason
+		assert(std::hash<A>()(left) == std::hash<A>()(right));
+	return e;
+}
+template<unsigned int S>
+bool eq(boost::intrusive_ptr<Automaton<S>> left, boost::intrusive_ptr<Automaton<S>> right) {
+	return eq(*left, *right);
+}
+
+TEST(AutomatonTest, EqualitySanity) {
+	ASSERT_TRUE(eq(Automaton<2>::any(), Automaton<2>::any()));
+	ASSERT_TRUE(eq(Automaton<4>::any(), Automaton<4>::any()));
+	ASSERT_TRUE(eq(Automaton<5>::any(), Automaton<5>::any()));
+	ASSERT_TRUE(eq(Automaton<12>::any(), Automaton<12>::any()));
+
+	ASSERT_TRUE(eq(Automaton<2>::lit(0), Automaton<2>::lit(0)));
+	ASSERT_FALSE(eq(Automaton<2>::lit(0), Automaton<2>::lit(1)));
+}
