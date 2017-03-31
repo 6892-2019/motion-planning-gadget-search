@@ -713,6 +713,13 @@ public:
 				//We're assuming it's actually a permutation, and so not checking
 				//for transitions becoming empty or determinism changing.
 			}
+		//apply_permutation destroys the permutation, so we'll copy the bitset
+		//and manually permute.  (The bitset is smaller than the permutation.)
+		boost::dynamic_bitset<std::size_t> accept;
+		accept.reserve(transitions_.size());
+		for (state_type i = 0; i < transitions_.size(); ++i)
+			accept.push_back(accept_.test(states[i]));
+		accept_ = std::move(accept);
 		apply_permutation(transitions_.begin(), transitions_.end(), states);
 	}
 
