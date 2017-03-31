@@ -99,7 +99,7 @@ public:
 	 * registered nor is waiting (already queued).
 	 * @return true iff the graph was queued
 	 */
-	bool offer(Gadget&& g, Provenance p) {
+	bool offer(Gadget g, Provenance p) {
 		std::size_t hash = std::hash<Gadget>()(g);
 		std::size_t probe = hash % closed_.size();
 		while (closed_[probe] != ABSENT) {
@@ -328,9 +328,10 @@ void mainloop(const automaton_type& target) {
 		combine(i, j, std::back_inserter(successors));
 	connect(i, std::back_inserter(successors));
 	for (std::pair<Gadget, Provenance> p : successors) {
-		if (*p.first.a_ == target)
+		bool offered = registry.offer(p.first, p.second);
+		//only check equality if we offered a new graph
+		if (offered && *p.first.a_ == target)
 			std::cout << "found! " << p.second.first << " " << p.second.second << std::endl;
-		registry.offer(std::move(p.first), p.second);
 	}
 }
 
