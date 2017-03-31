@@ -217,9 +217,12 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	SG_FREE(canon);
 	SG_FREE(sg);
 
+	dynarray<state_type> stateinvperm(a->size());
+	std::iota(stateinvperm.begin(), stateinvperm.end(), 0);
+	std::sort(stateinvperm.begin(), stateinvperm.end(), [&](auto l, auto r){return lab[towers[{l, 0}]] < lab[towers[{r, 0}]];});
 	dynarray<state_type> stateperm(a->size());
-	std::iota(stateperm.begin(), stateperm.end(), 0);
-	std::sort(stateperm.begin(), stateperm.end(), [&](auto l, auto r){return lab[towers[{l, 0}]] < lab[towers[{r, 0}]];});
+	for (state_type i = 0; i < stateperm.size(); ++i)
+		stateperm[stateinvperm[i]] = i;
 	//state 0 is the initial state, we can't renumber it
 	std::iter_swap(stateperm.begin(), std::find(stateperm.begin(), stateperm.end(), 0));
 	dynarray<automaton_type::symbol_type> locationperm(automaton_type::alphabet_size);
