@@ -244,19 +244,18 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 	using state_type = automaton_type::state_type;
 	std::vector<automaton_type::symbol_type> slide(automaton_type::alphabet_size);
 	std::vector<automaton_type::symbol_type> sliderotate(automaton_type::alphabet_size);
+	std::fill(slide.begin(), slide.begin()+right.locations_, std::numeric_limits<automaton_type::symbol_type>::max());
+	std::iota(slide.begin()+right.locations_, slide.begin()+right.locations_+left.locations_, 0);
+	std::fill(slide.begin()+right.locations_+left.locations_, slide.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 	for (location_type ll = 0; ll < left.locations_; ++ll) {
-		std::iota(slide.begin(), slide.end(), 0);
-		std::fill(sliderotate.begin(), sliderotate.end(), 0);
+		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 		std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_, 0);
 		for (location_type rl = 0; rl < right.locations_; ++rl) {
 			automaton_ptr combined = left.a_->clone();
 			state_type oldsize = combined->size();
-			slide.pop_back();
-			slide.insert(slide.begin()+ll, std::numeric_limits<automaton_type::symbol_type>::max());
 			combined->renumberAlphabet(0, combined->size(), slide);
 
 			combined->append(right.a_);
-			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_-1, sliderotate.begin()+ll+right.locations_);
 			combined->renumberAlphabet(oldsize, combined->size(), sliderotate);
 
 			for (state_type i = 0; i < oldsize; ++i)
@@ -269,7 +268,10 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 			canonicalize(combined, left.locations_ + right.locations_);
 			*out++ = std::make_pair(Gadget(combined, left.locations_ + right.locations_),
 					Provenance(l, ll, r, rl));
+
+			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_-1, sliderotate.begin()+ll+right.locations_);
 		}
+		std::swap(slide[ll], slide[ll+right.locations_]);
 	}
 
 	return out;
