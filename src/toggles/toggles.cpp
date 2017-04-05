@@ -155,6 +155,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	canon.nde = 0;
 
 	using state_type = automaton_type::state_type;
+	using symbol_type = automaton_type::symbol_type;
 	//TODO: these could just be functions
 	std::unordered_map<std::pair<state_type, unsigned int>, int,
 		boost::hash<std::pair<state_type, unsigned int>>> towers;
@@ -170,33 +171,36 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 			+ a->edges();
 	SG_ALLOC(sg, sg.nv, sg.nde, "asdf");
 
+	auto incr = [&](symbol_type s){return s == locations-1 ? 0 : s+1;};
+	auto decr = [&](symbol_type s){return s == 0 ? locations-1 : s-1;};
+
 	int ei = 0;
 	for (state_type s = 0; s < a->size(); ++s)
 		for (unsigned int l = 0; l < locations; ++l) {
-			int vi = towers[{s, l}];
+			int vi = towers.at({s, l});
 			sg.v[vi] = ei;
 
 			//below/above in the tower
 			sg.e[ei++] = l == 0 ? towers[{s, locations-1}] : towers[{s, l-1}];
 			sg.e[ei++] = l == locations-1 ? towers[{s, 0}] : towers[{s, l+1}];
 
-			sg.e[ei++] = edgecolors[l];
+			sg.e[ei++] = edgecolors.at(l);
 
 			auto dests = a->step(s, l);
 			assert(dests.size() <= 1 && "should already be deterministic");
 			if (!dests.empty())
-				sg.e[ei++] = towers[{dests.front(), l}];
+				sg.e[ei++] = towers.at({dests.front(), l});
 
 			sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 		}
 
 	for (unsigned int l = 0; l < locations; ++l) {
-		int vi = edgecolors[l];
+		int vi = edgecolors.at(l);
 		sg.v[vi] = ei;
-		sg.e[ei++] = l == 0 ? edgecolors[static_cast<location_type>(locations-1)] : edgecolors[static_cast<location_type>(l-1)];
-		sg.e[ei++] = l == locations-1 ? edgecolors[0] : edgecolors[static_cast<location_type>(l+1)];
+		sg.e[ei++] = l == 0 ? edgecolors.at(locations-1) : edgecolors.at(l-1);
+		sg.e[ei++] = l == locations-1 ? edgecolors.at(0) : edgecolors.at(l+1);
 		for (state_type s = 0; s < a->size(); ++s)
-			sg.e[ei++] = towers[{s, l}];
+			sg.e[ei++] = towers.at({s, l});
 		sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 	}
 	assert(ei == sg.nde && "wrong number of edges");
@@ -219,17 +223,23 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 
 	dynarray<state_type> stateinvperm(a->size());
 	std::iota(stateinvperm.begin(), stateinvperm.end(), 0);
-	std::sort(stateinvperm.begin(), stateinvperm.end(), [&](auto l, auto r){return lab[towers[{l, 0}]] < lab[towers[{r, 0}]];});
+	std::sort(stateinvperm.begin(), stateinvperm.end(), [&](auto l, auto r){return lab[towers.at({l, 0})] < lab[towers.at({r, 0})];});
 	dynarray<state_type> stateperm(a->size());
 	for (state_type i = 0; i < stateperm.size(); ++i)
 		stateperm[stateinvperm[i]] = i;
 	//state 0 is the initial state, we can't renumber it
 	std::iter_swap(stateperm.begin(), std::find(stateperm.begin(), stateperm.end(), 0));
+
+	//Locations are intrinsically ordered; we use the labeling to select a
+	//start point and a direction, then we walk the cycle ourselves.
+	symbol_type minloc = *std::min_element(boost::counting_iterator<symbol_type>(0),
+		boost::counting_iterator<symbol_type>(locations),
+		[&](auto l, auto r){return lab[edgecolors.at(l)] < lab[edgecolors.at(r)];});
 	dynarray<automaton_type::symbol_type> locationperm(automaton_type::alphabet_size);
-	std::iota(locationperm.begin(), locationperm.begin()+locations, 0);
-	std::sort(locationperm.begin(), locationperm.begin()+locations, [&](auto l, auto r){return lab[edgecolors[l]] < lab[edgecolors[r]];});
+	bool cycleDown = lab[edgecolors.at(decr(minloc))] < lab[edgecolors.at(incr(minloc))];
+	for (unsigned int i = 0; i < locations; ++i, minloc = cycleDown ? decr(minloc) : incr(minloc))
+		locationperm[i] = minloc;
 	std::fill(locationperm.begin()+locations, locationperm.end(), std::numeric_limits<automaton_type::symbol_type>::max());
-	//TODO: assert new location numbering is a cycle
 	a->renumber(stateperm.begin(), locationperm.begin());
 }
 
