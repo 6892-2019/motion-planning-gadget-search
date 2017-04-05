@@ -35,5 +35,12 @@ void apply_permutation(Iter1 first, Iter1 last, Iter2 indices) {
 	}
 }
 
+template<typename T, typename Compare = std::less<T>>
+int sgncmp(const T& left, const T& right, Compare comp = Compare()) {
+	if (comp(left, right)) return -1;
+	if (comp(right, left)) return 1;
+	return 0;
+}
+
 #endif /* ALGOUTILS_HPP */
 
