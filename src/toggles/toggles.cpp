@@ -295,7 +295,7 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 			dests = connected->step(s, m);
 			for (state_type d : dests) {
 				assert(connected->accepts(d));
-				for (state_type e : connected->step(d, m))
+				for (state_type e : connected->step(d, l))
 					connected->addEpsilon(s, e);
 			}
 		}
