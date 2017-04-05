@@ -307,6 +307,103 @@ public:
 		return a;
 	}
 
+private:
+	class DenseShuffleAcceptMap {
+	public:
+		using key_type = std::tuple<state_type, state_type, bool>;
+		DenseShuffleAcceptMap(std::size_t leftSize, std::size_t rightSize) : map_() {
+			//silent narrowing conversion: http://stackoverflow.com/q/37928951/3614835
+			map_.set_empty_key({leftSize, rightSize, false});
+		}
+		void insert(key_type oldstates, state_type newstate) {
+			map_.insert({oldstates, newstate});
+		}
+		template<class Callable>
+		std::pair<state_type, bool> compute_if_absent(key_type oldstates, Callable newstateProvider) {
+			//dense_hashtable::find_or_insert is so close to what we want :(
+			auto it = map_.find(oldstates);
+			if (it != map_.end())
+				return {it->second, false};
+			auto r = map_.insert({oldstates, newstateProvider()});
+			return {r.first->second, true};
+		}
+	private:
+		dense_hash_map<key_type, state_type, boost::hash<key_type>> map_;
+	};
+
+public:
+	/**
+	 * Computes the accepting shuffle of the given automata.  The accepting
+	 * shuffle is the language accepted by running both automata in parallel,
+	 * passing each character to one or the other automaton, switching the
+	 * active automaton only when both automata are in accepting states.
+	 */
+	static ptr shuffleAccept(const_ptr left, const_ptr right) {
+		//(left state, right state, new state, left automation active)
+		using state_quad = std::tuple<state_type, state_type, state_type, bool>;
+		std::stack<state_quad> worklist;
+		DenseShuffleAcceptMap newstates(left->size(), right->size());
+
+		ptr a = new Automaton;
+		//TODO: are we sure?
+		a->deterministic_ = left->deterministic() && right->deterministic();
+		//We have a free choise to begin with the left or with the right
+		//automaton, so we have two "initial" states and call addEpsilon later.
+		a->addState(); a->addState(); a->addState();
+		//TODO: assuming 0 is the initial state
+		worklist.push({0, 0, 1, true});
+		newstates.insert({0, 0, true}, 1);
+		worklist.push({0, 0, 2, false});
+		newstates.insert({0, 0, false}, 2);
+
+		while (!worklist.empty()) {
+			state_type ls, rs, ns;
+			bool leftactive;
+			std::tie(ls, rs, ns, leftactive) = worklist.top();
+			worklist.pop();
+			a->accept_.set(ns, left->accept_[ls] && right->accept_[rs]);
+
+			if (leftactive) {
+				for (Transition lt : left->transitions_[ls]) {
+					auto p = newstates.compute_if_absent({lt.next_, rs, leftactive}, [&]{return a->addState();});
+					if (p.second)
+						worklist.push({lt.next_, rs, p.first, leftactive});
+					a->addTrans(ns, lt.symbols_, p.first);
+
+					//If we brought the active automaton to an accept state,
+					//we can switch if we want.
+					if (left->accepts(lt.next_)) {
+						auto q = newstates.compute_if_absent({lt.next_, rs, !leftactive}, [&]{return a->addState();});
+						if (q.second)
+							worklist.push({lt.next_, rs, q.first, !leftactive});
+						a->addTrans(ns, lt.symbols_, q.first);
+					}
+				}
+			} else {
+				for (Transition rt : right->transitions_[rs]) {
+					auto p = newstates.compute_if_absent({ls, rt.next_, leftactive}, [&]{return a->addState();});
+					if (p.second)
+						worklist.push({ls, rt.next_, p.first, leftactive});
+					a->addTrans(ns, rt.symbols_, p.first);
+
+					//If we brought the active automaton to an accept state,
+					//we can switch if we want.
+					if (right->accepts(rt.next_)) {
+						auto q = newstates.compute_if_absent({ls, rt.next_, !leftactive}, [&]{return a->addState();});
+						if (q.second)
+							worklist.push({rs, rt.next_, q.first, !leftactive});
+						a->addTrans(ns, rt.symbols_, q.first);
+					}
+				}
+			}
+		}
+
+		//Choose left or right at the start.
+		a->addEpsilon(0, 1);
+		a->addEpsilon(0, 2);
+		return a;
+	}
+
 	static ptr star(const_ptr b) {
 		ptr a = new Automaton;
 		a->reserve(1 + b->size());
@@ -646,6 +743,18 @@ private:
 	}
 
 public:
+	/**
+	 * Renumbers the symbols on transitions out of all states in this automaton
+	 * by looking up through the given iterator.  Mapping a symbol to
+	 * std::numeric_limits<symbol_type>::max() stores a constant 0 (no
+	 * transition for that symbol); mapping to max()-1 stores a constant 1
+	 * (transition on that symbol).
+	 */
+	template<class RandomAccessIterator>
+	void renumberAlphabet(RandomAccessIterator symbols) {
+		renumberAlphabet(0, size(), symbols);
+	}
+
 	/**
 	 * Renumbers the symbols on transitions out of the states in the given range
 	 * by looking up through the given iterator.  Mapping a symbol to

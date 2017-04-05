@@ -251,19 +251,11 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 		std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_, 0);
 		for (location_type rl = 0; rl < right.locations_; ++rl) {
-			automaton_ptr combined = left.a_->clone();
-			state_type oldsize = combined->size();
-			combined->renumberAlphabet(0, combined->size(), slide);
-
-			combined->append(right.a_);
-			combined->renumberAlphabet(oldsize, combined->size(), sliderotate);
-
-			for (state_type i = 0; i < oldsize; ++i)
-				if (combined->accepts(i))
-					for (state_type j = 0; j < oldsize; ++j)
-						if (combined->accepts(j))
-							combined->addEpsilon(i, j);
-
+			automaton_ptr lm = left.a_->clone();
+			lm->renumberAlphabet(slide);
+			automaton_ptr rm = right.a_->clone();
+			rm->renumberAlphabet(sliderotate);
+			automaton_ptr combined = automaton_type::shuffleAccept(lm, rm);
 			combined->minimize();
 			canonicalize(combined, left.locations_ + right.locations_);
 			*out++ = std::make_pair(Gadget(combined, left.locations_ + right.locations_),
