@@ -273,14 +273,14 @@ template<typename OutputIterator>
 OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 	const Gadget& g = registry.at(gadgetIndex);
 	if (g.locations_ <= 2) {
-		std::cout << "Skipping connect due to size\n";
+		std::cout << "Skipping connect due to size (" << g.locations_ <<")\n";
 		return out;
 	}
 
 	using state_type = automaton_type::state_type;
 	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size);
-	for (location_type l = 0; l < g.locations_; ++l) {
-		location_type m = static_cast<location_type>((l+1) % g.locations_);
+	for (unsigned int l = 0; l < g.locations_; ++l) {
+		unsigned int m = (l+1) % g.locations_;
 		automaton_ptr connected = g.a_->clone();
 		//We may need to iterate to a fixpoint to deal with loops?
 		for (state_type s = 0; s < connected->size(); ++s) {
