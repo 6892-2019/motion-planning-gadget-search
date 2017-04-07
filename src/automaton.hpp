@@ -391,7 +391,7 @@ public:
 					if (right->accepts(rt.next_)) {
 						auto q = newstates.compute_if_absent({ls, rt.next_, !leftactive}, [&]{return a->addState();});
 						if (q.second)
-							worklist.push({rs, rt.next_, q.first, !leftactive});
+							worklist.push({ls, rt.next_, q.first, !leftactive});
 						a->addTrans(ns, rt.symbols_, q.first);
 					}
 				}
