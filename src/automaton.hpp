@@ -1604,6 +1604,20 @@ private:
 	}
 };
 
+/**
+ * Returns true iff the given automata accept the same language.
+ * TODO: should also return a witness
+ * TODO: should return left smaller-than right, right smaller-than left, or
+ * that they are incomparable, with witnesses for each
+ * TODO: witness generation is "pick an arbitrary string in this automaton",
+ * which is useful on its own (note the empty automaton won't have one)
+ */
+template<unsigned int N>
+bool same_language(typename Automaton<N>::const_ptr left, typename Automaton<N>::const_ptr right) {
+	return Automaton<N>::conj(left, Automaton<N>::comp(right))->isEmpty() &&
+			Automaton<N>::conj(Automaton<N>::comp(left), right)->isEmpty();
+}
+
 } //namespace automaton
 
 namespace std {
