@@ -244,7 +244,9 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	for (unsigned int i = 0; i < locations; ++i, minloc = cycleDown ? decr(minloc) : incr(minloc))
 		locationperm[i] = minloc;
 	std::fill(locationperm.begin()+locations, locationperm.end(), std::numeric_limits<automaton_type::symbol_type>::max());
+
 	a->renumber(stateperm.begin(), locationperm.begin());
+	a->prepareForEquals();
 }
 
 template<typename OutputIterator>
