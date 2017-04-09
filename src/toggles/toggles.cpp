@@ -100,6 +100,10 @@ public:
 	 * @return true iff the graph was queued
 	 */
 	bool offer(Gadget g, Provenance p) {
+		//Empty automata can't be usefully combined, so no reason to store them.
+		//TODO: isEmpty() isn't const, so we can't call it here.
+		if (g.a_->numTransitions() == 0) return false;
+
 		std::size_t hash = std::hash<Gadget>()(g);
 		std::size_t probe = hash % closed_.size();
 		while (closed_[probe] != ABSENT) {
