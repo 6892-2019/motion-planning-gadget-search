@@ -288,7 +288,7 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 template<typename OutputIterator>
 OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 	const Gadget& g = registry.at(gadgetIndex);
-	if (g.locations_ <= 2) {
+	if (g.locations_ <= 3) {
 		std::cout << "Skipping connect due to size (" << g.locations_ <<")\n";
 		return out;
 	}
