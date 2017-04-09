@@ -848,9 +848,43 @@ public:
 		enumerateRecurse<Alphabet>(stateStack, symbolString, callback);
 	}
 
+	/**
+	 * Prepares this automaton for equality testing.
+	 *
+	 * TODO: this is a hack.  We should move canonicalization into Automaton and
+	 * do any preparation there instead.
+	 */
+	void prepareForEquals() {
+		for (auto& ts : transitions_)
+			//We shouldn't have two Transitions with the same destination, so we
+			//sort only on next_.
+			std::sort(ts.begin(), ts.end(), [](Transition a, Transition b){return a.next_ < b.next_;});
+		assert(preparedForEquals());
+	}
+
+private:
+	bool preparedForEquals() const {
+		return std::all_of(transitions_.begin(), transitions_.end(), [](const auto& ts) {
+			return std::is_sorted(ts.begin(), ts.end(), [](Transition a, Transition b) {
+				return a.next_ < b.next_;
+			});
+		});
+	}
+
+public:
+	/**
+	 * Compares this automaton with another for structural equality.  Call
+	 * prepareForEquals() on both automata first.
+	 */
 	bool operator==(const Automaton& other) const {
+		assert(preparedForEquals());
+		assert(other.preparedForEquals());
 		return std::tie(accept_, transitions_) == std::tie(other.accept_, other.transitions_);
 	}
+	/**
+	 * Compares this automaton with another for structural inequality.  Call
+	 * prepareForEquals() on both automata first.
+	 */
 	bool operator!=(const Automaton& other) const {
 		return !(*this == other);
 	}
