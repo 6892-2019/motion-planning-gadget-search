@@ -294,35 +294,55 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 	}
 
 	using state_type = automaton_type::state_type;
+	using symbol_type = automaton_type::symbol_type;
 	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size);
 	for (unsigned int l = 0; l < g.locations_; ++l) {
 		unsigned int m = (l+1) % g.locations_;
 		automaton_ptr connected = g.a_->clone();
-		//We may need to iterate to a fixpoint to deal with loops?
-		for (state_type s = 0; s < connected->size(); ++s) {
-			if (connected->accepts(s)) continue;
-			auto dests = connected->step(s, l);
-			for (state_type d : dests) {
-				assert(connected->accepts(d));
-				for (state_type e : connected->step(d, m))
-					connected->addEpsilon(s, e);
+		//TODO: fixpoint iteration may not actually be necessary
+		bool progress = true;
+		while (progress) {
+			progress = false;
+			for (state_type s = 0; s < connected->size(); ++s) {
+				if (connected->accepts(s)) continue;
+				auto dests = connected->step(s, l);
+				for (state_type d : dests) {
+					assert(connected->accepts(d));
+					for (state_type e : connected->step(d, m))
+						progress |= connected->addEpsilon(s, e);
+				}
+
+				dests = connected->step(s, m);
+				for (state_type d : dests) {
+					assert(connected->accepts(d));
+					for (state_type e : connected->step(d, l))
+						progress |= connected->addEpsilon(s, e);
+				}
 			}
 
-			dests = connected->step(s, m);
-			for (state_type d : dests) {
-				assert(connected->accepts(d));
-				for (state_type e : connected->step(d, l))
-					connected->addEpsilon(s, e);
+			//Transitive closure.
+			//TODO: move to Automaton? (minus only being on non-accept states)
+			//If we renumbered l to m, transitive-closed, then deleted m, that would be enough (?).
+			for (state_type s = 0; s < connected->size(); ++s) {
+				if (connected->accepts(s)) continue;
+				for (symbol_type a = 0; a < g.locations_; ++a) {
+					for (state_type d : connected->step(s, a)) {
+						assert(connected->accepts(d));
+						for (state_type e : connected->step(d, a))
+							progress |= connected->addEpsilon(s, e);
+					}
+				}
 			}
 		}
 
-		std::iota(alphamap.begin(), alphamap.end(), 0);
+		std::iota(alphamap.begin(), alphamap.begin()+g.locations_, 0);
+		std::fill(alphamap.begin()+g.locations_, alphamap.end(), std::numeric_limits<symbol_type>::max());
 		//remove larger first to avoid off-by-one
 		alphamap.erase(alphamap.begin()+std::max(l, m));
 		alphamap.erase(alphamap.begin()+std::min(l, m));
 		//pad with 0
-		alphamap.push_back(std::numeric_limits<automaton_type::symbol_type>::max());
-		alphamap.push_back(std::numeric_limits<automaton_type::symbol_type>::max());
+		alphamap.push_back(std::numeric_limits<symbol_type>::max());
+		alphamap.push_back(std::numeric_limits<symbol_type>::max());
 		connected->renumberAlphabet(0, connected->size(), alphamap.begin());
 		connected->minimize();
 		canonicalize(connected, g.locations_ - 2);
