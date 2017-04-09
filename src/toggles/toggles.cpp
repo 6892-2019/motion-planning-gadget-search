@@ -185,8 +185,8 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 			sg.v[vi] = ei;
 
 			//below/above in the tower
-			sg.e[ei++] = l == 0 ? towers[{s, locations-1}] : towers[{s, l-1}];
-			sg.e[ei++] = l == locations-1 ? towers[{s, 0}] : towers[{s, l+1}];
+			sg.e[ei++] = towers.at({s, decr(l)});
+			sg.e[ei++] = towers.at({s, incr(l)});
 
 			sg.e[ei++] = edgecolors.at(l);
 
@@ -201,8 +201,8 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	for (unsigned int l = 0; l < locations; ++l) {
 		int vi = edgecolors.at(l);
 		sg.v[vi] = ei;
-		sg.e[ei++] = l == 0 ? edgecolors.at(locations-1) : edgecolors.at(l-1);
-		sg.e[ei++] = l == locations-1 ? edgecolors.at(0) : edgecolors.at(l+1);
+		sg.e[ei++] = edgecolors.at(decr(l));
+		sg.e[ei++] = edgecolors.at(incr(l));
 		for (state_type s = 0; s < a->size(); ++s)
 			sg.e[ei++] = towers.at({s, l});
 		sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
