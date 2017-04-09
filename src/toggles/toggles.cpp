@@ -357,12 +357,17 @@ void mainloop(const automaton_type& target) {
 	for (Registry::index_type j = 0; j <= i; ++j)
 		combine(i, j, std::back_inserter(successors));
 	connect(i, std::back_inserter(successors));
+	unsigned int total = 0;
 	for (std::pair<Gadget, Provenance> p : successors) {
 		bool offered = registry.offer(p.first, p.second);
+		total += offered;
 		//only check equality if we offered a new graph
-		if (offered && *p.first.a_ == target)
+		if (offered && *p.first.a_ == target) {
 			std::cout << "found! " << p.second.first << " " << p.second.second << std::endl;
+			std::exit(0);
+		}
 	}
+	std::cout << "gadget " << i << " " << registry.at(i).locations_ << " locations, produced " << successors.size() << ", offered " << total << std::endl;
 }
 
 int main(int argc, char* argv[]) {
