@@ -42,5 +42,30 @@ int sgncmp(const T& left, const T& right, Compare comp = Compare()) {
 	return 0;
 }
 
+template<class Front, class Sentinel>
+class range_for_pair {
+public:
+	range_for_pair(Front front, Sentinel sentinel) : front_(std::move(front)), sentinel_(std::move(sentinel)) {}
+	range_for_pair(std::pair<Front, Sentinel> pair) : front_(std::move(pair.first)), sentinel_(std::move(pair.second)) {}
+	Front begin() const {
+		return front_;
+	}
+	Sentinel end() const {
+		return sentinel_;
+	}
+private:
+	Front front_;
+	Sentinel sentinel_;
+};
+
+template<class Front, class Sentinel>
+range_for_pair<Front, Sentinel> make_range_for_pair(Front front, Sentinel sentinel) {
+	return {front, sentinel};
+}
+template<class Front, class Sentinel>
+range_for_pair<Front, Sentinel> as_range_for_pair(std::pair<Front, Sentinel> pair) {
+	return {pair};
+}
+
 #endif /* ALGOUTILS_HPP */
 
