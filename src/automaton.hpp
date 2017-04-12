@@ -9,6 +9,7 @@
 #define AUTOMATON_HPP
 
 #include "precompiled.hpp"
+#include "linear_set.hpp"
 
 //uncomment the line below to enable debugging logging expressions
 //#define AUTOMATON_DEBUG(expr) do {expr;} while(0);
@@ -18,18 +19,187 @@
 
 namespace automaton {
 
+class AutomatonBase;
 template<unsigned int AlphabetSize>
-class Automaton {
+class Automaton;
+class EdgeRangeSentinel;
+class EdgeRangeFront;
+
+/**
+ * Automaton functionality that does not depend on the alphabet size.
+ *
+ * (IAutomaton and Automatonable were both considered as names.)
+ */
+class AutomatonBase {
 public:
-	using ptr = boost::intrusive_ptr<Automaton>;
-	using const_ptr = boost::intrusive_ptr<const Automaton>;
-	static constexpr unsigned int alphabet_size = AlphabetSize;
 	using symbol_type = unsigned int; //cf. Literal
-	using symbol_mask_type = automaton::bitset<AlphabetSize>;
 	//We could save space by using a smaller type for small automata, but it's
 	//hard to know what size to use before building the automaton.  We'd only
 	//save on automata that are already small, so it's not really worth it.
 	using state_type = unsigned int;
+
+	//if we could forward-declare typedefs/aliases, these would be delcared outside
+	//because we can't, we'll put them here and lift them out later
+	using SymbolSet = linear_set<AutomatonBase::symbol_type>;
+	using StateSet = linear_set<AutomatonBase::state_type>;
+
+	virtual ~AutomatonBase() = default;
+	//prevent slicing
+	AutomatonBase(const AutomatonBase&) = delete;
+	AutomatonBase& operator=(const AutomatonBase&) = delete;
+
+	/**
+	 * @return the number of states in this automaton
+	 */
+	virtual state_type state_size() const = 0;
+	/**
+	 * @return the alphabet size of this automaton
+	 */
+	virtual symbol_type alphabet_size() const = 0;
+	/**
+	 * Returns the number of edges in this automaton.  This is related to the
+	 * physical size of this object.
+	 * @return the number of edges in this automaton
+	 */
+	virtual std::size_t edge_size() const = 0;
+	/**
+	 * Returns the number of transitions in this automaton.  This is a logical
+	 * notion; multiple transitions may be stored in one physical edge.
+	 * @return the number of transitions in this automaton
+	 */
+	virtual std::size_t transition_size() const = 0;
+
+	virtual bool accept(state_type state) const = 0;
+	virtual StateSet step(state_type state, symbol_type symbol) const = 0;
+	/**
+	 * Returns a set of the labels on the edge between from and to.  This set is
+	 * empty if there is no edge between from and to.
+	 *
+	 * labels is in some sense the orthogonal operation to step: step tells
+	 * where a symbol leads to, while label tells what symbols lead to a
+	 * particular place.
+	 */
+	virtual SymbolSet labels(state_type from, state_type to) const = 0;
+
+	range_for_pair<EdgeRangeFront, EdgeRangeSentinel> edges(state_type from) const;
+
+	virtual void reserve(state_type state_capacity) = 0;
+	virtual state_type addState() = 0;
+	virtual bool addEpsilon(state_type from, state_type to) = 0;
+	virtual bool addTrans(state_type from, symbol_type on, state_type to) = 0;
+	//TODO: we can't use symbol_mask_type, but maybe we'll want an opaque token
+	//type to allow e.g. copying a set of transitions
+
+	//TODO: equality, somehow (false if alphabet sizes disagree)
+
+	//TODO: we should have a sufficiently rich set of observer methods to
+	//implement printing just once for this interface
+//	friend std::ostream& operator<<(std::ostream& o, const AutomatonBase& a) {
+//		o << a.state_size() << " states, " << a.transition_size() << " transitions\n";
+//		//TODO: not sure if we're still tracking determinism or not
+////				<< (a.deterministic() ? "" : "non") << "deterministic\n";
+//		for (state_type i = 0; i < a.state_size(); ++i) {
+//			o << "state " << i << (a.accept(i) ? " [accept]:\n" : ":\n");
+//			//This is edge iteration: (next, symbol-set) pairs
+//			for (
+//		}
+//
+//		for (state_type i = 0; i < a.size(); ++i) {
+//			o << "state " << i << (a.accept_[i] ? " [accept]:\n" : ":\n");
+//			for (const Transition& t : a.transitions_[i])
+//				o << "  to " << t.next_ << " on " << t.symbols_ << '\n';
+//		}
+//		return o;
+//	}
+};
+
+using SymbolSet = AutomatonBase::SymbolSet;
+using StateSet = AutomatonBase::StateSet;
+
+class EdgeRangeSentinel {
+	const AutomatonBase* parent_;
+	AutomatonBase::state_type from_;
+	EdgeRangeSentinel(const AutomatonBase* parent, AutomatonBase::state_type from) : parent_(parent), from_(from) {}
+	friend class AutomatonBase;
+	friend bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right);
+};
+
+class EdgeRangeFront {
+	EdgeRangeFront(const AutomatonBase* parent, AutomatonBase::state_type from) : parent_(parent), from_(from), cur_(findNextStartingAt(0)) {}
+	const AutomatonBase* parent_;
+	AutomatonBase::state_type from_;
+	std::pair<SymbolSet, AutomatonBase::state_type> cur_;
+	std::pair<SymbolSet, AutomatonBase::state_type> findNextStartingAt(AutomatonBase::state_type start) {
+		AutomatonBase::state_type end = parent_->state_size();
+		//TODO: if this gets too expensive, we'll promote destinations()
+		//to AutomatonBase and cache it in this iterator
+		for (AutomatonBase::state_type s = start; s < end; ++s) {
+			SymbolSet symbols = parent_->labels(from_, s);
+			if (!symbols.empty())
+				return {std::move(symbols), s};
+		}
+		return {{}, end};
+	}
+public:
+	const auto& operator*() const {
+		return cur_;
+	}
+	auto& operator++() {
+		cur_ = findNextStartingAt(cur_.second+1);
+		return *this;
+	}
+	friend class AutomatonBase;
+	friend bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right);
+};
+
+bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right) {
+		assert(left.parent_ == right.parent_ && "edge ranges from different parents");
+		assert(left.from_ == right.from_ && "edge ranges from different states");
+		return left.cur_.second == left.parent_->state_size();
+}
+bool operator!=(const EdgeRangeFront& left, EdgeRangeSentinel right) {
+	return !(left == right);
+}
+
+range_for_pair<EdgeRangeFront, EdgeRangeSentinel> AutomatonBase::edges(state_type from) const {
+	return make_range_for_pair(EdgeRangeFront(this, from), EdgeRangeSentinel(this, from));
+}
+
+
+
+template<unsigned int AlphabetSize>
+class Automaton final : public AutomatonBase {
+public:
+	using ptr = boost::intrusive_ptr<Automaton>;
+	using const_ptr = boost::intrusive_ptr<const Automaton>;
+	//awkward name to avoid clash with member function name
+	//(virtual functions can't also be static constexpr)
+	static constexpr unsigned int alphabet_size_v = AlphabetSize;
+	using symbol_type = AutomatonBase::symbol_type;
+	using symbol_mask_type = automaton::bitset<AlphabetSize>;
+	using state_type = AutomatonBase::state_type;
+
+	state_type state_size() const override {
+		return transitions_.size();
+	}
+	symbol_type alphabet_size() const override {
+		return alphabet_size;
+	}
+	std::size_t edge_size() const override {
+		return std::accumulate(transitions_.begin(), transitions_.end(), static_cast<std::size_t>(0),
+				[](std::size_t l, const auto& r) {return l + r.size();});
+	}
+	std::size_t transition_size() const override {
+		std::size_t answer = 0;
+		for (auto& ts : transitions_)
+			for (auto t : ts)
+				answer += t.symbols_.count();
+		return answer;
+	}
+
+
+
+
 
 private:
 	//because just "using foo;" is illegal in class scopes, and we don't want to
