@@ -66,6 +66,19 @@ public:
 		return data_.cend();
 	}
 
+	const_reference front() {
+		return data_.front();
+	}
+	const_reference front() const {
+		return data_.front();
+	}
+	const_reference back() {
+		return data_.back();
+	}
+	const_reference back() const {
+		return data_.back();
+	}
+
 	bool count(const key_type& key) const {
 		return find(key) != end();
 	}
