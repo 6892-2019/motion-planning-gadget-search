@@ -239,7 +239,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	symbol_type minloc = *std::min_element(boost::counting_iterator<symbol_type>(0),
 		boost::counting_iterator<symbol_type>(locations),
 		[&](auto l, auto r){return lab[edgecolors.at(l)] < lab[edgecolors.at(r)];});
-	dynarray<automaton_type::symbol_type> locationperm(automaton_type::alphabet_size);
+	dynarray<automaton_type::symbol_type> locationperm(automaton_type::alphabet_size_v);
 	bool cycleDown = lab[edgecolors.at(decr(minloc))] < lab[edgecolors.at(incr(minloc))];
 	for (unsigned int i = 0; i < locations; ++i, minloc = cycleDown ? decr(minloc) : incr(minloc))
 		locationperm[i] = minloc;
@@ -252,14 +252,14 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 template<typename OutputIterator>
 OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIterator out) {
 	const Gadget& left = registry.at(l), &right = registry.at(r);
-	if (left.locations_ + right.locations_ > automaton_type::alphabet_size) {
+	if (left.locations_ + right.locations_ > automaton_type::alphabet_size_v) {
 		std::cout << "Skipping combine due to size\n";
 		return out;
 	}
 
 	using state_type = automaton_type::state_type;
-	std::vector<automaton_type::symbol_type> slide(automaton_type::alphabet_size);
-	std::vector<automaton_type::symbol_type> sliderotate(automaton_type::alphabet_size);
+	std::vector<automaton_type::symbol_type> slide(automaton_type::alphabet_size_v);
+	std::vector<automaton_type::symbol_type> sliderotate(automaton_type::alphabet_size_v);
 	std::fill(slide.begin(), slide.begin()+right.locations_, std::numeric_limits<automaton_type::symbol_type>::max());
 	std::iota(slide.begin()+right.locations_, slide.begin()+right.locations_+left.locations_, 0);
 	std::fill(slide.begin()+right.locations_+left.locations_, slide.end(), std::numeric_limits<automaton_type::symbol_type>::max());
@@ -295,7 +295,7 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 
 	using state_type = automaton_type::state_type;
 	using symbol_type = automaton_type::symbol_type;
-	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size);
+	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size_v);
 	for (unsigned int l = 0; l < g.locations_; ++l) {
 		unsigned int m = (l+1) % g.locations_;
 		automaton_ptr connected = g.a_->clone();
@@ -304,17 +304,17 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 		while (progress) {
 			progress = false;
 			for (state_type s = 0; s < connected->size(); ++s) {
-				if (connected->accepts(s)) continue;
+				if (connected->accept(s)) continue;
 				auto dests = connected->step(s, l);
 				for (state_type d : dests) {
-					assert(connected->accepts(d));
+					assert(connected->accept(d));
 					for (state_type e : connected->step(d, m))
 						progress |= connected->addEpsilon(s, e);
 				}
 
 				dests = connected->step(s, m);
 				for (state_type d : dests) {
-					assert(connected->accepts(d));
+					assert(connected->accept(d));
 					for (state_type e : connected->step(d, l))
 						progress |= connected->addEpsilon(s, e);
 				}
@@ -324,10 +324,10 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 			//TODO: move to Automaton? (minus only being on non-accept states)
 			//If we renumbered l to m, transitive-closed, then deleted m, that would be enough (?).
 			for (state_type s = 0; s < connected->size(); ++s) {
-				if (connected->accepts(s)) continue;
+				if (connected->accept(s)) continue;
 				for (symbol_type a = 0; a < g.locations_; ++a) {
 					for (state_type d : connected->step(s, a)) {
-						assert(connected->accepts(d));
+						assert(connected->accept(d));
 						for (state_type e : connected->step(d, a))
 							progress |= connected->addEpsilon(s, e);
 					}

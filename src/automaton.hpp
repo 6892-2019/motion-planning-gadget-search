@@ -44,9 +44,6 @@ public:
 	using StateSet = linear_set<AutomatonBase::state_type>;
 
 	virtual ~AutomatonBase() = default;
-	//prevent slicing
-	AutomatonBase(const AutomatonBase&) = delete;
-	AutomatonBase& operator=(const AutomatonBase&) = delete;
 
 	/**
 	 * @return the number of states in this automaton
@@ -70,6 +67,11 @@ public:
 	virtual std::size_t transition_size() const = 0;
 
 	virtual bool accept(state_type state) const = 0;
+	/**
+	 * Returns the possible next states of the automaton when reading the given
+	 * symbol in the given current state.  The returned set is empty if the
+	 * automaton crashes.
+	 */
 	virtual StateSet step(state_type state, symbol_type symbol) const = 0;
 	/**
 	 * Returns a set of the labels on the edge between from and to.  This set is
@@ -84,8 +86,24 @@ public:
 	range_for_pair<EdgeRangeFront, EdgeRangeSentinel> edges(state_type from) const;
 
 	virtual void reserve(state_type state_capacity) = 0;
+	/**
+	 * Adds a new state to this automaton.  The state is rejecting and has no
+	 * outgoing transitions.
+	 */
 	virtual state_type addState() = 0;
+	/**
+	 * Add transitions out of from that simulate the presence of an epsilon
+	 * transition into to.  (Later modifications of to's transitions will not
+	 * result in corresponding updates of from's transitions.)
+	 * @return true if the automaton changed, either by adding a transition or
+	 * making a non-accepting state an accepting state
+	 */
 	virtual bool addEpsilon(state_type from, state_type to) = 0;
+	/**
+	 * Adds a transition to this automaton.
+	 * @return true if the automaton changed, false if the transition was
+	 * already present
+	 */
 	virtual bool addTrans(state_type from, symbol_type on, state_type to) = 0;
 	//TODO: we can't use symbol_mask_type, but maybe we'll want an opaque token
 	//type to allow e.g. copying a set of transitions
@@ -152,16 +170,16 @@ public:
 	friend bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right);
 };
 
-bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right) {
+inline bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 		assert(left.parent_ == right.parent_ && "edge ranges from different parents");
 		assert(left.from_ == right.from_ && "edge ranges from different states");
 		return left.cur_.second == left.parent_->state_size();
 }
-bool operator!=(const EdgeRangeFront& left, EdgeRangeSentinel right) {
+inline bool operator!=(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 	return !(left == right);
 }
 
-range_for_pair<EdgeRangeFront, EdgeRangeSentinel> AutomatonBase::edges(state_type from) const {
+inline range_for_pair<EdgeRangeFront, EdgeRangeSentinel> AutomatonBase::edges(state_type from) const {
 	return make_range_for_pair(EdgeRangeFront(this, from), EdgeRangeSentinel(this, from));
 }
 
@@ -180,10 +198,10 @@ public:
 	using state_type = AutomatonBase::state_type;
 
 	state_type state_size() const override {
-		return transitions_.size();
+		return static_cast<state_type>(transitions_.size());
 	}
 	symbol_type alphabet_size() const override {
-		return alphabet_size;
+		return alphabet_size_v;
 	}
 	std::size_t edge_size() const override {
 		return std::accumulate(transitions_.begin(), transitions_.end(), static_cast<std::size_t>(0),
@@ -195,6 +213,79 @@ public:
 			for (auto t : ts)
 				answer += t.symbols_.count();
 		return answer;
+	}
+
+	bool accept(state_type state) const override {
+		assert(state < size());
+		return accept_[state];
+	}
+
+	StateSet step(state_type current, symbol_type symbol) const override {
+		assert(current < transitions_.size());
+		assert(symbol < AlphabetSize);
+		StateSet next;
+		for (const Transition& t : transitions_[current])
+			if (t.symbols_[symbol])
+				next.insert(t.next_);
+		//We used to assert(next.size() <= 1 || !deterministic_), but the
+		//addTrans calls isStateDeterministic calls step (us) when checking
+		//whether to clear deterministic_.  If we change the implementation of
+		//isStateDeterministic to not actually build the steps, we could add the
+		//assert back.
+		return next;
+	}
+
+	SymbolSet labels(state_type from, state_type to) const override {
+		for (const Transition& t : transitions_[from])
+			if (t.next_ == to) {
+				SymbolSet ret;
+				for (symbol_type a = 0; a < alphabet_size(); ++a)
+					if (t.symbols_[a])
+						ret.insert(a);
+				return ret;
+			}
+		return {};
+	}
+
+	void reserve(state_type state_capacity) override {
+		transitions_.reserve(state_capacity);
+		accept_.reserve(state_capacity);
+	}
+
+	state_type addState() override {
+		state_type s = static_cast<state_type>(transitions_.size());
+		transitions_.push_back({});
+		accept_.push_back(false);
+		return s;
+	}
+
+	bool addEpsilon(state_type from, state_type to) override {
+		bool changed = false;
+		if (accept_[to]) {
+			changed |= !accept_[from];
+			accept_.set(from);
+		}
+		for (const Transition& t : transitions_[to])
+			changed |= addTrans(from, t.symbols_, t.next_);
+		return changed;
+	}
+
+	bool addTrans(state_type from, symbol_type symbol, state_type to) override {
+		for (Transition& t : transitions_[from])
+			if (t.next_ == to) {
+				if (t.symbols_[symbol])
+					return false;
+				t.symbols_.set(symbol);
+				if (deterministic_ && !isStateDeterministic(from))
+					deterministic_ = false;
+				return true;
+			}
+		transitions_[from].push_back({});
+		transitions_[from].back().next_ = to;
+		transitions_[from].back().symbols_.set(symbol);
+		if (deterministic_ && !isStateDeterministic(from))
+			deterministic_ = false;
+		return true;
 	}
 
 
@@ -276,9 +367,9 @@ public:
 			//the empty string is the identity element for concatenation
 			return epsilon();
 
-		std::size_t totalStates = 0;
+		state_type totalStates = 0;
 		for (ForwardIterator i = begin; i != end; ++i)
-			totalStates += (*i)->transitions_.size();
+			totalStates += (*i)->state_size();
 
 		ptr a = new Automaton;
 		a->reserve(totalStates);
@@ -307,9 +398,9 @@ public:
 		if (begin == end)
 			return empty();
 
-		std::size_t totalStates = 1;
+		state_type totalStates = 0;
 		for (ForwardIterator i = begin; i != end; ++i)
-			totalStates += (*i)->transitions_.size();
+			totalStates += (*i)->state_size();
 
 		ptr a = new Automaton;
 		a->reserve(totalStates);
@@ -542,7 +633,7 @@ public:
 
 					//If we brought the active automaton to an accept state,
 					//we can switch if we want.
-					if (left->accepts(lt.next_)) {
+					if (left->accept(lt.next_)) {
 						auto q = newstates.compute_if_absent({lt.next_, rs, !leftactive}, [&]{return a->addState();});
 						if (q.second)
 							worklist.push({lt.next_, rs, q.first, !leftactive});
@@ -558,7 +649,7 @@ public:
 
 					//If we brought the active automaton to an accept state,
 					//we can switch if we want.
-					if (right->accepts(rt.next_)) {
+					if (right->accept(rt.next_)) {
 						auto q = newstates.compute_if_absent({ls, rt.next_, !leftactive}, [&]{return a->addState();});
 						if (q.second)
 							worklist.push({ls, rt.next_, q.first, !leftactive});
@@ -900,7 +991,7 @@ private:
 	template<class RandomAccessIterator>
 	static symbol_mask_type renumberAlphabet(symbol_mask_type cur, RandomAccessIterator map) {
 		symbol_mask_type ns;
-		for (symbol_type a = 0; a < alphabet_size; ++a) {
+		for (symbol_type a = 0; a < alphabet_size_v; ++a) {
 			symbol_type i = map[a];
 			if (i == std::numeric_limits<symbol_type>::max())
 				ns.reset(a); //no-op, because we initialized to 0 above
@@ -1101,34 +1192,6 @@ private:
 
 public:
 	/**
-	 * Returns the possible next states of the automaton when reading the given
-	 * symbol in the given current state.  This may be empty if the machine
-	 * crashed.
-	 */
-	small_vector<state_type, 4> step(state_type current, symbol_type symbol) const {
-		assert(current < transitions_.size());
-		assert(symbol < AlphabetSize);
-		small_vector<state_type, 4> next;
-		for (const Transition& t : transitions_[current])
-			if (t.symbols_[symbol])
-				next.push_back(t.next_);
-		//We used to assert(next.size() <= 1 || !deterministic_), but the
-		//addTrans calls isStateDeterministic calls step (us) when checking
-		//whether to clear deterministic_.  If we change the implementation of
-		//isStateDeterministic to not actually build the steps, we could add the
-		//assert back.
-		return next;
-	}
-
-	/**
-	 * Reserves space in this automaton for the given number of states.
-	 */
-	void reserve(std::size_t size) {
-		transitions_.reserve(size);
-		accept_.reserve(size);
-	}
-
-	/**
 	 * Copies all states from the given automaton into this automaton, adjusting
 	 * transition numbers as required.  This does not add any transitions to the
 	 * newly-copied states.
@@ -1151,57 +1214,7 @@ public:
 		return base;
 	}
 
-	/**
-	 * Adds a new state to this automaton.  The state is rejecting and has no
-	 * outgoing transitions.
-	 */
-	state_type addState() {
-		state_type s = static_cast<state_type>(transitions_.size());
-		transitions_.push_back({});
-		accept_.push_back(false);
-		return s;
-	}
 
-	/**
-	 * Add transitions out of from that simulate the presence of an epsilon
-	 * transition into to.  (Later modifications of to's transitions will not
-	 * result in corresponding updates of from's transitions.)
-	 * @return true if the automaton changed, either by adding a transition or
-	 * making a non-accepting state an accepting state
-	 */
-	bool addEpsilon(state_type from, state_type to) {
-		bool changed = false;
-		if (accept_[to]) {
-			changed |= !accept_[from];
-			accept_.set(from);
-		}
-		for (const Transition& t : transitions_[to])
-			changed |= addTrans(from, t.symbols_, t.next_);
-		return changed;
-	}
-
-	/**
-	 * Adds a transition to this automaton.
-	 * @return true if the automaton changed, false if the transition was
-	 * already present
-	 */
-	bool addTrans(state_type from, symbol_type symbol, state_type to) {
-		for (Transition& t : transitions_[from])
-			if (t.next_ == to) {
-				if (t.symbols_[symbol])
-					return false;
-				t.symbols_.set(symbol);
-				if (deterministic_ && !isStateDeterministic(from))
-					deterministic_ = false;
-				return true;
-			}
-		transitions_[from].push_back({});
-		transitions_[from].back().next_ = to;
-		transitions_[from].back().symbols_.set(symbol);
-		if (deterministic_ && !isStateDeterministic(from))
-			deterministic_ = false;
-		return true;
-	}
 
 	/**
 	 * Adds the given transitions to this automaton.
@@ -1223,14 +1236,6 @@ public:
 		if (deterministic_ && !isStateDeterministic(from))
 			deterministic_ = false;
 		return true;
-	}
-
-	/**
-	 * Returns true iff the given state is an accept state.
-	 */
-	bool accepts(state_type state) const {
-		assert(state < size());
-		return accept_[state];
 	}
 
 	/**
