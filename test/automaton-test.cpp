@@ -47,11 +47,12 @@ std::vector<std::vector<unsigned int>> allStrings(unsigned int alphabetSize, uns
  * if the automata may differ on longer strings.)
  */
 template<int AlphabetSize>
-void equivalentOnAllStrings(typename Automaton<AlphabetSize>::ptr a, typename Automaton<AlphabetSize>::ptr b, int length, int lineno = -1) {
+void equivalentOnAllStrings(const Automaton<AlphabetSize>& a, const Automaton<AlphabetSize>& b, int length, int lineno = -1) {
 	for (auto& string : allStrings(AlphabetSize, length))
-		EXPECT_EQ(a->run(string), b->run(string)) << to_string(string) << " from line " << lineno;
-	EXPECT_EQ(a->isEmpty(), b->isEmpty()) << " from line " << lineno;
-	EXPECT_EQ(a->infinite(), b->infinite()) << " from line " << lineno;
+		EXPECT_EQ(a.run(string), b.run(string)) << to_string(string) << " from line " << lineno;
+	//TODO: make these const
+//	EXPECT_EQ(a.isEmpty(), b.isEmpty()) << " from line " << lineno;
+//	EXPECT_EQ(a.infinite(), b.infinite()) << " from line " << lineno;
 }
 
 } //end anonymous namespace
@@ -79,685 +80,685 @@ TEST(AutomatonTest, AllStringsUtilFn) {
 }
 
 TEST(AutomatonTest, EquivOnAllStringsUtilFn) {
-	equivalentOnAllStrings<2>(Automaton<2>::empty(), Automaton<2>::empty(), 8);
-	equivalentOnAllStrings<2>(Automaton<2>::all(), Automaton<2>::all(), 8);
-	equivalentOnAllStrings<2>(Automaton<2>::lit(1), Automaton<2>::lit(1), 8);
+	equivalentOnAllStrings<2>(empty<2>(), empty<2>(), 8);
+	equivalentOnAllStrings<2>(all<2>(), all<2>(), 8);
+	equivalentOnAllStrings<2>(lit<2>(1), lit<2>(1), 8);
 }
 
 TEST(AutomatonTest, EmptyLanguage) {
-	auto a = Automaton<2>::empty();
-	EXPECT_TRUE(a->deterministic());
-	EXPECT_TRUE(a->isEmpty());
-	EXPECT_FALSE(a->infinite());
-	EXPECT_FALSE(a->run({}));
-	EXPECT_FALSE(a->run({0}));
-	EXPECT_FALSE(a->run({1}));
-	EXPECT_FALSE(a->run({0, 1}));
-	EXPECT_FALSE(a->run({1, 0}));
+	auto a = empty<2>();
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_TRUE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_FALSE(a.run({}));
+	EXPECT_FALSE(a.run({0}));
+	EXPECT_FALSE(a.run({1}));
+	EXPECT_FALSE(a.run({0, 1}));
+	EXPECT_FALSE(a.run({1, 0}));
 }
 
 TEST(AutomatonTest, AllLanguage) {
-	auto a = Automaton<2>::all();
-	EXPECT_TRUE(a->deterministic());
-	EXPECT_FALSE(a->isEmpty());
-	EXPECT_TRUE(a->infinite());
-	EXPECT_TRUE(a->run({}));
-	EXPECT_TRUE(a->run({0}));
-	EXPECT_TRUE(a->run({1}));
-	EXPECT_TRUE(a->run({0, 1}));
-	EXPECT_TRUE(a->run({1, 0}));
+	auto a = all<2>();
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_TRUE(a.infinite());
+	EXPECT_TRUE(a.run({}));
+	EXPECT_TRUE(a.run({0}));
+	EXPECT_TRUE(a.run({1}));
+	EXPECT_TRUE(a.run({0, 1}));
+	EXPECT_TRUE(a.run({1, 0}));
 }
 
 TEST(AutomatonTest, Any) {
-	auto a = Automaton<2>::any();
-	EXPECT_TRUE(a->deterministic());
-	EXPECT_FALSE(a->isEmpty());
-	EXPECT_FALSE(a->infinite());
-	EXPECT_FALSE(a->run({}));
-	EXPECT_TRUE(a->run({0}));
-	EXPECT_TRUE(a->run({1}));
-	EXPECT_FALSE(a->run({0, 1}));
-	EXPECT_FALSE(a->run({1, 0}));
+	auto a = any<2>();
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_FALSE(a.run({}));
+	EXPECT_TRUE(a.run({0}));
+	EXPECT_TRUE(a.run({1}));
+	EXPECT_FALSE(a.run({0, 1}));
+	EXPECT_FALSE(a.run({1, 0}));
 }
 
 TEST(AutomatonTest, AnyTrinary) {
-	auto a = Automaton<3>::any();
-	EXPECT_TRUE(a->deterministic());
-	EXPECT_FALSE(a->isEmpty());
-	EXPECT_FALSE(a->infinite());
-	EXPECT_FALSE(a->run({}));
-	EXPECT_TRUE(a->run({0}));
-	EXPECT_TRUE(a->run({1}));
-	EXPECT_TRUE(a->run({2}));
-	EXPECT_FALSE(a->run({0, 1}));
-	EXPECT_FALSE(a->run({1, 0}));
-	EXPECT_FALSE(a->run({0, 1, 2}));
-	EXPECT_FALSE(a->run({2, 1, 0}));
+	auto a = any<3>();
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_FALSE(a.run({}));
+	EXPECT_TRUE(a.run({0}));
+	EXPECT_TRUE(a.run({1}));
+	EXPECT_TRUE(a.run({2}));
+	EXPECT_FALSE(a.run({0, 1}));
+	EXPECT_FALSE(a.run({1, 0}));
+	EXPECT_FALSE(a.run({0, 1, 2}));
+	EXPECT_FALSE(a.run({2, 1, 0}));
 }
 
 TEST(AutomatonTest, Epsilon) {
-	auto a = Automaton<2>::epsilon();
-	EXPECT_TRUE(a->deterministic());
-	EXPECT_FALSE(a->isEmpty());
-	EXPECT_FALSE(a->infinite());
-	EXPECT_TRUE(a->run({}));
-	EXPECT_FALSE(a->run({0}));
-	EXPECT_FALSE(a->run({1}));
-	EXPECT_FALSE(a->run({0, 1}));
-	EXPECT_FALSE(a->run({1, 0}));
+	auto a = epsilon<2>();
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_TRUE(a.run({}));
+	EXPECT_FALSE(a.run({0}));
+	EXPECT_FALSE(a.run({1}));
+	EXPECT_FALSE(a.run({0, 1}));
+	EXPECT_FALSE(a.run({1, 0}));
 }
 
 TEST(AutomatonTest, Lit) {
-	auto a = Automaton<2>::lit(0);
-	EXPECT_TRUE(a->deterministic());
-	EXPECT_FALSE(a->isEmpty());
-	EXPECT_FALSE(a->infinite());
-	EXPECT_FALSE(a->run({}));
-	EXPECT_TRUE(a->run({0}));
-	EXPECT_FALSE(a->run({1}));
-	EXPECT_FALSE(a->run({0, 1}));
-	EXPECT_FALSE(a->run({1, 0}));
+	auto a = lit<2>(0);
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_FALSE(a.run({}));
+	EXPECT_TRUE(a.run({0}));
+	EXPECT_FALSE(a.run({1}));
+	EXPECT_FALSE(a.run({0, 1}));
+	EXPECT_FALSE(a.run({1, 0}));
 
-	a = Automaton<2>::lit(1);
-	EXPECT_TRUE(a->deterministic());
-	EXPECT_FALSE(a->isEmpty());
-	EXPECT_FALSE(a->infinite());
-	EXPECT_FALSE(a->run({}));
-	EXPECT_TRUE(a->run({1}));
-	EXPECT_FALSE(a->run({0}));
-	EXPECT_FALSE(a->run({0, 1}));
-	EXPECT_FALSE(a->run({1, 0}));
+	a = lit<2>(1);
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_FALSE(a.run({}));
+	EXPECT_TRUE(a.run({1}));
+	EXPECT_FALSE(a.run({0}));
+	EXPECT_FALSE(a.run({0, 1}));
+	EXPECT_FALSE(a.run({1, 0}));
 }
 
 TEST(AutomatonTest, Cat) {
-	auto a = Automaton<2>::lit(0);
-	auto cat = Automaton<2>::cat({a});
-	EXPECT_FALSE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
-	EXPECT_FALSE(cat->run({}));
-	EXPECT_TRUE(cat->run({0}));
-	EXPECT_FALSE(cat->run({1}));
-	EXPECT_FALSE(cat->run({0, 1}));
-	EXPECT_FALSE(cat->run({1, 0}));
+	auto a = lit<2>(0);
+	auto foo = cat<2>({a});
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_TRUE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
 
-	auto b = Automaton<2>::lit(1);
-	auto c = Automaton<2>::lit(0);
+	auto b = lit<2>(1);
+	auto c = lit<2>(0);
 
-	cat = Automaton<2>::cat({a, b, c});
-	EXPECT_FALSE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
-	EXPECT_FALSE(cat->run({}));
-	EXPECT_FALSE(cat->run({0}));
-	EXPECT_FALSE(cat->run({1}));
-	EXPECT_FALSE(cat->run({0, 1}));
-	EXPECT_FALSE(cat->run({1, 0}));
-	EXPECT_FALSE(cat->run({0, 0, 0}));
-	EXPECT_FALSE(cat->run({0, 0, 1}));
-	EXPECT_TRUE(cat->run({0, 1, 0}));
-	EXPECT_FALSE(cat->run({0, 1, 1}));
-	EXPECT_FALSE(cat->run({1, 0, 0}));
-	EXPECT_FALSE(cat->run({1, 0, 1}));
-	EXPECT_FALSE(cat->run({1, 1, 0}));
-	EXPECT_FALSE(cat->run({1, 1, 1}));
+	foo = cat<2>({a, b, c});
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_FALSE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 1}));
+	EXPECT_TRUE(foo.run({0, 1, 0}));
+	EXPECT_FALSE(foo.run({0, 1, 1}));
+	EXPECT_FALSE(foo.run({1, 0, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 1}));
+	EXPECT_FALSE(foo.run({1, 1, 0}));
+	EXPECT_FALSE(foo.run({1, 1, 1}));
 
-	auto e = Automaton<2>::epsilon();
-	auto ecat = Automaton<2>::cat({e});
+	auto e = epsilon<2>();
+	auto ecat = cat<2>({e});
 	equivalentOnAllStrings<2>(e, ecat, 8, __LINE__);
-	auto ee = Automaton<2>::cat({e, e});
+	auto ee = cat<2>({e, e});
 	equivalentOnAllStrings<2>(e, ee, 8, __LINE__);
-	auto f = Automaton<2>::cat({e, e, e, e, e});
+	auto f = cat<2>({e, e, e, e, e});
 	equivalentOnAllStrings<2>(e, f, 8, __LINE__);
 }
 
 TEST(AutomatonTest, Alt) {
-	auto a = Automaton<2>::lit(0);
-	auto alt = Automaton<2>::alt({a});
-	EXPECT_FALSE(alt->isEmpty());
-	EXPECT_FALSE(alt->infinite());
-	EXPECT_FALSE(alt->run({}));
-	EXPECT_TRUE(alt->run({0}));
-	EXPECT_FALSE(alt->run({1}));
-	EXPECT_FALSE(alt->run({0, 1}));
-	EXPECT_FALSE(alt->run({1, 0}));
+	auto a = lit<2>(0);
+	auto foo = alt<2>({a});
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_TRUE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
 
-	auto b = Automaton<2>::lit(1);
-	alt = Automaton<2>::alt({a, b});
-	EXPECT_FALSE(alt->isEmpty());
-	EXPECT_FALSE(alt->infinite());
-	EXPECT_FALSE(alt->run({}));
-	EXPECT_TRUE(alt->run({0}));
-	EXPECT_TRUE(alt->run({1}));
-	EXPECT_FALSE(alt->run({0, 1}));
-	EXPECT_FALSE(alt->run({1, 0}));
-	EXPECT_FALSE(alt->run({0, 0, 0}));
-	EXPECT_FALSE(alt->run({0, 0, 1}));
-	EXPECT_FALSE(alt->run({0, 1, 0}));
-	EXPECT_FALSE(alt->run({0, 1, 1}));
-	EXPECT_FALSE(alt->run({1, 0, 0}));
-	EXPECT_FALSE(alt->run({1, 0, 1}));
-	EXPECT_FALSE(alt->run({1, 1, 0}));
-	EXPECT_FALSE(alt->run({1, 1, 1}));
+	auto b = lit<2>(1);
+	foo = alt<2>({a, b});
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_TRUE(foo.run({0}));
+	EXPECT_TRUE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 1}));
+	EXPECT_FALSE(foo.run({0, 1, 0}));
+	EXPECT_FALSE(foo.run({0, 1, 1}));
+	EXPECT_FALSE(foo.run({1, 0, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 1}));
+	EXPECT_FALSE(foo.run({1, 1, 0}));
+	EXPECT_FALSE(foo.run({1, 1, 1}));
 
-	auto c = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	alt = Automaton<2>::alt({a, c});
-	EXPECT_FALSE(alt->isEmpty());
-	EXPECT_FALSE(alt->infinite());
-	EXPECT_FALSE(alt->run({}));
-	EXPECT_TRUE(alt->run({0}));
-	EXPECT_FALSE(alt->run({1}));
-	EXPECT_FALSE(alt->run({0, 1}));
-	EXPECT_TRUE(alt->run({1, 0}));
-	EXPECT_FALSE(alt->run({0, 0, 0}));
-	EXPECT_FALSE(alt->run({0, 0, 1}));
-	EXPECT_FALSE(alt->run({0, 1, 0}));
-	EXPECT_FALSE(alt->run({0, 1, 1}));
-	EXPECT_FALSE(alt->run({1, 0, 0}));
-	EXPECT_FALSE(alt->run({1, 0, 1}));
-	EXPECT_FALSE(alt->run({1, 1, 0}));
-	EXPECT_FALSE(alt->run({1, 1, 1}));
+	auto c = cat<2>({lit<2>(1), lit<2>(0)});
+	foo = alt<2>({a, c});
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_TRUE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_TRUE(foo.run({1, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 1}));
+	EXPECT_FALSE(foo.run({0, 1, 0}));
+	EXPECT_FALSE(foo.run({0, 1, 1}));
+	EXPECT_FALSE(foo.run({1, 0, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 1}));
+	EXPECT_FALSE(foo.run({1, 1, 0}));
+	EXPECT_FALSE(foo.run({1, 1, 1}));
 }
 
 TEST(AutomatonTest, CatAlt) {
-	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto cat = Automaton<2>::cat({a, a, a});
-	equivalentOnAllStrings<2>(cat, Automaton<2>::nCopies(Automaton<2>::any(), 3), 4, __LINE__);
-	EXPECT_FALSE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
+	auto a = alt<2>({lit<2>(0), lit<2>(1)});
+	auto foo = cat<2>({a, a, a});
+	equivalentOnAllStrings<2>(foo, nCopies<2>(any<2>(), 3), 4, __LINE__);
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
 }
 
 TEST(AutomatonTest, CatAltLitAlt) {
-	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a});
-	EXPECT_FALSE(cat->run({0, 0, 0}));
-	EXPECT_FALSE(cat->run({0, 0, 1}));
-	EXPECT_TRUE(cat->run({0, 1, 0}));
-	EXPECT_TRUE(cat->run({0, 1, 1}));
-	EXPECT_FALSE(cat->run({1, 0, 0}));
-	EXPECT_FALSE(cat->run({1, 0, 1}));
-	EXPECT_TRUE(cat->run({1, 1, 0}));
-	EXPECT_TRUE(cat->run({1, 1, 1}));
-	EXPECT_FALSE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
+	auto a = alt<2>({lit<2>(0), lit<2>(1)});
+	auto foo = cat<2>({a, lit<2>(1), a});
+	EXPECT_FALSE(foo.run({0, 0, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 1}));
+	EXPECT_TRUE(foo.run({0, 1, 0}));
+	EXPECT_TRUE(foo.run({0, 1, 1}));
+	EXPECT_FALSE(foo.run({1, 0, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 1}));
+	EXPECT_TRUE(foo.run({1, 1, 0}));
+	EXPECT_TRUE(foo.run({1, 1, 1}));
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
 }
 
 TEST(AutomatonTest, CatAltLitAltLitAlt) {
-	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a, Automaton<2>::lit(1), a});
-	EXPECT_FALSE(cat->run({0, 0, 0, 1, 0}));
-	EXPECT_FALSE(cat->run({0, 0, 1, 1, 0}));
-	EXPECT_TRUE(cat->run({0, 1, 0, 1, 0}));
-	EXPECT_TRUE(cat->run({0, 1, 1, 1, 0}));
-	EXPECT_FALSE(cat->run({1, 0, 0, 1, 0}));
-	EXPECT_FALSE(cat->run({1, 0, 1, 1, 0}));
-	EXPECT_TRUE(cat->run({1, 1, 0, 1, 0}));
-	EXPECT_TRUE(cat->run({1, 1, 1, 1, 0}));
-	EXPECT_FALSE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
+	auto a = alt<2>({lit<2>(0), lit<2>(1)});
+	auto foo = cat<2>({a, lit<2>(1), a, lit<2>(1), a});
+	EXPECT_FALSE(foo.run({0, 0, 0, 1, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 1, 1, 0}));
+	EXPECT_TRUE(foo.run({0, 1, 0, 1, 0}));
+	EXPECT_TRUE(foo.run({0, 1, 1, 1, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 0, 1, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 1, 1, 0}));
+	EXPECT_TRUE(foo.run({1, 1, 0, 1, 0}));
+	EXPECT_TRUE(foo.run({1, 1, 1, 1, 0}));
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
 }
 
 TEST(AutomatonTest, Conj) {
-	auto a = Automaton<2>::lit(0);
-	auto b = Automaton<2>::lit(0);
-	auto cat = Automaton<2>::conj(a, b);
-	EXPECT_FALSE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
-	EXPECT_FALSE(cat->run({}));
-	EXPECT_TRUE(cat->run({0}));
-	EXPECT_FALSE(cat->run({1}));
-	EXPECT_FALSE(cat->run({0, 1}));
-	EXPECT_FALSE(cat->run({1, 0}));
+	auto a = lit<2>(0);
+	auto b = lit<2>(0);
+	auto foo = conj<2>(a, b);
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_TRUE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
 
-	auto c = Automaton<2>::lit(1);
-	cat = Automaton<2>::conj(a, c);
-	EXPECT_TRUE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
-	EXPECT_FALSE(cat->run({}));
-	EXPECT_FALSE(cat->run({0}));
-	EXPECT_FALSE(cat->run({1}));
-	EXPECT_FALSE(cat->run({0, 1}));
-	EXPECT_FALSE(cat->run({1, 0}));
+	auto c = lit<2>(1);
+	foo = conj<2>(a, c);
+	EXPECT_TRUE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_FALSE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
 
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	cat = Automaton<2>::conj(f, d);
-	EXPECT_FALSE(cat->isEmpty());
-	EXPECT_FALSE(cat->infinite());
-	EXPECT_FALSE(cat->run({}));
-	EXPECT_FALSE(cat->run({0}));
-	EXPECT_FALSE(cat->run({1}));
-	EXPECT_TRUE(cat->run({0, 1}));
-	EXPECT_FALSE(cat->run({1, 0}));
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	foo = conj<2>(f, d);
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_FALSE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_TRUE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
 }
 
 TEST(AutomatonTest, Star) {
-	auto a = Automaton<2>::lit(0);
-	auto s = Automaton<2>::star(a);
-	EXPECT_TRUE(s->deterministic());
-	EXPECT_FALSE(s->isEmpty());
-	EXPECT_TRUE(s->infinite());
-	EXPECT_TRUE(s->run({}));
-	EXPECT_TRUE(s->run({0}));
-	EXPECT_TRUE(s->run({0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0}));
-	EXPECT_FALSE(s->run({1}));
-	EXPECT_FALSE(s->run({0, 1}));
-	EXPECT_FALSE(s->run({0, 0, 1}));
-	EXPECT_FALSE(s->run({1, 0, 0}));
+	auto a = lit<2>(0);
+	auto s = star<2>(a);
+	EXPECT_TRUE(s.deterministic());
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_TRUE(s.infinite());
+	EXPECT_TRUE(s.run({}));
+	EXPECT_TRUE(s.run({0}));
+	EXPECT_TRUE(s.run({0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0}));
+	EXPECT_FALSE(s.run({1}));
+	EXPECT_FALSE(s.run({0, 1}));
+	EXPECT_FALSE(s.run({0, 0, 1}));
+	EXPECT_FALSE(s.run({1, 0, 0}));
 }
 
 TEST(AutomatonTest, NCopies) {
-	auto a = Automaton<2>::lit(0);
-	auto s = Automaton<2>::nCopies(a, 3);
-	EXPECT_FALSE(s->isEmpty());
-	EXPECT_FALSE(s->infinite());
-	EXPECT_FALSE(s->run({}));
-	EXPECT_FALSE(s->run({0}));
-	EXPECT_FALSE(s->run({0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({1}));
-	EXPECT_FALSE(s->run({0, 1}));
-	EXPECT_FALSE(s->run({0, 0, 1}));
-	EXPECT_FALSE(s->run({1, 0, 0}));
+	auto a = lit<2>(0);
+	auto s = nCopies<2>(a, 3);
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_FALSE(s.infinite());
+	EXPECT_FALSE(s.run({}));
+	EXPECT_FALSE(s.run({0}));
+	EXPECT_FALSE(s.run({0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({1}));
+	EXPECT_FALSE(s.run({0, 1}));
+	EXPECT_FALSE(s.run({0, 0, 1}));
+	EXPECT_FALSE(s.run({1, 0, 0}));
 }
 
 TEST(AutomatonTest, StarNCopies) {
 	//any multiple of 3, including 0
-	auto s = Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3));
-	EXPECT_FALSE(s->isEmpty());
-	EXPECT_TRUE(s->infinite());
-	EXPECT_TRUE(s->run({}));
-	EXPECT_FALSE(s->run({0}));
-	EXPECT_FALSE(s->run({1}));
-	EXPECT_FALSE(s->run({0, 0}));
-	EXPECT_FALSE(s->run({1, 1}));
-	EXPECT_TRUE(s->run({0, 0, 0}));
-	EXPECT_TRUE(s->run({1, 0, 1}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0, 0, 0}));
+	auto s = star<2>(nCopies<2>(any<2>(), 3));
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_TRUE(s.infinite());
+	EXPECT_TRUE(s.run({}));
+	EXPECT_FALSE(s.run({0}));
+	EXPECT_FALSE(s.run({1}));
+	EXPECT_FALSE(s.run({0, 0}));
+	EXPECT_FALSE(s.run({1, 1}));
+	EXPECT_TRUE(s.run({0, 0, 0}));
+	EXPECT_TRUE(s.run({1, 0, 1}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0, 0, 0, 0}));
 }
 
 TEST(AutomatonTest, PlusNCopies) {
 	//any multiple of 3 except 0
-	auto s = Automaton<2>::plus(Automaton<2>::nCopies(Automaton<2>::any(), 3));
-	EXPECT_FALSE(s->isEmpty());
-	EXPECT_TRUE(s->infinite());
-	EXPECT_FALSE(s->run({}));
-	EXPECT_FALSE(s->run({0}));
-	EXPECT_FALSE(s->run({1}));
-	EXPECT_FALSE(s->run({0, 0}));
-	EXPECT_FALSE(s->run({1, 1}));
-	EXPECT_TRUE(s->run({0, 0, 0}));
-	EXPECT_TRUE(s->run({1, 0, 1}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0, 0, 0}));
+	auto s = plus<2>(nCopies<2>(any<2>(), 3));
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_TRUE(s.infinite());
+	EXPECT_FALSE(s.run({}));
+	EXPECT_FALSE(s.run({0}));
+	EXPECT_FALSE(s.run({1}));
+	EXPECT_FALSE(s.run({0, 0}));
+	EXPECT_FALSE(s.run({1, 1}));
+	EXPECT_TRUE(s.run({0, 0, 0}));
+	EXPECT_TRUE(s.run({1, 0, 1}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0, 0, 0, 0}));
 }
 
 TEST(AutomatonTest, NOrMore) {
-	auto a = Automaton<2>::lit(0);
-	auto s = Automaton<2>::nOrMore(a, 3);
-	EXPECT_FALSE(s->isEmpty());
-	EXPECT_TRUE(s->infinite());
-	EXPECT_FALSE(s->run({}));
-	EXPECT_FALSE(s->run({0}));
-	EXPECT_FALSE(s->run({0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({1}));
-	EXPECT_FALSE(s->run({0, 1}));
-	EXPECT_FALSE(s->run({0, 0, 1}));
-	EXPECT_FALSE(s->run({1, 0, 0}));
+	auto a = lit<2>(0);
+	auto s = nOrMore<2>(a, 3);
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_TRUE(s.infinite());
+	EXPECT_FALSE(s.run({}));
+	EXPECT_FALSE(s.run({0}));
+	EXPECT_FALSE(s.run({0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({1}));
+	EXPECT_FALSE(s.run({0, 1}));
+	EXPECT_FALSE(s.run({0, 0, 1}));
+	EXPECT_FALSE(s.run({1, 0, 0}));
 }
 
 TEST(AutomatonTest, Range) {
-	auto a = Automaton<2>::lit(0);
-	auto s = Automaton<2>::range(a, 2, 6);
-	EXPECT_FALSE(s->isEmpty());
-	EXPECT_FALSE(s->infinite());
-	EXPECT_FALSE(s->run({}));
-	EXPECT_FALSE(s->run({0}));
-	EXPECT_TRUE(s->run({0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({1}));
-	EXPECT_FALSE(s->run({0, 1}));
-	EXPECT_FALSE(s->run({0, 0, 1}));
-	EXPECT_FALSE(s->run({1, 0, 0}));
+	auto a = lit<2>(0);
+	auto s = range<2>(a, 2, 6);
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_FALSE(s.infinite());
+	EXPECT_FALSE(s.run({}));
+	EXPECT_FALSE(s.run({0}));
+	EXPECT_TRUE(s.run({0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({1}));
+	EXPECT_FALSE(s.run({0, 1}));
+	EXPECT_FALSE(s.run({0, 0, 1}));
+	EXPECT_FALSE(s.run({1, 0, 0}));
 }
 
 TEST(AutomatonTest, Comp) {
-	auto a = Automaton<2>::lit(0);
-	auto comp = Automaton<2>::comp(a);
-	EXPECT_FALSE(comp->isEmpty());
-	EXPECT_TRUE(comp->infinite());
-	EXPECT_TRUE(comp->run({}));
-	EXPECT_FALSE(comp->run({0}));
-	EXPECT_TRUE(comp->run({1}));
-	EXPECT_TRUE(comp->run({0, 1, 0}));
+	auto a = lit<2>(0);
+	auto foo = comp<2>(a);
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_TRUE(foo.infinite());
+	EXPECT_TRUE(foo.run({}));
+	EXPECT_FALSE(foo.run({0}));
+	EXPECT_TRUE(foo.run({1}));
+	EXPECT_TRUE(foo.run({0, 1, 0}));
 
-	auto s = Automaton<2>::range(a, 2, 6);
-	s = Automaton<2>::comp(s);
-	EXPECT_FALSE(s->isEmpty());
-	EXPECT_TRUE(s->infinite());
-	EXPECT_TRUE(s->run({}));
-	EXPECT_TRUE(s->run({0}));
-	EXPECT_FALSE(s->run({0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0}));
-	EXPECT_FALSE(s->run({0, 0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({0, 0, 0, 0, 0, 0, 0}));
-	EXPECT_TRUE(s->run({1}));
-	EXPECT_TRUE(s->run({0, 1}));
-	EXPECT_TRUE(s->run({0, 0, 1}));
-	EXPECT_TRUE(s->run({1, 0, 0}));
+	auto s = range<2>(a, 2, 6);
+	s = comp<2>(s);
+	EXPECT_FALSE(s.isEmpty());
+	EXPECT_TRUE(s.infinite());
+	EXPECT_TRUE(s.run({}));
+	EXPECT_TRUE(s.run({0}));
+	EXPECT_FALSE(s.run({0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0}));
+	EXPECT_FALSE(s.run({0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({0, 0, 0, 0, 0, 0, 0}));
+	EXPECT_TRUE(s.run({1}));
+	EXPECT_TRUE(s.run({0, 1}));
+	EXPECT_TRUE(s.run({0, 0, 1}));
+	EXPECT_TRUE(s.run({1, 0, 0}));
 }
 
 TEST(AutomatonTest, Clone) {
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
 	equivalentOnAllStrings<2>(a, b, 8);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
 	equivalentOnAllStrings<2>(f, fc, 8);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
 TEST(AutomatonTest, Determinize) {
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
-	b->determinize();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
+	b.determinize();
 	equivalentOnAllStrings<2>(a, b, 8);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
-	fc->determinize();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
+	fc.determinize();
 	equivalentOnAllStrings<2>(f, fc, 8);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
-	gc->determinize();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
+	gc.determinize();
 	equivalentOnAllStrings<2>(g, gc, 8);
 
-	auto multOf3 = Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3));
-	auto multOf3Clone = multOf3->clone();
-	multOf3Clone->determinize();
+	auto multOf3 = star<2>(nCopies<2>(any<2>(), 3));
+	auto multOf3Clone = multOf3; //clone
+	multOf3Clone.determinize();
 	equivalentOnAllStrings<2>(multOf3, multOf3Clone, 8, __LINE__);
 
-	auto finiteMultOf3 = Automaton<2>::conj(multOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
-	auto finiteMultOf3Clone = finiteMultOf3->clone();
-	finiteMultOf3Clone->determinize();
+	auto finiteMultOf3 = conj<2>(multOf3, nCopies<2>(any<2>(), 6));
+	auto finiteMultOf3Clone = finiteMultOf3; //clone
+	finiteMultOf3Clone.determinize();
 	equivalentOnAllStrings<2>(finiteMultOf3, finiteMultOf3Clone, 8, __LINE__);
 
-	auto posMultOf3 = Automaton<2>::plus(Automaton<2>::nCopies(Automaton<2>::any(), 3));
-	auto posMultOf3Clone = posMultOf3->clone();
-	posMultOf3Clone->determinize();
+	auto posMultOf3 = plus<2>(nCopies<2>(any<2>(), 3));
+	auto posMultOf3Clone = posMultOf3; //clone
+	posMultOf3Clone.determinize();
 	equivalentOnAllStrings<2>(posMultOf3, posMultOf3Clone, 8, __LINE__);
 
-	auto finitePosMultOf3 = Automaton<2>::conj(posMultOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
-	auto finitePosMultOf3Clone = finitePosMultOf3->clone();
-	finitePosMultOf3Clone->determinize();
+	auto finitePosMultOf3 = conj<2>(posMultOf3, nCopies<2>(any<2>(), 6));
+	auto finitePosMultOf3Clone = finitePosMultOf3; //clone
+	finitePosMultOf3Clone.determinize();
 	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, Totalize) {
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
-	b->totalize();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
+	b.totalize();
 	equivalentOnAllStrings<2>(a, b, 8);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
-	fc->totalize();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
+	fc.totalize();
 	equivalentOnAllStrings<2>(f, fc, 8);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
-	gc->totalize();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
+	gc.totalize();
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
 TEST(AutomatonTest, DeterminizeTotalize) {
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
-	b->determinize();
-	b->totalize();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
+	b.determinize();
+	b.totalize();
 	equivalentOnAllStrings<2>(a, b, 8);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
-	fc->determinize();
-	fc->totalize();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
+	fc.determinize();
+	fc.totalize();
 	equivalentOnAllStrings<2>(f, fc, 8);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
-	gc->determinize();
-	gc->totalize();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
+	gc.determinize();
+	gc.totalize();
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
 TEST(AutomatonTest, TotalizeDeterminize) {
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
-	b->totalize();
-	b->determinize();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
+	b.totalize();
+	b.determinize();
 	equivalentOnAllStrings<2>(a, b, 8);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
-	fc->totalize();
-	fc->determinize();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
+	fc.totalize();
+	fc.determinize();
 	equivalentOnAllStrings<2>(f, fc, 8);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
-	gc->totalize();
-	gc->determinize();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
+	gc.totalize();
+	gc.determinize();
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
 TEST(AutomatonTest, RemoveDeadStates) {
-	auto p = Automaton<2>::lit(0);
-	auto q = p->clone();
-	q->removeDeadStates();
+	auto p = lit<2>(0);
+	auto q = p; //clone
+	q.removeDeadStates();
 	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
-	p = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	q = p->clone();
-	q->removeDeadStates();
+	p = cat<2>({lit<2>(0), lit<2>(1)});
+	q = p; //clone
+	q.removeDeadStates();
 	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
-	b->removeDeadStates();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
+	b.removeDeadStates();
 	equivalentOnAllStrings<2>(a, b, 8, __LINE__);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
-	fc->removeDeadStates();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
+	fc.removeDeadStates();
 	equivalentOnAllStrings<2>(f, fc, 8, __LINE__);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
-	gc->removeDeadStates();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
+	gc.removeDeadStates();
 	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
-	auto h = Automaton<2>::comp(Automaton<2>::lit(0));
-	auto hc = h->clone();
-	hc->removeDeadStates();
+	auto h = comp<2>(lit<2>(0));
+	auto hc = h; //clone
+	hc.removeDeadStates();
 	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
 }
 
 TEST(AutomatonTest, DeterminizeRemoveDeadStates) {
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
-	b->determinize();
-	b->removeDeadStates();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
+	b.determinize();
+	b.removeDeadStates();
 	equivalentOnAllStrings<2>(a, b, 8, __LINE__);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
-	fc->determinize();
-	fc->removeDeadStates();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
+	fc.determinize();
+	fc.removeDeadStates();
 	equivalentOnAllStrings<2>(f, fc, 8, __LINE__);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
-	gc->determinize();
-	gc->removeDeadStates();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
+	gc.determinize();
+	gc.removeDeadStates();
 	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
 }
 
 TEST(AutomatonTest, Minimize) {
-	auto p = Automaton<2>::lit(0);
-	auto q = p->clone();
-	q->minimize();
+	auto p = lit<2>(0);
+	auto q = p; //clone
+	q.minimize();
 	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
-	p = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	q = p->clone();
-	q->minimize();
+	p = cat<2>({lit<2>(0), lit<2>(1)});
+	q = p; //clone
+	q.minimize();
 	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
-	auto a = Automaton<2>::range(Automaton<2>::lit(0), 2, 6);
-	auto b = a->clone();
-	b->minimize();
+	auto a = range<2>(lit<2>(0), 2, 6);
+	auto b = a; //clone
+	b.minimize();
 	equivalentOnAllStrings<2>(a, b, 8, __LINE__);
-	auto d = Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto e = Automaton<2>::cat({Automaton<2>::lit(1), Automaton<2>::lit(0)});
-	auto f = Automaton<2>::alt({d, e});
-	auto fc = f->clone();
-	fc->minimize();
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto fc = f; //clone
+	fc.minimize();
 	equivalentOnAllStrings<2>(f, fc, 8, __LINE__);
-	auto g = Automaton<2>::conj(f, d);
-	auto gc = g->clone();
-	gc->minimize();
+	auto g = conj<2>(f, d);
+	auto gc = g; //clone
+	gc.minimize();
 	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
-	auto h = Automaton<2>::comp(Automaton<2>::lit(0));
-	auto hc = h->clone();
-	hc->minimize();
+	auto h = comp<2>(lit<2>(0));
+	auto hc = h; //clone
+	hc.minimize();
 	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
-	h = Automaton<2>::all();
-	hc = h->clone();
-	hc->minimize();
+	h = all<2>();
+	hc = h; //clone
+	hc.minimize();
 	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
-	h = Automaton<2>::empty();
-	hc = h->clone();
-	hc->minimize();
+	h = empty<2>();
+	hc = h; //clone
+	hc.minimize();
 	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
-	h = Automaton<2>::alt({d, d, d, d, d, d, d});
-	hc = h->clone();
-	hc->minimize();
+	h = alt<2>({d, d, d, d, d, d, d});
+	hc = h; //clone
+	hc.minimize();
 	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
 
-	auto multOf3 = Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3));
-	auto multOf3Clone = multOf3->clone();
-	multOf3Clone->minimize();
+	auto multOf3 = star<2>(nCopies<2>(any<2>(), 3));
+	auto multOf3Clone = multOf3; //clone
+	multOf3Clone.minimize();
 	equivalentOnAllStrings<2>(multOf3, multOf3Clone, 8, __LINE__);
 
-	auto multOf3Zero = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3)), Automaton<2>::lit(0)});
-	auto multOf3ZeroClone = multOf3Zero->clone();
-	multOf3ZeroClone->minimize();
+	auto multOf3Zero = cat<2>({star<2>(nCopies<2>(any<2>(), 3)), lit<2>(0)});
+	auto multOf3ZeroClone = multOf3Zero; //clone
+	multOf3ZeroClone.minimize();
 	equivalentOnAllStrings<2>(multOf3Zero, multOf3ZeroClone, 8, __LINE__);
 
-	auto multOf3One = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::nCopies(Automaton<2>::any(), 3)), Automaton<2>::lit(1)});
-	auto multOf3OneClone = multOf3One->clone();
-	multOf3OneClone->minimize();
+	auto multOf3One = cat<2>({star<2>(nCopies<2>(any<2>(), 3)), lit<2>(1)});
+	auto multOf3OneClone = multOf3One; //clone
+	multOf3OneClone.minimize();
 	equivalentOnAllStrings<2>(multOf3One, multOf3OneClone, 8, __LINE__);
 
-	auto finiteMultOf3 = Automaton<2>::conj(multOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
-	auto finiteMultOf3Clone = finiteMultOf3->clone();
-	finiteMultOf3Clone->minimize();
+	auto finiteMultOf3 = conj<2>(multOf3, nCopies<2>(any<2>(), 6));
+	auto finiteMultOf3Clone = finiteMultOf3; //clone
+	finiteMultOf3Clone.minimize();
 	equivalentOnAllStrings<2>(finiteMultOf3, finiteMultOf3Clone, 8, __LINE__);
 
-	auto posMultOf3 = Automaton<2>::plus(Automaton<2>::nCopies(Automaton<2>::any(), 3));
-	auto posMultOf3Clone = posMultOf3->clone();
-	posMultOf3Clone->minimize();
+	auto posMultOf3 = plus<2>(nCopies<2>(any<2>(), 3));
+	auto posMultOf3Clone = posMultOf3; //clone
+	posMultOf3Clone.minimize();
 	equivalentOnAllStrings<2>(posMultOf3, posMultOf3Clone, 8, __LINE__);
 
-	auto finitePosMultOf3 = Automaton<2>::conj(posMultOf3, Automaton<2>::nCopies(Automaton<2>::any(), 6));
-	auto finitePosMultOf3Clone = finitePosMultOf3->clone();
-	finitePosMultOf3Clone->minimize();
+	auto finitePosMultOf3 = conj<2>(posMultOf3, nCopies<2>(any<2>(), 6));
+	auto finitePosMultOf3Clone = finitePosMultOf3; //clone
+	finitePosMultOf3Clone.minimize();
 	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
 
-	auto zeroStarOne = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::lit(0)), Automaton<2>::lit(1)});
-	auto zeroStarOneClone = zeroStarOne->clone();
-	zeroStarOneClone->minimize();
+	auto zeroStarOne = cat<2>({star<2>(lit<2>(0)), lit<2>(1)});
+	auto zeroStarOneClone = zeroStarOne; //clone
+	zeroStarOneClone.minimize();
 	equivalentOnAllStrings<2>(zeroStarOne, zeroStarOneClone, 8, __LINE__);
 
-	auto zeroZeroStarOne = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(0)})), Automaton<2>::lit(1)});
-	auto zeroZeroStarOneClone = zeroZeroStarOne->clone();
-	zeroZeroStarOneClone->minimize();
+	auto zeroZeroStarOne = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(0)})), lit<2>(1)});
+	auto zeroZeroStarOneClone = zeroZeroStarOne; //clone
+	zeroZeroStarOneClone.minimize();
 	equivalentOnAllStrings<2>(zeroZeroStarOne, zeroZeroStarOneClone, 8, __LINE__);
 
-	auto zeroOneStarOne = Automaton<2>::cat({Automaton<2>::star(Automaton<2>::cat({Automaton<2>::lit(0), Automaton<2>::lit(1)})), Automaton<2>::lit(1)});
-	auto zeroOneStarOneClone = zeroOneStarOne->clone();
-	zeroOneStarOneClone->minimize();
+	auto zeroOneStarOne = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
+	auto zeroOneStarOneClone = zeroOneStarOne; //clone
+	zeroOneStarOneClone.minimize();
 	equivalentOnAllStrings<2>(zeroOneStarOne, zeroOneStarOneClone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, CatAltMinimize) {
-	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto cat = Automaton<2>::cat({a, a, a});
-	auto catClone = cat->clone();
-	catClone->minimize();
-	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+	auto a = alt<2>({lit<2>(0), lit<2>(1)});
+	auto foo = cat<2>({a, a, a});
+	auto catClone = foo; //clone
+	catClone.minimize();
+	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, CatAltLitAltMinimize) {
-	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a});
-	auto catClone = cat->clone();
-	catClone->minimize();
-	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+	auto a = alt<2>({lit<2>(0), lit<2>(1)});
+	auto foo = cat<2>({a, lit<2>(1), a});
+	auto catClone = foo; //clone
+	catClone.minimize();
+	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, CatAltLitAltLitAltMinimize) {
-	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a, Automaton<2>::lit(1), a});
-	auto catClone = cat->clone();
-	catClone->minimize();
-	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+	auto a = alt<2>({lit<2>(0), lit<2>(1)});
+	auto foo = cat<2>({a, lit<2>(1), a, lit<2>(1), a});
+	auto catClone = foo; //clone
+	catClone.minimize();
+	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, CatAltLitAltRemoveDeadStates) {
-	auto a = Automaton<2>::alt({Automaton<2>::lit(0), Automaton<2>::lit(1)});
-	auto cat = Automaton<2>::cat({a, Automaton<2>::lit(1), a});
-	auto catClone = cat->clone();
-	catClone->removeDeadStates();
-	equivalentOnAllStrings<2>(cat, catClone, 8, __LINE__);
+	auto a = alt<2>({lit<2>(0), lit<2>(1)});
+	auto foo = cat<2>({a, lit<2>(1), a});
+	auto catClone = foo; //clone
+	catClone.removeDeadStates();
+	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, CatAltMinimizeTrinary) {
-	auto a = Automaton<3>::alt({Automaton<3>::lit(0), Automaton<3>::lit(1)});
-	auto b = Automaton<3>::any();
-	auto cat = Automaton<3>::cat({a, b, a});
-	auto catClone = cat->clone();
-	catClone->minimize();
-	equivalentOnAllStrings<3>(cat, catClone, 8, __LINE__);
+	auto a = alt<3>({lit<3>(0), lit<3>(1)});
+	auto b = any<3>();
+	auto foo = cat<3>({a, b, a});
+	auto catClone = foo; //clone
+	catClone.minimize();
+	equivalentOnAllStrings<3>(foo, catClone, 8, __LINE__);
 }
 
 TEST(AutomatonTest, HashSanity) {
-	auto a = Automaton<2>::any();
-	std::hash<Automaton<2>>()(*a);
+	auto a = any<2>();
+	std::hash<Automaton<2>>()(a);
 }
 
 template<class A>
@@ -774,11 +775,11 @@ bool eq(boost::intrusive_ptr<Automaton<S>> left, boost::intrusive_ptr<Automaton<
 }
 
 TEST(AutomatonTest, EqualitySanity) {
-	ASSERT_TRUE(eq(Automaton<2>::any(), Automaton<2>::any()));
-	ASSERT_TRUE(eq(Automaton<4>::any(), Automaton<4>::any()));
-	ASSERT_TRUE(eq(Automaton<5>::any(), Automaton<5>::any()));
-	ASSERT_TRUE(eq(Automaton<12>::any(), Automaton<12>::any()));
+	ASSERT_TRUE(eq(any<2>(), any<2>()));
+	ASSERT_TRUE(eq(any<4>(), any<4>()));
+	ASSERT_TRUE(eq(any<5>(), any<5>()));
+	ASSERT_TRUE(eq(any<12>(), any<12>()));
 
-	ASSERT_TRUE(eq(Automaton<2>::lit(0), Automaton<2>::lit(0)));
-	ASSERT_FALSE(eq(Automaton<2>::lit(0), Automaton<2>::lit(1)));
+	ASSERT_TRUE(eq(lit<2>(0), lit<2>(0)));
+	ASSERT_FALSE(eq(lit<2>(0), lit<2>(1)));
 }
