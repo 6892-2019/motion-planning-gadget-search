@@ -7,13 +7,13 @@
 
 using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
-using automaton_ptr = typename automaton_type::ptr;
-using automaton_const_ptr = typename automaton_type::const_ptr;
+using automaton_const_ptr = std::shared_ptr<const automaton_type>;
 using alphabet_type = ByteAlphabet<8>;
 using regex_type = automaton::Regex<alphabet_type>;
 
 struct Gadget {
 	Gadget() = default;
+	Gadget(automaton_type&& a, unsigned int locations) : Gadget(std::make_shared<const automaton_type>(std::move(a)), locations) {}
 	Gadget(automaton_const_ptr a, unsigned int locations) : a_(a), locations_(locations) {}
 
 	bool operator==(const Gadget& other) const {
@@ -149,7 +149,7 @@ constexpr Registry::index_type Registry::ABSENT;
 
 static Registry registry(9001);
 
-void canonicalize(automaton_ptr a, unsigned int locations) {
+void canonicalize(automaton_type& a, unsigned int locations) {
 	sparsegraph sg, canon;
 	SG_INIT(sg);
 	sg.nv = 0;
@@ -164,22 +164,22 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	std::unordered_map<std::pair<state_type, unsigned int>, int,
 		boost::hash<std::pair<state_type, unsigned int>>> towers;
 	std::unordered_map<unsigned int, int> edgecolors;
-	for (state_type s = 0; s < a->size(); ++s)
+	for (state_type s = 0; s < a.size(); ++s)
 		for (unsigned int l = 0; l < locations; ++l)
 			towers[{s, l}] = sg.nv++;
 	for (unsigned int l = 0; l < locations; ++l)
 		edgecolors[l] = sg.nv++;
 	sg.nde = 2 * towers.size() //undirected cycle through each tower
 			+ 2 * edgecolors.size() //undirected cycle through the colors
-			+ 2 * a->size() * edgecolors.size() //undirected edge between each color and each node in its level
-			+ a->edges();
+			+ 2 * a.size() * edgecolors.size() //undirected edge between each color and each node in its level
+			+ a.edges();
 	SG_ALLOC(sg, sg.nv, sg.nde, "asdf");
 
 	auto incr = [&](symbol_type s){return s == locations-1 ? 0 : s+1;};
 	auto decr = [&](symbol_type s){return s == 0 ? locations-1 : s-1;};
 
 	int ei = 0;
-	for (state_type s = 0; s < a->size(); ++s)
+	for (state_type s = 0; s < a.size(); ++s)
 		for (unsigned int l = 0; l < locations; ++l) {
 			int vi = towers.at({s, l});
 			sg.v[vi] = ei;
@@ -190,7 +190,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 
 			sg.e[ei++] = edgecolors.at(l);
 
-			auto dests = a->step(s, l);
+			auto dests = a.step(s, l);
 			assert(dests.size() <= 1 && "should already be deterministic");
 			if (!dests.empty())
 				sg.e[ei++] = towers.at({dests.front(), l});
@@ -203,7 +203,7 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 		sg.v[vi] = ei;
 		sg.e[ei++] = edgecolors.at(decr(l));
 		sg.e[ei++] = edgecolors.at(incr(l));
-		for (state_type s = 0; s < a->size(); ++s)
+		for (state_type s = 0; s < a.size(); ++s)
 			sg.e[ei++] = towers.at({s, l});
 		sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 	}
@@ -225,10 +225,10 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 	SG_FREE(canon);
 	SG_FREE(sg);
 
-	dynarray<state_type> stateinvperm(a->size());
+	dynarray<state_type> stateinvperm(a.size());
 	std::iota(stateinvperm.begin(), stateinvperm.end(), 0);
 	std::sort(stateinvperm.begin(), stateinvperm.end(), [&](auto l, auto r){return lab[towers.at({l, 0})] < lab[towers.at({r, 0})];});
-	dynarray<state_type> stateperm(a->size());
+	dynarray<state_type> stateperm(a.size());
 	for (state_type i = 0; i < stateperm.size(); ++i)
 		stateperm[stateinvperm[i]] = i;
 	//state 0 is the initial state, we can't renumber it
@@ -245,8 +245,8 @@ void canonicalize(automaton_ptr a, unsigned int locations) {
 		locationperm[i] = minloc;
 	std::fill(locationperm.begin()+locations, locationperm.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 
-	a->renumber(stateperm.begin(), locationperm.begin());
-	a->prepareForEquals();
+	a.renumber(stateperm.begin(), locationperm.begin());
+	a.prepareForEquals();
 }
 
 template<typename OutputIterator>
@@ -267,15 +267,15 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 		std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_, 0);
 		for (location_type rl = 0; rl < right.locations_; ++rl) {
-			automaton_ptr lm = left.a_->clone();
-			lm->renumberAlphabet(slide);
-			automaton_ptr rm = right.a_->clone();
-			rm->renumberAlphabet(sliderotate);
-			automaton_ptr combined = automaton_type::shuffleAccept(lm, rm);
-			combined->minimize();
+			automaton_type lm = *left.a_;
+			lm.renumberAlphabet(slide);
+			automaton_type rm = *right.a_;
+			rm.renumberAlphabet(sliderotate);
+			automaton_type combined = automaton::shuffleAccept(lm, rm);
+			combined.minimize();
 			canonicalize(combined, left.locations_ + right.locations_);
-			*out++ = std::make_pair(Gadget(combined, left.locations_ + right.locations_),
-					Provenance(l, ll, r, rl));
+			*out++ = std::make_pair(Gadget(std::make_shared<const automaton_type>(std::move(combined)),
+					left.locations_ + right.locations_), Provenance(l, ll, r, rl));
 
 			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_-1, sliderotate.begin()+ll+right.locations_);
 		}
@@ -298,7 +298,7 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size_v);
 	for (unsigned int l = 0; l < g.locations_; ++l) {
 		unsigned int m = (l+1) % g.locations_;
-		automaton_ptr connected = g.a_->clone();
+		auto connected = std::make_shared<automaton_type>(*g.a_);
 		//TODO: fixpoint iteration may not actually be necessary
 		bool progress = true;
 		while (progress) {
@@ -345,8 +345,8 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 		alphamap.push_back(std::numeric_limits<symbol_type>::max());
 		connected->renumberAlphabet(0, connected->size(), alphamap.begin());
 		connected->minimize();
-		canonicalize(connected, g.locations_ - 2);
-		*out++ = std::make_pair(Gadget(connected, g.locations_ - 2), Provenance(gadgetIndex, l));
+		canonicalize(*connected, g.locations_ - 2);
+		*out++ = std::make_pair(Gadget(std::move(connected), g.locations_ - 2), Provenance(gadgetIndex, l));
 	}
 	return out;
 }
@@ -372,28 +372,28 @@ void mainloop(const automaton_type& target) {
 
 int main(int argc, char* argv[]) {
 	using R = regex_type;
-	automaton_ptr split = R::star(R::alt({R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
+	automaton_type split = R::star(R::alt({R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
 			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
 			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
-	split->minimize();
+	split.minimize();
 	canonicalize(split, 3);
 	//TODO: provenance for initial gadgets
 	registry.offer(Gadget(std::move(split), 3), Provenance(100000, 0));
 
 	R ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(3), R::lit(2)})});
 	R rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(2), R::lit(3)})});
-	automaton_ptr parallelToggle = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
-	parallelToggle->minimize();
+	automaton_type parallelToggle = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
+	parallelToggle.minimize();
 	canonicalize(parallelToggle, 4);
 	registry.offer(Gadget(std::move(parallelToggle), 4), Provenance(100001, 0));
 
 	ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(2), R::lit(3)})});
 	rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(3), R::lit(2)})});
-	automaton_ptr antiparallelToggle = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
-	antiparallelToggle->minimize();
+	automaton_type antiparallelToggle = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
+	antiparallelToggle.minimize();
 	canonicalize(antiparallelToggle, 4);
 	while (true) {
-		mainloop(*antiparallelToggle);
+		mainloop(antiparallelToggle);
 	}
 	return 0;
 }
