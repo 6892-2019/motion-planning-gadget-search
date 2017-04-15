@@ -14,6 +14,8 @@
 //typos corrected, reformatted
 //thinking about it, maybe just "permute" would be a better name, should I
 //actually write a standards paper for this
+//in light of the function below, maybe "permute_from" and "permute_to"
+//indices indicate where an element moves from
 template<typename Iter1, typename Iter2>
 void apply_permutation(Iter1 first, Iter1 last, Iter2 indices) {
 	using T = typename std::iterator_traits<Iter1>::value_type;
@@ -31,6 +33,25 @@ void apply_permutation(Iter1 first, Iter1 last, Iter2 indices) {
 			}
 			first[current] = std::move(t);
 			indices[current] = current;
+		}
+	}
+}
+
+//by Raymond Chen: https://blogs.msdn.microsoft.com/oldnewthing/20170111-00/?p=95165
+//reformated, throws changed to asserts
+//indices indicate where an element should move to
+template<typename Iter1, typename Iter2>
+void apply_reverse_permutation(Iter1 first, Iter1 last, Iter2 indices) {
+	using Diff = typename std::iterator_traits<Iter2>::value_type;
+	using std::swap;
+	Diff length = std::distance(first, last);
+	for (Diff i = 0; i < length; i++) {
+		while (i != indices[i]) {
+			Diff next = indices[i];
+			assert(0 <= next && next <= length && "invalid index in permutation");
+			assert(next != indices[next] && "not a permutation");
+			swap(first[i], first[next]);
+			swap(indices[i], indices[next]);
 		}
 	}
 }
