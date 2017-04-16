@@ -470,6 +470,37 @@ TEST(AutomatonTest, Comp) {
 	EXPECT_TRUE(s.run({0, 1}));
 	EXPECT_TRUE(s.run({0, 0, 1}));
 	EXPECT_TRUE(s.run({1, 0, 0}));
+
+	auto t = alt({lit<2>(0), lit<2>(1)});
+	auto tc = comp(t);
+	EXPECT_TRUE(tc.run({}));
+	EXPECT_FALSE(tc.run({0}));
+	EXPECT_FALSE(tc.run({1}));
+	EXPECT_TRUE(tc.run({0, 0}));
+	EXPECT_TRUE(tc.run({0, 1}));
+	EXPECT_TRUE(tc.run({1, 0}));
+	EXPECT_TRUE(tc.run({1, 1}));
+
+	auto u = alt({cat({lit<2>(0), lit<2>(1)})});
+	auto uc = comp(u);
+	EXPECT_TRUE(uc.run({}));
+	EXPECT_TRUE(uc.run({0}));
+	EXPECT_TRUE(uc.run({1}));
+	EXPECT_TRUE(uc.run({0, 0}));
+	EXPECT_FALSE(uc.run({0, 1}));
+	EXPECT_TRUE(uc.run({1, 0}));
+	EXPECT_TRUE(uc.run({1, 1}));
+
+	auto u3 = alt({cat({lit<2>(0), lit<2>(1)}), cat({lit<2>(0), lit<2>(1)}), cat({lit<2>(0), lit<2>(1)})});
+	EXPECT_TRUE(u3.run({0, 1}));
+	auto u3c = comp(u3);
+	EXPECT_TRUE(u3c.run({}));
+	EXPECT_TRUE(u3c.run({0}));
+	EXPECT_TRUE(u3c.run({1}));
+	EXPECT_TRUE(u3c.run({0, 0}));
+	EXPECT_FALSE(u3c.run({0, 1}));
+	EXPECT_TRUE(u3c.run({1, 0}));
+	EXPECT_TRUE(u3c.run({1, 1}));
 }
 
 TEST(AutomatonTest, Clone) {

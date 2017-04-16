@@ -1797,15 +1797,13 @@ Automaton<N> range(const Automaton<N>& a, unsigned int min, unsigned int max) {
 }
 
 template<unsigned int N>
-Automaton<N> comp(const Automaton<N>& a) {
-	Automaton<N> ret(a);
-	ret.determinize();
-	ret.totalize();
+Automaton<N> comp(Automaton<N> a) {
+	a.determinize();
+	a.totalize();
 	//TODO: we could add a method to flip everything at once (or make comp a friend)
-	//ret has one additional state, the crash state, which becomes accepting
-	for (typename Automaton<N>::state_type s = 0; s < ret.size(); ++s)
-		ret.setAccept(s, s < a.state_size() ? !a.accept(s) : true);
-	return ret;
+	for (typename Automaton<N>::state_type s = 0; s < a.size(); ++s)
+		a.setAccept(s, !a.accept(s));
+	return a;
 }
 
 /**
