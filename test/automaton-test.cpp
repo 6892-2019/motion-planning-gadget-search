@@ -50,6 +50,8 @@ template<int AlphabetSize>
 void equivalentOnAllStrings(const Automaton<AlphabetSize>& a, const Automaton<AlphabetSize>& b, int length, int lineno = -1) {
 	for (auto& string : allStrings(AlphabetSize, length))
 		EXPECT_EQ(a.run(string), b.run(string)) << to_string(string) << " from line " << lineno;
+	ComparisonResult<AlphabetSize> cmp = compare_languages(a, b);
+	EXPECT_TRUE(cmp.equal()) << " from line " << lineno << "\n" << cmp.leftButNotRight << '\n' << cmp.rightButNotLeft << std::endl;
 	//TODO: make these const
 //	EXPECT_EQ(a.isEmpty(), b.isEmpty()) << " from line " << lineno;
 //	EXPECT_EQ(a.infinite(), b.infinite()) << " from line " << lineno;

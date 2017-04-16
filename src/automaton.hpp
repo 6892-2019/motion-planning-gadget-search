@@ -1819,17 +1819,29 @@ Automaton<N> shuffleAccept(const Automaton<N>& left, const Automaton<N>& right) 
 
 /**
  * Returns true iff the given automata accept the same language.
- * TODO: should also return a witness
- * TODO: should return left smaller-than right, right smaller-than left, or
- * that they are incomparable, with witnesses for each
- * TODO: witness generation is "pick an arbitrary string in this automaton",
- * which is useful on its own (note the empty automaton won't have one)
  */
-//template<unsigned int N>
-//bool same_language(typename Automaton<N>::const_ptr left, typename Automaton<N>::const_ptr right) {
-//	return Automaton<N>::conj(left, Automaton<N>::comp(right))->isEmpty() &&
-//			Automaton<N>::conj(Automaton<N>::comp(left), right)->isEmpty();
-//}
+template<unsigned int N>
+bool same_language(const Automaton<N>& left, const Automaton<N>& right) {
+	return conj(left, comp(right)).isEmpty() && conj(comp(left), right).isEmpty();
+}
+
+template<unsigned int N>
+struct ComparisonResult {
+	//whether left accepts strings right doesn't or vice-versa
+	Automaton<N> leftButNotRight, rightButNotLeft;
+	bool equal() {return leftButNotRight.isEmpty() && rightButNotLeft.isEmpty();}
+	bool smaller() {return leftButNotRight.empty() && !rightButNotLeft.empty();}
+	bool larger() {return !leftButNotRight.empty() && rightButNotLeft.empty();}
+	bool incomparable() {return !leftButNotRight.empty() && !rightButNotLeft.empty();}
+	//TODO: methods to compute witnesses, for fluent use of compare_languages?
+};
+/**
+ * Compares the languages accepted by the given automata.
+ */
+template<unsigned int N>
+ComparisonResult<N> compare_languages(const Automaton<N>& left, const Automaton<N>& right) {
+	return {conj(left, comp(right)), conj(comp(left), right)};
+}
 
 } //namespace automaton
 
