@@ -1,3 +1,4 @@
+#include "precompiled.hpp"
 #include "automaton.hpp"
 #include <gtest/gtest.h>
 
