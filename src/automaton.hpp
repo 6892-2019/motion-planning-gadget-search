@@ -25,6 +25,13 @@ class Automaton;
 class EdgeRangeSentinel;
 class EdgeRangeFront;
 
+namespace detail {
+struct AutomatonReprStreamer {
+	const AutomatonBase& a;
+};
+std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs);
+}
+
 /**
  * Automaton functionality that does not depend on the alphabet size.
  *
@@ -131,6 +138,16 @@ public:
 //		}
 //		return o;
 //	}
+
+	/**
+	 * Returns an object of unspecified type that, when streamed to a
+	 * std::ostream, outputs a C++ expression that constructs an Automaton equal
+	 * to this one.  Use this like "std::cout << a.repr() << std::endl".
+	 * @return a streamable object that outputs a repr string
+	 */
+	auto repr() const {
+		return detail::AutomatonReprStreamer{*this};
+	}
 };
 
 using SymbolSet = AutomatonBase::SymbolSet;
