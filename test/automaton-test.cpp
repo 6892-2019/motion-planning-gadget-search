@@ -247,6 +247,29 @@ TEST(AutomatonTest, Minimize) {
 	auto zeroOneStarOneClone = zeroOneStarOne; //clone
 	zeroOneStarOneClone.minimize();
 	equivalentOnAllStrings<2>(zeroOneStarOne, zeroOneStarOneClone, 8, __LINE__);
+
+	Automaton<4> twoAccept;
+	twoAccept.addState();
+	twoAccept.addState();
+	twoAccept.setAccept(0);
+	twoAccept.setAccept(1);
+	auto twoAcceptM = twoAccept;
+	twoAcceptM.minimize();
+	ASSERT_EQ(twoAcceptM.state_size(), 1) << twoAcceptM;
+	equivalentOnAllStrings<4>(twoAccept, twoAcceptM, 4, __LINE__);
+
+	Automaton<4> twoAccept2;
+	twoAccept2.addState();
+	twoAccept2.addState();
+	twoAccept2.addState();
+	twoAccept2.setAccept(1);
+	twoAccept2.setAccept(2);
+	twoAccept2.addTrans(0, 0, 1);
+	twoAccept2.addTrans(0, 1, 2);
+	auto twoAccept2M = twoAccept2;
+	twoAccept2M.minimize();
+	ASSERT_EQ(twoAccept2M.state_size(), 2) << twoAccept2M;
+	equivalentOnAllStrings<4>(twoAccept2, twoAccept2M, 4, __LINE__);
 }
 
 TEST(AutomatonTest, CatAltMinimize) {
