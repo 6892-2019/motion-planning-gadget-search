@@ -22,15 +22,16 @@ namespace automaton {
 class AutomatonBase;
 template<unsigned int AlphabetSize>
 class Automaton;
+
+namespace detail {
 class EdgeRangeSentinel;
 class EdgeRangeFront;
 
-namespace detail {
 struct AutomatonReprStreamer {
 	const AutomatonBase& a;
 };
 std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs);
-}
+} //namespace detail
 
 /**
  * Automaton functionality that does not depend on the alphabet size.
@@ -90,7 +91,7 @@ public:
 	 */
 	virtual SymbolSet labels(state_type from, state_type to) const = 0;
 
-	range_for_pair<EdgeRangeFront, EdgeRangeSentinel> edges(state_type from) const;
+	range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> edges(state_type from) const;
 
 	virtual void reserve(state_type state_capacity) = 0;
 	/**
@@ -153,11 +154,12 @@ public:
 using SymbolSet = AutomatonBase::SymbolSet;
 using StateSet = AutomatonBase::StateSet;
 
+namespace detail {
 class EdgeRangeSentinel {
 	const AutomatonBase* parent_;
 	AutomatonBase::state_type from_;
 	EdgeRangeSentinel(const AutomatonBase* parent, AutomatonBase::state_type from) : parent_(parent), from_(from) {}
-	friend class AutomatonBase;
+	friend AutomatonBase;
 	friend bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right);
 };
 
@@ -185,7 +187,7 @@ public:
 		cur_ = findNextStartingAt(cur_.second+1);
 		return *this;
 	}
-	friend class AutomatonBase;
+	friend AutomatonBase;
 	friend bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right);
 };
 
@@ -197,9 +199,10 @@ inline bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 inline bool operator!=(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 	return !(left == right);
 }
+} //namespace detail
 
-inline range_for_pair<EdgeRangeFront, EdgeRangeSentinel> AutomatonBase::edges(state_type from) const {
-	return make_range_for_pair(EdgeRangeFront(this, from), EdgeRangeSentinel(this, from));
+inline range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> AutomatonBase::edges(state_type from) const {
+	return make_range_for_pair(detail::EdgeRangeFront(this, from), detail::EdgeRangeSentinel(this, from));
 }
 
 
