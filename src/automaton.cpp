@@ -3,6 +3,8 @@
 
 namespace automaton {
 
+AutomatonBase::~AutomatonBase() = default;
+
 namespace detail {
 std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs) {
 	const AutomatonBase& a = rs.a;

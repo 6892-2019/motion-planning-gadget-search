@@ -51,7 +51,7 @@ public:
 	using SymbolSet = linear_set<AutomatonBase::symbol_type>;
 	using StateSet = linear_set<AutomatonBase::state_type>;
 
-	virtual ~AutomatonBase() = default;
+	virtual ~AutomatonBase();
 
 	/**
 	 * @return the number of states in this automaton
