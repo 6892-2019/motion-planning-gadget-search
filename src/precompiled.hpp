@@ -1,6 +1,5 @@
 #include <array>
 #include <vector>
-#include <deque>
 #include <queue>
 #include <stack>
 #include <unordered_set>
@@ -14,8 +13,6 @@
 #include <sparsehash/dense_hash_map>
 #include <sparsehash/dense_hash_set>
 #include <sparsehash/sparse_hash_map>
-#include <sparsehash/sparse_hash_set>
-#include <sparsehash/sparsetable>
 #include "bitset.hpp"
 #include "natural_map.hpp"
 #include "dynarray.hpp"
@@ -25,14 +22,11 @@
 #include <boost/iterator/counting_iterator.hpp>
 #include <boost/iterator/indirect_iterator.hpp>
 #include <boost/range/iterator_range_core.hpp>
-#include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include "algoutils.hpp"
 
-#include <thread>
 #include <atomic>
-#include <future>
 
 #include <iostream>
 #include <fstream>
