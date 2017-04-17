@@ -340,3 +340,42 @@ TEST(AutomatonTest, EqualitySanity) {
 	ASSERT_TRUE(eq(lit<2>(0), lit<2>(0)));
 	ASSERT_FALSE(eq(lit<2>(0), lit<2>(1)));
 }
+
+TEST(AutomatonTest, MinimizeDeadEndAcceptStates) {
+	//A minimal automaton cannot contain two states with the same accept status
+	//and no outgoing transitions, because those states would be Myhill-Nerode
+	//equivalent.
+	Automaton<4> a;
+	a.reserve(10);
+	for (AutomatonBase::state_type s = 0; s < 10; ++s)
+		a.addState();
+	for (AutomatonBase::state_type s : {2, 4, 5, 6, 7, 9, })
+		a.setAccept(s);
+	a.addTrans(0, 0, 1);
+	a.addTrans(0, 3, 8);
+	a.addTrans(1, 2, 0);
+	a.addTrans(1, 2, 1);
+	a.addTrans(1, 3, 1);
+	a.addTrans(1, 1, 2);
+	a.addTrans(2, 2, 3);
+	a.addTrans(3, 3, 3);
+	a.addTrans(4, 3, 5);
+	a.addTrans(4, 1, 6);
+	a.addTrans(4, 3, 9);
+	a.addTrans(6, 2, 2);
+	a.addTrans(6, 3, 2);
+	a.addTrans(7, 1, 1);
+	a.addTrans(7, 0, 2);
+	a.addTrans(7, 1, 2);
+	a.addTrans(8, 0, 5);
+	a.addTrans(9, 3, 6);
+	a.minimize();
+
+	//TODO: extract this for use in the fuzz tester, or to make it an assertion
+	//in HopcroftMinimizer
+	std::vector<AutomatonBase::state_type> deadEndAccepts;
+	for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
+		if (a.accept(s) && a.destinations(s).empty())
+			deadEndAccepts.push_back(s);
+	ASSERT_EQ(deadEndAccepts.size(), 1) << a;
+}
