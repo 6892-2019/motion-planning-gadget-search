@@ -266,40 +266,40 @@ using SparseConjMap = MapConjMap<google::sparse_hash_map<std::pair<state_type, s
  * So far it doesn't seem to have worked out in either space or time, though
  * the latter might be fixed with a better hash function.
  */
-class DenseConjVectorOfMaps {
-public:
-	DenseConjVectorOfMaps(std::size_t leftSize, std::size_t rightSize) : maps_(std::min(leftSize, rightSize)), useLeft_(leftSize > rightSize) {
-		for (auto& map : maps_)
-			map.set_empty_key(std::numeric_limits<state_type>::max());
-	}
-	void insert(std::pair<state_type, state_type> oldstates, state_type newstate) {
-		if (useLeft_)
-			maps_[oldstates.second].insert({oldstates.first, newstate});
-		else
-			maps_[oldstates.first].insert({oldstates.second, newstate});
-	}
-	template<class Callable>
-	std::pair<state_type, bool> compute_if_absent(std::pair<state_type, state_type> oldstates, Callable newstateProvider) {
-		auto& map = useLeft_ ? maps_[oldstates.second] : maps_[oldstates.first];
-		state_type key = useLeft_ ? oldstates.first : oldstates.second;
-		auto it = map.find(key);
-		if (it != map.end())
-			return {it->second, false};
-		auto r = map.insert({key, newstateProvider()});
-		return {r.first->second, true};
-	}
-private:
-	struct MyHash {
-		std::size_t operator()(const state_type s) const {
-			return (s * s) + s;
-//			return s ^ (s >> 8) ^ (s >> 16) ^ (s >> 24);
-		}
-	};
-	//both std::hash and boost::hash just return the state as its hash,
-	//which is very bad for dense_hash_map's power-of-two tables
-	std::vector<google::dense_hash_map<state_type, state_type, MyHash>> maps_;
-	bool useLeft_;
-};
+//class DenseConjVectorOfMaps {
+//public:
+//	DenseConjVectorOfMaps(std::size_t leftSize, std::size_t rightSize) : maps_(std::min(leftSize, rightSize)), useLeft_(leftSize > rightSize) {
+//		for (auto& map : maps_)
+//			map.set_empty_key(std::numeric_limits<state_type>::max());
+//	}
+//	void insert(std::pair<state_type, state_type> oldstates, state_type newstate) {
+//		if (useLeft_)
+//			maps_[oldstates.second].insert({oldstates.first, newstate});
+//		else
+//			maps_[oldstates.first].insert({oldstates.second, newstate});
+//	}
+//	template<class Callable>
+//	std::pair<state_type, bool> compute_if_absent(std::pair<state_type, state_type> oldstates, Callable newstateProvider) {
+//		auto& map = useLeft_ ? maps_[oldstates.second] : maps_[oldstates.first];
+//		state_type key = useLeft_ ? oldstates.first : oldstates.second;
+//		auto it = map.find(key);
+//		if (it != map.end())
+//			return {it->second, false};
+//		auto r = map.insert({key, newstateProvider()});
+//		return {r.first->second, true};
+//	}
+//private:
+//	struct MyHash {
+//		std::size_t operator()(const state_type s) const {
+//			return (s * s) + s;
+////			return s ^ (s >> 8) ^ (s >> 16) ^ (s >> 24);
+//		}
+//	};
+//	//both std::hash and boost::hash just return the state as its hash,
+//	//which is very bad for dense_hash_map's power-of-two tables
+//	std::vector<google::dense_hash_map<state_type, state_type, MyHash>> maps_;
+//	bool useLeft_;
+//};
 
 class DenseShuffleAcceptMap {
 public:
