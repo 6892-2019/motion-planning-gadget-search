@@ -124,7 +124,7 @@ public:
 		assert(endExclusive <= N);
 		assert(startInclusive <= endExclusive);
 //		bits_ = static_cast<storage_type>(bits_ & ~midmask(startInclusive, endExclusive));
-		do_and(~midmask(startInclusive, endExclusive));
+		do_and_comp(midmask(startInclusive, endExclusive));
 		return *this;
 	}
 	bitset& flip() {
