@@ -721,6 +721,7 @@ public:
 		if (deterministic()) return;
 		//We manually sort before inserting in newstate.
 		//Unfortunately there's no small_flat_set...
+		//TODO: use StateSet!
 		using state_set = small_vector<state_type, 4>;
 		auto hasher = [](const state_set& set) {
 			//could be std::accumulate, I guess
