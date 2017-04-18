@@ -33,7 +33,7 @@ public:
 	using size_type = std::size_t;
 	using difference_type = std::ptrdiff_t;
 	using reference = value_type&;
-	using const_reference = const reference;
+	using const_reference = const value_type&;
 	using const_iterator = typename decltype(data_)::const_iterator;
 	using iterator = const_iterator;
 
@@ -104,7 +104,7 @@ public:
 	//TODO: emplace
 	iterator erase(const_iterator pos) {
 		auto idx = pos - begin();
-		std::iter_swap(pos, data_.end()-1);
+		std::iter_swap(data_.begin()+idx, data_.end()-1);
 		data_.pop_back();
 		return begin() + idx;
 	}
