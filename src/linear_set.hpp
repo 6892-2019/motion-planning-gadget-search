@@ -155,6 +155,16 @@ template<typename T>
 void swap(linear_set<T>& left, linear_set<T>& right) {
 	left.swap(right);
 }
+
+template<typename T>
+struct hash<linear_set<T>> {
+	size_t operator()(const linear_set<T>& s) const {
+		size_t h = 0;
+		for (const auto& t : s)
+			h += std::hash<T>()(t);
+		return h;
+	}
+};
 }
 
 #endif /* LINEAR_SET_HPP */
