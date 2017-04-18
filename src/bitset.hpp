@@ -62,12 +62,12 @@ public:
 	reference at(size_type pos) {
 		if (pos < size())
 			throw std::out_of_range("TODO: informative message");
-		return *this[pos];
+		return (*this)[pos];
 	}
 	bool at(size_type pos) const {
 		if (pos < size())
 			throw std::out_of_range("TODO: informative message");
-		return *this[pos];
+		return (*this)[pos];
 	}
 
 	size_type count() const {
@@ -158,9 +158,8 @@ public:
 
 	bool test_set(size_type pos, bool value = true) {
 		assert(pos < size());
-		const reference& r = *this[pos];
-		bool old = r;
-		r = value;
+		bool old = (*this)[pos];
+		(*this)[pos] = value;
 		return old;
 	}
 	bool test_reset(size_type pos) {
