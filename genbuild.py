@@ -50,14 +50,19 @@ for config in configs:
           source = os.path.join(subdir, f)
           rel = os.path.relpath(subdir, 'src/')
           object = "$builddir/$src_dir/" + rel + '/' + f[:-4] + '.o'
-          buildfile.write('build {} : cxx {} | $pch_target\n'.format(object, source))
-          src_objects[rel].append(object)
+          if 'precompiled-instantiations' in f:
+            pch_inst_target = object
+            buildfile.write('build {} : cxx {}\n'.format(object, source))
+          else:
+            buildfile.write('build {} : cxx {} | $pch_target\n'.format(object, source))
+            src_objects[rel].append(object)
     buildfile.write('\n')
 
+    src_objects['.'].append(pch_inst_target)
     src_objects_str = ' '.join(src_objects['.'])
     del src_objects['.']
     for k, v in src_objects.iteritems():
-      buildfile.write('build $builddir/bin/{}.exe : ld {} {}\n'.format(k, src_objects_str, ' '.join(v)))
+      buildfile.write('build $builddir/bin/{}.exe : ld {} {}\n'.format(k, ' '.join(v), src_objects_str))
       buildfile.write('\n')
 
     test_objects = []
