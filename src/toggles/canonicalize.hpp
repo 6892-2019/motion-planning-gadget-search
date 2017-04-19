@@ -111,16 +111,29 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	//state 0 is the initial state, we can't renumber it
 	std::iter_swap(stateperm.begin(), std::find(stateperm.begin(), stateperm.end(), 0));
 
-	//Locations are intrinsically ordered; we use the labeling to select a
-	//start point and a direction, then we walk the cycle ourselves.
-	const symbol_type minloc = *std::min_element(boost::counting_iterator<symbol_type>(0),
-		boost::counting_iterator<symbol_type>(locations),
-		[&](auto l, auto r){return lab[edgecolors.at(l)] < lab[edgecolors.at(r)];});
+	dynarray<state_type> locationinvperm(automaton::Automaton<N>::alphabet_size_v);
+	std::iota(locationinvperm.begin(), locationinvperm.begin()+locations, 0);
+	std::sort(locationinvperm.begin(), locationinvperm.begin()+locations, [&](auto l, auto r){return lab[edgecolors.at(l)] < lab[edgecolors.at(r)];});
+	std::fill(locationinvperm.begin()+locations, locationinvperm.end(), std::numeric_limits<symbol_type>::max());
+
 	dynarray<symbol_type> locationperm(automaton::Automaton<N>::alphabet_size_v);
-	bool cycleDown = lab[edgecolors.at(decr(minloc))] < lab[edgecolors.at(incr(minloc))];
-	for (unsigned int i = 0, loc = minloc; i < locations; ++i, loc = cycleDown ? decr(loc) : incr(loc))
-		locationperm[i] = loc;
+	for (int l = 0; l < locations; ++l)
+		locationperm[locationinvperm[l]] = l;
 	std::fill(locationperm.begin()+locations, locationperm.end(), std::numeric_limits<symbol_type>::max());
+
+//	std::cout << "labels: ";
+//	for (auto x : lab)
+//		std::cout << x << " ";
+//	std::cout << "\nlocationperm: ";
+//	for (auto x : locationperm)
+//		std::cout << x << " ";
+//	std::cout << "\nlocationinvperm: ";
+//	for (auto x : locationinvperm)
+//		std::cout << x << " ";
+//	std::cout << "\nstateperm: ";
+//	for (auto x : stateperm)
+//		std::cout << x << " ";
+//	std::cout << std::endl;
 
 	a.renumber(stateperm.begin(), locationperm.begin());
 	a.prepareForEquals();
