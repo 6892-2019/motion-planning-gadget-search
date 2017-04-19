@@ -853,13 +853,16 @@ public:
 		//The Java library explicitly checks for the all-strings automaton here,
 		//but it doesn't seem to be necessary.
 		//Java totalizes the automaton here (then removes the added state in
-		//removeDeadStates).  That isn't required; our Hopcroft implementation
-		//understands states are not equivalent if one crashes and the other
-		//doesn't.
+		//removeDeadStates after minimizing).  That isn't required; our Hopcroft
+		//implementation understands states are not equivalent if one crashes
+		//and the other doesn't.
+		//Instead, we remove dead states before minimizing, to prevent
+		//transitions to dead states from distinguishing states that are
+		//otherwise equivalent.
+		removeDeadStates();
 		MAYBE_UNUSED std::size_t oldsize = size();
 		HopcroftMinimizer(*this).minimize();
 		AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << size() << std::endl);
-		removeDeadStates();
 	}
 
 private:
