@@ -11,6 +11,15 @@
 #include "automaton.hpp"
 #include <nausparse.h>
 
+inline void dotfile(const sparsegraph& sg) {
+	std::cout << "digraph {\n";
+	for (int v = 0; v < sg.nv; ++v) {
+		for (int e = sg.v[v]; e < sg.v[v] + sg.d[v]; ++e)
+			std::cout << "v" << v << " -> v" << sg.e[e] << ";\n";
+	}
+	std::cout << "}" << std::endl;
+}
+
 template<unsigned int N>
 void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	sparsegraph sg, canon;
