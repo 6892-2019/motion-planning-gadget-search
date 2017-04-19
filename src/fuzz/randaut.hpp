@@ -21,6 +21,19 @@ Automaton<N> generate(RNG& rng) {
 	return a;
 }
 
+/**
+ * Generates a diagonal automaton on N symbols.  The diagonal automaton accepts
+ * the string 0, 1, 2, 3... n-1 only.
+ */
+template<unsigned int N>
+Automaton<N> generate_diagonal() {
+	Automaton<N> a;
+	a.addState();
+	for (AutomatonBase::symbol_type s = 0; s < N; ++s)
+		a.addTrans(s, s, a.addState());
+	return a;
+}
+
 } //namespace automaton
 
 #endif // AUTOMATON_FUZZ_RANDAUT_HPP_INCLUDED
