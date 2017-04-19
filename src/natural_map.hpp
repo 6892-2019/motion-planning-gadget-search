@@ -8,8 +8,6 @@
 #ifndef NATURAL_MAP_HPP
 #define NATURAL_MAP_HPP
 
-#include "precompiled.hpp"
-
 template<class K, typename Enable = void>
 struct MinimalPerfectHash {
 	//TODO: can we static_assert here for a better error message?
@@ -149,14 +147,6 @@ private:
 		return std::numeric_limits<V>::max();
 	}
 };
-
-extern template class natural_map<unsigned char, unsigned char>;
-extern template class natural_map<unsigned short, unsigned short>;
-extern template class natural_map<unsigned int, unsigned int>;
-extern template class natural_map<unsigned long, unsigned long>;
-extern template class natural_map<unsigned long long, unsigned long long>;
-
-extern template class natural_map<std::pair<unsigned int, unsigned int>, unsigned int>;
 
 #endif /* NATURAL_MAP_HPP */
 
