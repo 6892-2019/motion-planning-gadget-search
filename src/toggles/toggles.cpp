@@ -121,11 +121,14 @@ public:
 		return true;
 	}
 
-	index_type size() const {
+	index_type registered_size() const {
 		return size_;
 	}
 	const Gadget& at(index_type i) const {
 		return graphs_[i];
+	}
+	std::size_t waiting_size() const {
+		return waiting_.size();
 	}
 private:
 	static constexpr double LOAD_FACTOR = 0.8;
@@ -266,7 +269,7 @@ void mainloop(const automaton_type& target) {
 			std::exit(0);
 		}
 	}
-	std::cout << "gadget " << i << " " << registry.at(i).locations_ << " locations, produced " << successors.size() << ", offered " << total << std::endl;
+	std::cout << "gadget " << i << " " << registry.at(i).locations_ << " locations, produced " << successors.size() << ", offered " << total << ", " << registry.waiting_size() << " waiting" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
