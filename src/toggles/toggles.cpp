@@ -190,9 +190,9 @@ OutputIterator combine(Registry::index_type l, bool leftMirror, Registry::index_
 	for (location_type ll = 0; ll < left.locations_; ++ll) {
 		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 		std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_, 0);
+		automaton_type lm = la;
+		lm.renumberAlphabet(slide);
 		for (location_type rl = 0; rl < right.locations_; ++rl) {
-			automaton_type lm = la;
-			lm.renumberAlphabet(slide); //TODO: lift up out of this loop
 			automaton_type rm = ra;
 			rm.renumberAlphabet(sliderotate);
 			automaton_type combined = automaton::shuffleAccept(lm, rm);
