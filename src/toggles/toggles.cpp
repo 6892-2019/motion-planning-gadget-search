@@ -4,6 +4,8 @@
 #include "../alphabet.hpp"
 #include "canonicalize.hpp"
 
+using automaton::Automaton;
+using automaton::AutomatonBase;
 using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
 using automaton_const_ptr = std::shared_ptr<const automaton_type>;
@@ -13,7 +15,7 @@ using regex_type = automaton::Regex<alphabet_type>;
 struct Gadget {
 	Gadget() = default;
 	Gadget(automaton_type&& a, unsigned int locations) : Gadget(std::make_shared<const automaton_type>(std::move(a)), locations) {}
-	Gadget(automaton_const_ptr a, unsigned int locations) : a_(a), locations_(locations) {}
+	Gadget(automaton_const_ptr a, unsigned int locations) : a_(a), mirror_(nullptr), locations_(locations) {}
 
 	bool operator==(const Gadget& other) const {
 		return *a_ == *other.a_;
@@ -30,8 +32,10 @@ struct Gadget {
 		return std::tie(left.locations_, ls) > std::tie(right.locations_, rs);
 	}
 
-	//TODO: const_ptr?  we shouldn't need to ever modify it
 	automaton_const_ptr a_;
+	//If this gadget is chiral, this is its mirror image; nullptr otherwise.
+	//Chirality is not checked until this gadget is registered.
+	automaton_const_ptr mirror_;
 	unsigned int locations_;
 
 	friend class std::hash<Gadget>;
@@ -47,16 +51,32 @@ struct hash<Gadget> {
 }
 
 struct Provenance {
-	std::uint32_t first, second;
-	location_type i, j;
+	std::uint32_t first, second, i, j;
 	Provenance() = default;
-	Provenance(std::uint32_t parent, location_type connection)
-		: first(parent), second(std::numeric_limits<std::uint32_t>::max()),
-		i(connection), j(std::numeric_limits<location_type>::max()) {}
-	Provenance(std::uint32_t firstParent, location_type firstSplice,
-			std::uint32_t secondParent, location_type secondSplice)
-		: first(firstParent), second(secondParent), i(firstSplice), j(secondSplice) {}
+	Provenance(std::uint32_t initialIndex) : first(ALLONES), second(initialIndex), i(ALLONES), j(ALLONES) {}
+	Provenance(std::uint32_t parent, std::uint32_t connection, AutomatonBase::state_type newInitialState)
+		: first(parent), second(ALLONES), i(connection), j(newInitialState) {}
+	Provenance(std::uint32_t firstParent, std::uint32_t firstSplice, bool firstMirrored,
+			std::uint32_t secondParent, std::uint32_t secondSplice, bool secondMirrored)
+		: first(firstParent), second(secondParent),
+		  i(firstMirrored ? firstSplice | TOPBIT : firstSplice),
+		  j(secondMirrored ? secondSplice | TOPBIT : secondSplice) {}
+private:
+	static constexpr std::uint32_t ALLONES = std::numeric_limits<std::uint32_t>::max();
+	static constexpr std::uint32_t TOPBIT = 1 << 31;
 };
+
+automaton_type mirror(const automaton_type& a, unsigned int locations) {
+	//TODO: precompute and reuse for 2..automaton_type::alphabet_size_v
+	std::vector<AutomatonBase::symbol_type> symbols(
+			boost::make_counting_iterator<AutomatonBase::symbol_type>(0),
+			boost::make_counting_iterator<AutomatonBase::symbol_type>(automaton_type::alphabet_size_v));
+	std::reverse(symbols.begin(), symbols.begin()+locations);
+	automaton_type b = a;
+	b.renumberAlphabet(symbols);
+	canonicalize(b, locations);
+	return b;
+}
 
 class Registry {
 public:
@@ -80,6 +100,10 @@ public:
 		queue_.pop_back();
 		MAYBE_UNUSED auto erased = waiting_.erase(graphs_[index]);
 		assert(erased && "dequeued, but couldn't erase from waiting set");
+
+		automaton_type m = mirror(*graphs_[index].a_, graphs_[index].locations_);
+		if (m != *graphs_[index].a_)
+			graphs_[index].mirror_ = std::make_shared<automaton_type>(std::move(m));
 
 		std::size_t hash = std::hash<Gadget>()(graphs_[index]);
 		std::size_t probe = hash % closed_.size();
@@ -152,12 +176,10 @@ constexpr Registry::index_type Registry::ABSENT;
 static Registry registry(9001);
 
 template<typename OutputIterator>
-OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIterator out) {
+OutputIterator combine(Registry::index_type l, bool leftMirror, Registry::index_type r, bool rightMirror, OutputIterator out) {
 	const Gadget& left = registry.at(l), &right = registry.at(r);
-	if (left.locations_ + right.locations_ > automaton_type::alphabet_size_v) {
-		std::cout << "Skipping combine due to size\n";
-		return out;
-	}
+	const automaton_type& la = leftMirror ? *left.mirror_ : *left.a_;
+	const automaton_type& ra = rightMirror ? *right.mirror_ : *right.a_;
 
 	using state_type = automaton_type::state_type;
 	std::vector<automaton_type::symbol_type> slide(automaton_type::alphabet_size_v);
@@ -169,20 +191,39 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<automaton_type::symbol_type>::max());
 		std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_, 0);
 		for (location_type rl = 0; rl < right.locations_; ++rl) {
-			automaton_type lm = *left.a_;
-			lm.renumberAlphabet(slide);
-			automaton_type rm = *right.a_;
+			automaton_type lm = la;
+			lm.renumberAlphabet(slide); //TODO: lift up out of this loop
+			automaton_type rm = ra;
 			rm.renumberAlphabet(sliderotate);
 			automaton_type combined = automaton::shuffleAccept(lm, rm);
 			combined.minimize();
 			canonicalize(combined, left.locations_ + right.locations_);
 			*out++ = std::make_pair(Gadget(std::make_shared<const automaton_type>(std::move(combined)),
-					left.locations_ + right.locations_), Provenance(l, ll, r, rl));
+					left.locations_ + right.locations_), Provenance(l, ll, leftMirror, r, rl, rightMirror));
 
 			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_-1, sliderotate.begin()+ll+right.locations_);
 		}
 		std::swap(slide[ll], slide[ll+right.locations_]);
 	}
+
+	return out;
+}
+
+template<typename OutputIterator>
+OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIterator out) {
+	const Gadget& left = registry.at(l), &right = registry.at(r);
+	if (left.locations_ + right.locations_ > automaton_type::alphabet_size_v) {
+//		std::cout << "Skipping combine due to size\n";
+		return out;
+	}
+
+	out = combine(l, false, r, false, out);
+	if (left.mirror_)
+		out = combine(l, true, r, false, out);
+	if (right.mirror_)
+		out = combine(l, false, r, true, out);
+	if (left.mirror_ && right.mirror_) //TODO: do we need this?
+		out = combine(l, true, r, true, out);
 
 	return out;
 }
@@ -246,9 +287,10 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 		alphamap.push_back(std::numeric_limits<symbol_type>::max());
 		alphamap.push_back(std::numeric_limits<symbol_type>::max());
 		connected->renumberAlphabet(0, connected->size(), alphamap.begin());
-		connected->minimize();
+		connected->minimize(); //TODO: may have segmented the automaton
 		canonicalize(*connected, g.locations_ - 2);
-		*out++ = std::make_pair(Gadget(std::move(connected), g.locations_ - 2), Provenance(gadgetIndex, l));
+		*out++ = std::make_pair(Gadget(std::move(connected), g.locations_ - 2),
+				Provenance(gadgetIndex, l, 0)); //TODO: note initial state
 	}
 	return out;
 }
@@ -274,20 +316,42 @@ void mainloop(const automaton_type& target) {
 
 int main(int argc, char* argv[]) {
 	using R = regex_type;
-	automaton_type split = R::star(R::alt({R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
-			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
-			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
+//	automaton_type split = R::star(R::alt({
+//			R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
+//			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
+//			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
+	automaton_type split = R::star(R::alt({
+			R::cat({R::lit(0), R::alt({R::lit(0), R::lit(1), R::lit(2)})}),
+			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(1), R::lit(2)})}),
+			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(2)})})})).compile();
 	split.minimize();
 	canonicalize(split, 3);
-	//TODO: provenance for initial gadgets
-	registry.offer(Gadget(std::move(split), 3), Provenance(100000, 0));
+//	std::cout << split << std::endl;
+	registry.offer(Gadget(std::move(split), 3), Provenance(0));
+
+//	automaton_ptr split4 = R::star(R::alt({
+//			R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2), R::lit(3)})}),
+//			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2), R::lit(3)})}),
+//			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(3)})}),
+//			R::cat({R::lit(3), R::alt({R::lit(0), R::lit(1), R::lit(2)})})})).compile();
+//	automaton_ptr split4 = R::star(R::alt({
+//			R::cat({R::lit(0), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})}),
+//			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})}),
+//			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})}),
+//			R::cat({R::lit(3), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})})})).compile();
+//	split4->minimize();
+//	canonicalize(split4, 4);
+//	std::cout << *split4 << std::endl;
+//	while (true) {
+//		mainloop(*split4);
+//	}
 
 	R ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(3), R::lit(2)})});
 	R rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(2), R::lit(3)})});
 	automaton_type parallelToggle = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
 	parallelToggle.minimize();
 	canonicalize(parallelToggle, 4);
-	registry.offer(Gadget(std::move(parallelToggle), 4), Provenance(100001, 0));
+	registry.offer(Gadget(std::move(parallelToggle), 4), Provenance(1));
 
 	ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(2), R::lit(3)})});
 	rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(3), R::lit(2)})});
@@ -299,3 +363,51 @@ int main(int argc, char* argv[]) {
 	}
 	return 0;
 }
+
+//int main(int argc, char* argv[]) {
+//	using R = regex_type;
+//	automaton_type split = R::star(R::alt({
+//		R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
+//		R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
+//		R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
+//	split.minimize();
+//	canonicalize(split, 3);
+//	std::cout << split << std::endl;
+//	//TODO: provenance for initial gadgets
+//	registry.offer(Gadget(std::move(split), 3), Provenance(100000, 0));
+//	registry.register_next();
+//
+//	std::vector<std::pair<Gadget, Provenance>> successors;
+//	combine(0, 0, std::back_inserter(successors));
+//	bool offered = registry.offer(successors.front().first, successors.front().second);
+//	std::cout << offered << std::endl;
+//	std::cout << *successors.front().first.a_ << std::endl;
+//	successors.clear();
+//	registry.register_next();
+//
+//	connect(1, std::back_inserter(successors));
+//	for (auto& p : successors)
+//		std::cout << *p.first.a_ << std::endl;
+//	std::cout << "ASDFASDF" << std::endl;
+//	offered = registry.offer(successors[2].first, successors[2].second);
+//	std::cout << offered << std::endl;
+//	std::cout << *successors[2].first.a_ << std::endl;
+//	successors.clear();
+//	registry.register_next();
+//
+//	connect(2, std::back_inserter(successors));
+//	offered = registry.offer(successors.front().first, successors.front().second);
+//	std::cout << offered << std::endl;
+//	std::cout << *successors.front().first.a_ << std::endl;
+//	successors.clear();
+//	registry.register_next();
+//
+//	automaton_type split4 = R::star(R::alt({
+//		R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2), R::lit(3)})}),
+//		R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2), R::lit(3)})}),
+//		R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(3)})}),
+//		R::cat({R::lit(3), R::alt({R::lit(0), R::lit(1), R::lit(2)})})})).compile();
+//	split4.minimize();
+//	canonicalize(split4, 4);
+//	std::cout << split4 << std::endl;
+//}
