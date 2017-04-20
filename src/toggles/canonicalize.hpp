@@ -14,7 +14,7 @@
 inline void dotfile(const sparsegraph& sg) {
 	std::cout << "digraph {\n";
 	for (int v = 0; v < sg.nv; ++v) {
-		for (int e = sg.v[v]; e < sg.v[v] + sg.d[v]; ++e)
+		for (std::size_t e = sg.v[v]; e < sg.v[v] + sg.d[v]; ++e)
 			std::cout << "v" << v << " -> v" << sg.e[e] << ";\n";
 	}
 	std::cout << "}" << std::endl;
@@ -54,7 +54,7 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	auto incr = [&](symbol_type s){return s == locations-1 ? 0 : s+1;};
 	auto decr = [&](symbol_type s){return s == 0 ? locations-1 : s-1;};
 
-	int ei = 0;
+	std::size_t ei = 0;
 	for (state_type s = 0; s < a.size(); ++s)
 		for (unsigned int l = 0; l < locations; ++l) {
 			int vi = towers.at({s, l});
@@ -126,7 +126,7 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	std::fill(locationinvperm.begin()+locations, locationinvperm.end(), std::numeric_limits<symbol_type>::max());
 
 	dynarray<symbol_type> locationperm(automaton::Automaton<N>::alphabet_size_v);
-	for (int l = 0; l < locations; ++l)
+	for (unsigned int l = 0; l < locations; ++l)
 		locationperm[locationinvperm[l]] = l;
 	std::fill(locationperm.begin()+locations, locationperm.end(), std::numeric_limits<symbol_type>::max());
 
