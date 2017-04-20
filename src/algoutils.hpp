@@ -42,7 +42,7 @@ void apply_permutation(Iter1 first, Iter1 last, Iter2 indices) {
 //indices indicate where an element should move to
 template<typename Iter1, typename Iter2>
 void apply_reverse_permutation(Iter1 first, Iter1 last, Iter2 indices) {
-	using Diff = typename std::iterator_traits<Iter2>::value_type;
+	using Diff = typename std::iterator_traits<Iter2>::difference_type;
 	using std::swap;
 	Diff length = std::distance(first, last);
 	for (Diff i = 0; i < length; i++) {
