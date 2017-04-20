@@ -21,7 +21,7 @@ int main(int argc, char* argv[]) {
 
 		std::vector<Automaton<4>> rotations;
 		rotations.reserve(randaut.alphabet_size());
-		for (int rotDist = 0; rotDist < randaut.alphabet_size(); ++rotDist) {
+		for (AutomatonBase::symbol_type rotDist = 0; rotDist < randaut.alphabet_size(); ++rotDist) {
 			auto copy = randaut;
 			symbols.assign(boost::make_counting_iterator<AutomatonBase::symbol_type>(0),
 					boost::make_counting_iterator<AutomatonBase::symbol_type>(randaut.alphabet_size()));
