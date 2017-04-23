@@ -948,12 +948,36 @@ public:
 
 	/**
 	 * Renumbers states and symbols.  After this method returns, state i is
+	 * numbered states[i].  The given iterator must point to a permutation of
+	 * size equal to the number of states in this automaton.  The sequence
+	 * pointed to by the iterator will be modified.  Note that renumbering state
+	 * 0 to any other number may change the language accepted by this automaton.
+	 */
+	template<class RandomAccessIterator>
+	void renumberStates(RandomAccessIterator states) {
+		for (auto& ts : transitions_)
+			for (Transition& t : ts)
+				t.next_ = states[t.next_];
+		//apply_reverse_permutation destroys the permutation, so we'll copy the bitset
+		//and manually permute.  (The bitset is smaller than the permutation.)
+		boost::dynamic_bitset<std::size_t> accept;
+		accept.resize(transitions_.size()); //yes, resize, not reserve
+		for (state_type i = 0; i < transitions_.size(); ++i)
+			accept.set(states[i], accept_.test(i));
+		accept_ = std::move(accept);
+		apply_reverse_permutation(transitions_.begin(), transitions_.end(), states);
+	}
+
+	/**
+	 * Renumbers states and symbols.  After this method returns, state i is
 	 * numbered states[i] and symbol i is numbered symbols[i].  Both iterators
 	 * must point to permutations of the appropriate size.
 	 */
 	template<class RandomAccessIterator1, class RandomAccessIterator2>
 	void renumber(RandomAccessIterator1 states, RandomAccessIterator2 symbols) {
 		//Renumber transitions_[*].next_ and .symbols_, then swap transitions_.
+		//This doesn't just call renumberStates followed by renumberAlphabet to
+		//preserve locality when iterating transitions_.
 		for (auto& ts : transitions_)
 			for (Transition& t : ts) {
 				t.next_ = states[t.next_];
