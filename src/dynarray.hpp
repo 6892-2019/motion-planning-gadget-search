@@ -9,6 +9,7 @@
 #define DYNARRAY_HPP
 
 #include <memory>
+#include <iterator>
 #include <cassert>
 
 /**
@@ -24,6 +25,8 @@ public:
 	using const_reference = const value_type&;
 	using iterator = T*;
 	using const_iterator = const T*;
+	using reverse_iterator = std::reverse_iterator<iterator>;
+	using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 	using size_type = std::size_t;
 	using difference_type = std::ptrdiff_t;
 
@@ -50,6 +53,24 @@ public:
 	}
 	const_iterator cend() const {
 		return end();
+	}
+	reverse_iterator rbegin() {
+		return reverse_iterator(end());
+	}
+	const_reverse_iterator rbegin() const {
+		return const_reverse_iterator(end());
+	}
+	reverse_iterator rend() {
+		return reverse_iterator(begin());
+	}
+	const_reverse_iterator rend() const {
+		return const_reverse_iterator(begin());
+	}
+	const_reverse_iterator crbegin() const {
+		return rbegin();
+	}
+	const_reverse_iterator crend() const {
+		return rend();
 	}
 
 	reference operator[](size_type i) {
