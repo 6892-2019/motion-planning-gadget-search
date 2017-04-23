@@ -9,6 +9,7 @@
 #define ALGOUTILS_HPP
 
 #include <iterator>
+#include "dynarray.hpp"
 
 //by Raymond Chen: https://blogs.msdn.microsoft.com/oldnewthing/20170104-00/?p=95115
 //typos corrected, reformatted
@@ -54,6 +55,35 @@ void apply_reverse_permutation(Iter1 first, Iter1 last, Iter2 indices) {
 			swap(indices[i], indices[next]);
 		}
 	}
+}
+
+template<typename Iter>
+bool is_possibly_mirrored_rotation_permutation(Iter first, Iter last) {
+	auto dist = std::distance(first, last);
+	assert(dist > 0);
+	auto size = static_cast<std::make_unsigned_t<decltype(dist)>>(dist);
+	using T = typename std::iterator_traits<Iter>::value_type;
+	auto zeroit = std::find(first, last, 0);
+	if (zeroit == last)
+		return false;
+	auto theirzero = std::distance(first, zeroit);
+
+	dynarray<T> exemplar(size);
+	std::copy(boost::counting_iterator<T>(0), boost::counting_iterator<T>(static_cast<T>(size)), exemplar.begin());
+	std::rotate(exemplar.rbegin(), exemplar.rbegin()+theirzero, exemplar.rend());
+	if (std::equal(first, last, exemplar.begin(), exemplar.end()))
+		return true;
+	std::copy(boost::counting_iterator<T>(0), boost::counting_iterator<T>(static_cast<T>(size)), exemplar.begin());
+	std::reverse(exemplar.begin(), exemplar.end());
+	std::rotate(exemplar.begin(), exemplar.begin()+(size-theirzero-1), exemplar.end());
+	if (std::equal(first, last, exemplar.begin(), exemplar.end()))
+		return true;
+	return false;
+}
+
+template<typename T>
+bool is_possibly_mirrored_rotation_permutation(std::initializer_list<T> list) {
+	return is_possibly_mirrored_rotation_permutation(list.begin(), list.end());
 }
 
 template<typename T, typename Compare = std::less<T>>
