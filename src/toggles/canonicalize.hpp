@@ -43,6 +43,8 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	using state_type = automaton::AutomatonBase::state_type;
 	using symbol_type = automaton::AutomatonBase::symbol_type;
 	const state_type state_size = a.state_size();
+	const auto edge_size = a.edge_size();
+	const auto transition_size = a.transition_size();
 	//TODO: these could just be functions
 	std::unordered_map<std::pair<state_type, unsigned int>, int,
 		boost::hash<std::pair<state_type, unsigned int>>> towers;
@@ -141,7 +143,7 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	//we have to walk the cycle
 	int symbolVtx = edgecolors.at(0);
 	linear_set<int> visitedSymbolVertices;
-	for (symbol_type symbolIdx = 0; symbolIdx < 4; ++symbolIdx) {
+	for (symbol_type symbolIdx = 0; symbolIdx < locations; ++symbolIdx) {
 		visitedSymbolVertices.insert(symbolVtx);
 		int next = edgecolors.at(locations-1)+1; //larger than any actual value
 		auto begin = canon.e + canon.v[symbolVtx], end = begin + canon.d[symbolVtx];
@@ -165,6 +167,9 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 			a.addTrans(state, symbol, next);
 		}
 	}
+	assert(a.edge_size() == edge_size);
+	assert(a.transition_size() == transition_size);
+
 	a.prepareForEquals();
 	SG_FREE(canon);
 }
