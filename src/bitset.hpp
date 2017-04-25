@@ -146,9 +146,10 @@ public:
 		do_xor(midmask(startInclusive, endExclusive));
 		return *this;
 	}
-	bitset& set(bool value) {
-		return value ? set() : reset();
-	}
+	//This overload is ambiguous with set(size_type) when calling set(int)
+//	bitset& set(bool value) {
+//		return value ? set() : reset();
+//	}
 	bitset& set(size_type pos, bool value) {
 		return value ? set(pos) : reset(pos);
 	}
