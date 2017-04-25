@@ -12,13 +12,22 @@
 #include "linear_set.hpp"
 #include <nausparse.h>
 
-inline void dotfile(const sparsegraph& sg) {
-	std::cout << "digraph {\n";
+inline void dotfile(const sparsegraph& sg, std::ostream& destination = std::cout) {
+	destination << "digraph {\n";
 	for (int v = 0; v < sg.nv; ++v) {
-		for (std::size_t e = sg.v[v]; e < sg.v[v] + sg.d[v]; ++e)
-			std::cout << "v" << v << " -> v" << sg.e[e] << ";\n";
+		std::size_t begin = sg.v[v], end = begin + sg.d[v];
+		if (begin != end) {
+			std::sort(sg.e+begin, sg.e+end);
+			destination << "v" << v << " -> {";
+			for (auto i = begin; i < end; ++i) {
+				destination << "v" << sg.e[i];
+				if ((i+1) != end)
+					destination << ", ";
+			}
+			destination << "};\n";
+		}
 	}
-	std::cout << "}" << std::endl;
+	destination << "}" << std::endl;
 }
 
 template<unsigned int N>
