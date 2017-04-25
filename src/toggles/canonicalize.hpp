@@ -9,6 +9,7 @@
 #define CANONICALIZE_HPP
 
 #include "automaton.hpp"
+#include "linear_set.hpp"
 #include <nausparse.h>
 
 inline void dotfile(const sparsegraph& sg) {
@@ -32,6 +33,7 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 
 	using state_type = automaton::AutomatonBase::state_type;
 	using symbol_type = automaton::AutomatonBase::symbol_type;
+	const state_type state_size = a.state_size();
 	//TODO: these could just be functions
 	std::unordered_map<std::pair<state_type, unsigned int>, int,
 		boost::hash<std::pair<state_type, unsigned int>>> towers;
@@ -44,11 +46,13 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 		edgecolors[l] = sg.nv++;
 	for (unsigned int t = 0; t < a.size(); ++t)
 		towercolors[t] = sg.nv++;
-	sg.nde = 2 * towers.size() //undirected cycle through each tower
-			+ 2 * edgecolors.size() //undirected cycle through the colors
-			+ 2 * a.size() * edgecolors.size() //undirected edge between each color and each node in its level
-			+ 2 * towercolors.size() * edgecolors.size() //undirected edge between each color and each node in its tower
-			+ a.edges();
+	const int acceptvtx = sg.nv++;
+	sg.nde = 2 * edgecolors.size() //undirected cycle through the colors
+			+ 1 * a.size() * edgecolors.size() //edge from each color to each node in its level
+			+ 1 * towercolors.size() * edgecolors.size() //edge from each color to each node in its tower
+			+ a.edges()
+			+ 1 //state 0 is distinguished by a self-loop
+			+ a.accept_size(); //accepting states are distinguished by an edge to acceptvtx
 	SG_ALLOC(sg, sg.nv, sg.nde, "asdf");
 
 	auto incr = [&](symbol_type s){return s == locations-1 ? 0 : s+1;};
@@ -59,19 +63,10 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 		for (unsigned int l = 0; l < locations; ++l) {
 			int vi = towers.at({s, l});
 			sg.v[vi] = ei;
-
-			//below/above in the tower
-			sg.e[ei++] = towers.at({s, decr(l)});
-			sg.e[ei++] = towers.at({s, incr(l)});
-
-			sg.e[ei++] = edgecolors.at(l);
-			sg.e[ei++] = towercolors.at(s);
-
 			auto dests = a.step(s, l);
 			assert(dests.size() <= 1 && "should already be deterministic");
 			if (!dests.empty())
 				sg.e[ei++] = towers.at({dests.front(), l});
-
 			sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 		}
 
@@ -90,16 +85,23 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 		sg.v[vi] = ei;
 		for (symbol_type l = 0; l < locations; ++l)
 			sg.e[ei++] = towers.at({t, l});
+		if (t == 0) //distinguish initial state with self-loop
+			sg.e[ei++] = vi;
+		if (a.accept(t))
+			sg.e[ei++] = acceptvtx;
 		sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 	}
+	sg.v[acceptvtx] = ei;
+	sg.d[acceptvtx] = 0;
 	assert(ei == sg.nde && "wrong number of edges");
 
 	dynarray<int> lab(sg.nv), ptn(sg.nv);
 	std::iota(lab.begin(), lab.end(), 0);
 	std::fill(ptn.begin(), ptn.end(), 1); //counter-intuitively, partitions end at 0
-	ptn[towers.size()-1] = 0;
-	ptn[towers.size()+edgecolors.size()-1] = 0;
-	ptn[ptn.size()-1] = 0;
+	ptn[towers.size()-1] = 0; //state-location pairs
+	ptn[towers.size()+edgecolors.size()-1] = 0; //edge colors
+	ptn[ptn.size()-2] = 0; //state colors
+	ptn[ptn.size()-1] = 0; //the accept state distinguishing vertex
 
 	DEFAULTOPTIONS_SPARSEDIGRAPH(options);
 	options.getcanon = TRUE;
@@ -107,45 +109,55 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	statsblk stats;
 	dynarray<int> orbits(sg.nv);
 	sparsenauty(&sg, lab.begin(), ptn.begin(), orbits.begin(), &options, &stats, &canon);
-	//we don't actually need the graphs at all, just the labeling
-	SG_FREE(canon);
 	SG_FREE(sg);
 
-	dynarray<state_type> stateinvperm(a.size());
-	std::iota(stateinvperm.begin(), stateinvperm.end(), 0);
-	std::sort(stateinvperm.begin(), stateinvperm.end(), [&](auto l, auto r){return lab[towercolors.at(l)] < lab[towercolors.at(r)];});
-	dynarray<state_type> stateperm(a.size());
-	for (state_type i = 0; i < stateperm.size(); ++i)
-		stateperm[stateinvperm[i]] = i;
-	//state 0 is the initial state, we can't renumber it
-	std::iter_swap(stateperm.begin(), std::find(stateperm.begin(), stateperm.end(), 0));
+	a.clear();
+	for (state_type s = 0; s < state_size; ++s)
+		a.addState();
 
-	dynarray<state_type> locationinvperm(automaton::Automaton<N>::alphabet_size_v);
-	std::iota(locationinvperm.begin(), locationinvperm.begin()+locations, 0);
-	std::sort(locationinvperm.begin(), locationinvperm.begin()+locations, [&](auto l, auto r){return lab[edgecolors.at(l)] < lab[edgecolors.at(r)];});
-	std::fill(locationinvperm.begin()+locations, locationinvperm.end(), std::numeric_limits<symbol_type>::max());
+	//map the state-location pair vertices to their state and location
+	dynarray<state_type> vertexToState(state_size * locations), vertexToLocation(state_size * locations);
+	state_type stateIdx = 1;
+	for (int v = towercolors.at(0); v <= towercolors.at(a.state_size()-1); ++v) {
+		auto begin = canon.e + canon.v[v], end = begin + canon.d[v];
+		//state 0 has a self-loop
+		state_type state = std::find(begin, end, v) != end ? 0 : stateIdx++;
+		//accepting if pointing to the accept vertex
+		a.setAccept(state, std::find(begin, end, acceptvtx) != end);
+		for (int* q = begin; q < end; ++q)
+			if (*q < vertexToState.size()) //only edges to first color (skip the self-loop/accept edges)
+				vertexToState[*q] = state;
+	}
 
-	dynarray<symbol_type> locationperm(automaton::Automaton<N>::alphabet_size_v);
-	for (unsigned int l = 0; l < locations; ++l)
-		locationperm[locationinvperm[l]] = l;
-	std::fill(locationperm.begin()+locations, locationperm.end(), std::numeric_limits<symbol_type>::max());
+	//we have to walk the cycle
+	int symbolVtx = edgecolors.at(0);
+	linear_set<int> visitedSymbolVertices;
+	for (symbol_type symbolIdx = 0; symbolIdx < 4; ++symbolIdx) {
+		visitedSymbolVertices.insert(symbolVtx);
+		int next = edgecolors.at(locations-1)+1; //larger than any actual value
+		auto begin = canon.e + canon.v[symbolVtx], end = begin + canon.d[symbolVtx];
+		for (int* q = begin; q < end; ++q)
+			if (*q < vertexToLocation.size())
+				vertexToLocation[*q] = symbolIdx;
+			else if (!visitedSymbolVertices.count(*q) && *q < next)
+				next = *q;
+		symbolVtx = next;
+	}
 
-//	std::cout << "labels: ";
-//	for (auto x : lab)
-//		std::cout << x << " ";
-//	std::cout << "\nlocationperm: ";
-//	for (auto x : locationperm)
-//		std::cout << x << " ";
-//	std::cout << "\nlocationinvperm: ";
-//	for (auto x : locationinvperm)
-//		std::cout << x << " ";
-//	std::cout << "\nstateperm: ";
-//	for (auto x : stateperm)
-//		std::cout << x << " ";
-//	std::cout << std::endl;
-
-	a.renumber(stateperm.begin(), locationperm.begin());
+	//read off the automaton edges from the graph
+	for (int v = 0; v < edgecolors.at(0); ++v) {
+		auto begin = canon.e + canon.v[v], end = begin + canon.d[v];
+		state_type state = vertexToState[v];
+		symbol_type symbol = vertexToLocation[v];
+		for (int* q = begin; q < end; ++q) {
+			state_type next = vertexToState[*q];
+			symbol_type on = vertexToLocation[*q];
+			assert(symbol == on && "not isomorphic after all?");
+			a.addTrans(state, symbol, next);
+		}
+	}
 	a.prepareForEquals();
+	SG_FREE(canon);
 }
 
 #endif /* CANONICALIZE_HPP */
