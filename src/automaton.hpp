@@ -58,6 +58,10 @@ public:
 	 */
 	virtual state_type state_size() const = 0;
 	/**
+	 * @return the number of accepting states in this automaton
+	 */
+	virtual state_type accept_size() const = 0;
+	/**
 	 * @return the alphabet size of this automaton
 	 */
 	virtual symbol_type alphabet_size() const = 0;
@@ -114,6 +118,10 @@ public:
 	 */
 	virtual bool addTrans(state_type from, symbol_type on, state_type to) = 0;
 	virtual bool setAccept(state_type state, bool accepts = true) = 0;
+	/**
+	 * Removes all states and transitions from this automaton.
+	 */
+	virtual void clear() = 0;
 
 	//TODO: we can't use symbol_mask_type, but maybe we'll want an opaque token
 	//type to allow e.g. copying a set of transitions
@@ -354,6 +362,9 @@ public:
 	state_type state_size() const override {
 		return static_cast<state_type>(transitions_.size());
 	}
+	state_type accept_size() const override {
+		return static_cast<state_type>(accept_.count());
+	}
 	symbol_type alphabet_size() const override {
 		return alphabet_size_v;
 	}
@@ -448,7 +459,11 @@ public:
 		return accepts == old;
 	}
 
-
+	void clear() override {
+		transitions_.clear();
+		accept_.clear();
+		deterministic_ = true;
+	}
 
 
 private:
