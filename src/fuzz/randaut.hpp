@@ -31,6 +31,7 @@ Automaton<N> generate_diagonal() {
 	a.addState();
 	for (AutomatonBase::symbol_type s = 0; s < N; ++s)
 		a.addTrans(s, s, a.addState());
+	a.setAccept(a.state_size()-1);
 	return a;
 }
 
