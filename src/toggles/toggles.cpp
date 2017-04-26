@@ -327,7 +327,11 @@ void mainloop(const automaton_type& target) {
 			std::exit(0);
 		}
 	}
-	std::cout << "gadget " << i << " " << registry.at(i).locations_ << " locations, produced " << successors.size() << ", offered " << total << ", " << registry.waiting_size() << " waiting" << std::endl;
+	std::cout << "gadget " << i << " " << registry.at(i).locations_ << " locations, "
+			<< (registry.at(i).mirror_ ? "chiral, " : "")
+			<< "produced " << successors.size()
+			<< ", offered " << total << ", "
+			<< registry.waiting_size() << " waiting" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
