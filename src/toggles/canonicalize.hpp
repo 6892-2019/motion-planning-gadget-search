@@ -31,7 +31,7 @@ inline void dotfile(const sparsegraph& sg, std::ostream& destination = std::cout
 }
 
 template<unsigned int N>
-void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
+void canonicalize(automaton::Automaton<N>& a, unsigned int locations, bool allowMirroring = true) {
 	sparsegraph sg, canon;
 	SG_INIT(sg);
 	sg.nv = 0;
@@ -58,7 +58,7 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 	for (unsigned int t = 0; t < a.size(); ++t)
 		towercolors[t] = sg.nv++;
 	const int acceptvtx = sg.nv++;
-	sg.nde = 2 * edgecolors.size() //undirected cycle through the colors
+	sg.nde = (allowMirroring ? 2 : 1) * edgecolors.size() //(un)directed cycle through the colors
 			+ 1 * a.size() * edgecolors.size() //edge from each color to each node in its level
 			+ 1 * towercolors.size() * edgecolors.size() //edge from each color to each node in its tower
 			+ a.edges()
@@ -85,7 +85,8 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations) {
 		int vi = edgecolors.at(l);
 		sg.v[vi] = ei;
 		sg.e[ei++] = edgecolors.at(decr(l));
-		sg.e[ei++] = edgecolors.at(incr(l));
+		if (allowMirroring)
+			sg.e[ei++] = edgecolors.at(incr(l));
 		for (state_type s = 0; s < a.size(); ++s)
 			sg.e[ei++] = towers.at({s, l});
 		sg.d[vi] = static_cast<int>(ei - sg.v[vi]);

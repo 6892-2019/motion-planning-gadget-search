@@ -74,7 +74,7 @@ automaton_type mirror(const automaton_type& a, unsigned int locations) {
 	std::reverse(symbols.begin(), symbols.begin()+locations);
 	automaton_type b = a;
 	b.renumberAlphabet(symbols);
-	canonicalize(b, locations);
+	canonicalize(b, locations, false);
 	return b;
 }
 
