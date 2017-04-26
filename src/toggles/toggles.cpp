@@ -29,7 +29,8 @@ struct Gadget {
 		//in the size of the automaton.  We're manually tracking the effective
 		//alphabet size (locations_) to avoid a similar linear scan.
 		std::size_t ls = left.a_->size(), rs = right.a_->size();
-		return std::tie(left.locations_, ls) > std::tie(right.locations_, rs);
+//		return std::tie(left.locations_, ls) > std::tie(right.locations_, rs);
+		return std::tie(ls, left.locations_) > std::tie(rs, right.locations_);
 	}
 
 	automaton_const_ptr a_;
