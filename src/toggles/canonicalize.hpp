@@ -43,8 +43,8 @@ void canonicalize(automaton::Automaton<N>& a, unsigned int locations, bool allow
 	using state_type = automaton::AutomatonBase::state_type;
 	using symbol_type = automaton::AutomatonBase::symbol_type;
 	const state_type state_size = a.state_size();
-	const auto edge_size = a.edge_size();
-	const auto transition_size = a.transition_size();
+	MAYBE_UNUSED const auto edge_size = a.edge_size();
+	MAYBE_UNUSED const auto transition_size = a.transition_size();
 	//TODO: these could just be functions
 	std::unordered_map<std::pair<state_type, unsigned int>, int,
 		boost::hash<std::pair<state_type, unsigned int>>> towers;
