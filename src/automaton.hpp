@@ -962,11 +962,11 @@ public:
 //	}
 
 	/**
-	 * Renumbers states and symbols.  After this method returns, state i is
-	 * numbered states[i].  The given iterator must point to a permutation of
-	 * size equal to the number of states in this automaton.  The sequence
-	 * pointed to by the iterator will be modified.  Note that renumbering state
-	 * 0 to any other number may change the language accepted by this automaton.
+	 * Renumbers states.  After this method returns, state i is numbered
+	 * states[i].  The given iterator must point to a permutation of size equal
+	 * to the number of states in this automaton.  The sequence pointed to by
+	 * the iterator will be modified.  Note that renumbering state 0 to any
+	 * other number may change the language accepted by this automaton.
 	 */
 	template<class RandomAccessIterator>
 	void renumberStates(RandomAccessIterator states) {
