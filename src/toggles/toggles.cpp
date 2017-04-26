@@ -333,8 +333,8 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 				std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
 				op->renumberAlphabet(alphamap.begin());
 			}
-			canonicalize(*op, active.size());
-			*out++ = std::make_pair(Gadget(std::move(op), active.size()),
+			canonicalize(*op, static_cast<std::uint32_t>(active.size()));
+			*out++ = std::make_pair(Gadget(std::move(op), static_cast<std::uint32_t>(active.size())),
 					Provenance(gadgetIndex, l, s));
 		}
 	}
