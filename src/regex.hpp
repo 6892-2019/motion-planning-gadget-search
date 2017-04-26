@@ -73,6 +73,7 @@ Automaton<AlphabetSize> interpret(Expr::const_ptr expr) {
 		return alt<AlphabetSize>(children.begin(), children.end());
 	}
 	assert(false && "reached end of interpret");
+	__builtin_unreachable();
 }
 } //namespace impl
 
