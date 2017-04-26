@@ -118,5 +118,20 @@ range_for_pair<Front, Sentinel> as_range_for_pair(std::pair<Front, Sentinel> pai
 	return {pair};
 }
 
+
+struct indirect_equal {
+	template<typename L, typename R>
+	bool operator()(const L* l, const R* r) const noexcept(noexcept(*l == *r)) {
+		//TODO: also test pointer equality (and return true)?
+		//maybe as identical_or_indirect_equal?
+		return *l == *r;
+	}
+};
+struct indirect_hash {
+	template<typename T>
+	std::size_t operator()(const T* p) const noexcept(noexcept(std::hash<T>()(*p))) {
+		return std::hash<T>()(*p);
+	}
+};
 #endif /* ALGOUTILS_HPP */
 

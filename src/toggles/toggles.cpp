@@ -83,9 +83,23 @@ class Registry {
 public:
 	using index_type = std::uint32_t;
 	Registry(std::size_t maxSize) : size_(0), graphs_(maxSize), provenance_(maxSize),
-			closed_((std::size_t)(((double)maxSize) * (1.0/LOAD_FACTOR))), queue_(), waiting_() {
+			closed_((std::size_t)(((double)maxSize) * (1.0/LOAD_FACTOR))), queue_(), waiting_(),
+			empty_(new automaton_type), deleted_(new automaton_type) {
 		//TODO: guess at and reserve queue_ and waiting_
 		std::fill(closed_.begin(), closed_.end(), ABSENT);
+
+		//all gadget automata have effective alphabet [0, n), so we can use
+		//automata with transitions on 1/2 but not 0 as sentinels
+		empty_->addState();
+		empty_->addState();
+		empty_->addTrans(0, 1, 1);
+		empty_->setAccept(1);
+		deleted_->addState();
+		deleted_->addState();
+		deleted_->addTrans(0, 2, 1);
+		deleted_->setAccept(1);
+		waiting_.set_empty_key(empty_.get());
+		waiting_.set_deleted_key(deleted_.get());
 	}
 
 	/**
@@ -99,7 +113,7 @@ public:
 		graphs_[index] = (std::move(queue_.back().first));
 		provenance_[index] = queue_.back().second;
 		queue_.pop_back();
-		MAYBE_UNUSED auto erased = waiting_.erase(graphs_[index]);
+		MAYBE_UNUSED auto erased = waiting_.erase(graphs_[index].a_.get());
 		assert(erased && "dequeued, but couldn't erase from waiting set");
 
 		automaton_type m = mirror(*graphs_[index].a_, graphs_[index].locations_);
@@ -138,9 +152,9 @@ public:
 			if (probe == closed_.size())
 				probe = 0;
 		}
-		if (waiting_.count(g)) return false;
+		if (waiting_.count(g.a_.get())) return false;
 
-		waiting_.insert(g);
+		waiting_.insert(g.a_.get());
 		queue_.emplace_back(std::move(g), p);
 		std::push_heap(queue_.begin(), queue_.end(), queue_order);
 		return true;
@@ -169,8 +183,11 @@ private:
 	dynarray<Provenance> provenance_;
 	dynarray<std::uint32_t> closed_;
 	std::vector<std::pair<Gadget, Provenance>> queue_;
-	//so long as Gadget is a handle type, this is fine
-	std::unordered_set<Gadget> waiting_;
+	//non-owning pointer to the automata managed by Gadget's shared_ptr
+	google::dense_hash_set<const automaton_type*, indirect_hash, indirect_equal> waiting_;
+
+	//dummy automata used for waiting_'s empty and deleted keys
+	std::shared_ptr<automaton_type> empty_, deleted_;
 };
 constexpr Registry::index_type Registry::ABSENT;
 
