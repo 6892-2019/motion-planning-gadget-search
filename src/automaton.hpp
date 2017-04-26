@@ -1181,6 +1181,21 @@ public:
 	}
 
 	/**
+	 * @return a set containing the symbols that appear as labels on transitions
+	 * in this automaton.
+	 */
+	SymbolSet activeAlphabet() const {
+		symbol_mask_type mask;
+		for (state_type s = 0; s < state_size(); ++s)
+			mask |= outgoing(s);
+		SymbolSet set;
+		for (symbol_type s = 0; s < alphabet_size(); ++s)
+			if (mask[s])
+				set.insert(s);
+		return set;
+	}
+
+	/**
 	 * Returns the states directly reachable from the given state.
 	 * @return the states directly reachable from the given state
 	 */

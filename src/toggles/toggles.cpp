@@ -6,6 +6,8 @@
 
 using automaton::Automaton;
 using automaton::AutomatonBase;
+using automaton::StateSet;
+using automaton::SymbolSet;
 using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
 using automaton_const_ptr = std::shared_ptr<const automaton_type>;
@@ -141,6 +143,8 @@ public:
 		//Empty automata can't be usefully combined, so no reason to store them.
 		//TODO: isEmpty() isn't const, so we can't call it here.
 		if (g.a_->numTransitions() == 0) return false;
+		//Require a full set of active locations.
+		assert(g.a_->activeAlphabet().size() == g.locations_);
 
 		std::size_t hash = std::hash<Gadget>()(g);
 		std::size_t probe = hash % closed_.size();
@@ -320,8 +324,17 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 			//TODO: this repeated minimization is annoying in the case where we
 			//didn't disconnect the automaton...
 			op->minimize();
-			canonicalize(*op, g.locations_ - 2);
-			*out++ = std::make_pair(Gadget(std::move(op), g.locations_ - 2),
+			SymbolSet active = op->activeAlphabet();
+			if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
+			if (active.size() != g.locations_ - 2) {
+				//compress the alphabet
+				active.sort();
+				std::copy(active.begin(), active.end(), alphamap.begin());
+				std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
+				op->renumberAlphabet(alphamap.begin());
+			}
+			canonicalize(*op, active.size());
+			*out++ = std::make_pair(Gadget(std::move(op), active.size()),
 					Provenance(gadgetIndex, l, s));
 		}
 	}
