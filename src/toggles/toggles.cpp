@@ -203,14 +203,14 @@ OutputIterator combine(Registry::index_type l, bool leftMirror, Registry::index_
 	const automaton_type& la = leftMirror ? *left.mirror_ : *left.a_;
 	const automaton_type& ra = rightMirror ? *right.mirror_ : *right.a_;
 
-	using state_type = automaton_type::state_type;
-	std::vector<automaton_type::symbol_type> slide(automaton_type::alphabet_size_v);
-	std::vector<automaton_type::symbol_type> sliderotate(automaton_type::alphabet_size_v);
-	std::fill(slide.begin(), slide.begin()+right.locations_, std::numeric_limits<automaton_type::symbol_type>::max());
+	using symbol_type = automaton_type::symbol_type;
+	std::vector<symbol_type> slide(automaton_type::alphabet_size_v);
+	std::vector<symbol_type> sliderotate(automaton_type::alphabet_size_v);
+	std::fill(slide.begin(), slide.begin()+right.locations_, std::numeric_limits<symbol_type>::max());
 	std::iota(slide.begin()+right.locations_, slide.begin()+right.locations_+left.locations_, 0);
-	std::fill(slide.begin()+right.locations_+left.locations_, slide.end(), std::numeric_limits<automaton_type::symbol_type>::max());
+	std::fill(slide.begin()+right.locations_+left.locations_, slide.end(), std::numeric_limits<symbol_type>::max());
 	for (location_type ll = 0; ll < left.locations_; ++ll) {
-		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<automaton_type::symbol_type>::max());
+		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<symbol_type>::max());
 		std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_, 0);
 		automaton_type lm = la;
 		lm.renumberAlphabet(slide);
