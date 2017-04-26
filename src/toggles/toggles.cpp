@@ -287,10 +287,25 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 		alphamap.push_back(std::numeric_limits<symbol_type>::max());
 		alphamap.push_back(std::numeric_limits<symbol_type>::max());
 		connected->renumberAlphabet(0, connected->size(), alphamap.begin());
-		connected->minimize(); //TODO: may have segmented the automaton
-		canonicalize(*connected, g.locations_ - 2);
-		*out++ = std::make_pair(Gadget(std::move(connected), g.locations_ - 2),
-				Provenance(gadgetIndex, l, 0)); //TODO: note initial state
+
+		//We may have disconnected the automaton (disconnecting the
+		//configuration graph of the gadget it represents).  We will swap each
+		//accepting state into state 0 instead.
+		unsigned int processed = 0;
+		const auto accept_size = connected->accept_size();
+		for (state_type s = 0; processed < accept_size && s < connected->state_size(); ++s) {
+			if (!connected->accept(s)) continue;
+			++processed;
+			//last one can move, others have to copy
+			auto op = processed == accept_size ? std::move(connected) : std::make_shared<automaton_type>(*connected);
+			op->swapStateNumbers(0, s);
+			//TODO: this repeated minimization is annoying in the case where we
+			//didn't disconnect the automaton...
+			op->minimize();
+			canonicalize(*op, g.locations_ - 2);
+			*out++ = std::make_pair(Gadget(std::move(op), g.locations_ - 2),
+					Provenance(gadgetIndex, l, s));
+		}
 	}
 	return out;
 }

@@ -984,6 +984,28 @@ public:
 	}
 
 	/**
+	 * Swaps the given state numbers.  This is somewhat more efficient than
+	 * calling renumberStates if only a few states are being swapped and avoids
+	 * having to allocate a permutation array.  Note that renumbering state 0
+	 * to any other number may change the language accepted by this automaton.
+	 */
+	void swapStateNumbers(state_type a, state_type b) {
+		if (a == b) return;
+		//This might actually be faster with a lookup table.
+		for (auto& ts : transitions_)
+			for (Transition& t : ts)
+				if (t.next_ == a)
+					t.next_ = b;
+				else if (t.next_ == b)
+					t.next_ = a;
+		bool aa = accept_.test(a);
+		accept_.set(a, accept_.test(b));
+		accept_.set(b, aa);
+		using std::swap;
+		swap(transitions_[a], transitions_[b]);
+	}
+
+	/**
 	 * Renumbers states and symbols.  After this method returns, state i is
 	 * numbered states[i] and symbol i is numbered symbols[i].  Both iterators
 	 * must point to permutations of the appropriate size.
