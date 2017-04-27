@@ -258,7 +258,7 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 }
 
 template<typename OutputIterator>
-OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
+OutputIterator connect(Registry::index_type gadgetIndex, const automaton_type& a, OutputIterator out) {
 	const Gadget& g = registry.at(gadgetIndex);
 	if (g.locations_ <= 3) {
 		std::cout << "Skipping connect due to size (" << g.locations_ <<")\n";
@@ -270,7 +270,7 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size_v);
 	for (unsigned int l = 0; l < g.locations_; ++l) {
 		unsigned int m = (l+1) % g.locations_;
-		auto connected = std::make_shared<automaton_type>(*g.a_);
+		auto connected = std::make_shared<automaton_type>(a);
 		//TODO: fixpoint iteration may not actually be necessary
 		bool progress = true;
 		while (progress) {
@@ -346,6 +346,20 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 					Provenance(gadgetIndex, l, s, registry.provenance(gadgetIndex).generation+1));
 		}
 	}
+	return out;
+}
+
+template<typename OutputIterator>
+OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
+	const Gadget& g = registry.at(gadgetIndex);
+	if (g.locations_ <= 3) {
+		std::cout << "Skipping connect due to size (" << g.locations_ <<")\n";
+		return out;
+	}
+
+	out = connect(gadgetIndex, *g.a_, out);
+	if (g.mirror_)
+		out = connect(gadgetIndex, *g.mirror_, out);
 	return out;
 }
 
