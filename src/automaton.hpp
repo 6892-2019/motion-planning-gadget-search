@@ -1220,10 +1220,13 @@ public:
 	 * every symbol.
 	 */
 	bool isStateDeterministic(state_type state) const {
-		for (symbol_type s = 0; s < AlphabetSize; ++s)
-			if (step(state, s).size() > 1)
-				return false;
-		return true;
+		symbol_mask_type overall;
+		unsigned int sum = 0;
+		for (const Transition& t : transitions_[state]) {
+			overall |= t.symbols_;
+			sum += t.symbols_.count();
+		}
+		return overall.count() == sum;
 	}
 
 	/**
