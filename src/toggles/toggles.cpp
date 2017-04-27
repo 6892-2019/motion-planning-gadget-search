@@ -54,16 +54,16 @@ struct hash<Gadget> {
 }
 
 struct Provenance {
-	std::uint32_t first, second, i, j;
+	std::uint32_t first, second, i, j, generation;
 	Provenance() = default;
-	Provenance(std::uint32_t initialIndex) : first(ALLONES), second(initialIndex), i(ALLONES), j(ALLONES) {}
-	Provenance(std::uint32_t parent, std::uint32_t connection, AutomatonBase::state_type newInitialState)
-		: first(parent), second(ALLONES), i(connection), j(newInitialState) {}
+	Provenance(std::uint32_t initialIndex) : first(ALLONES), second(initialIndex), i(ALLONES), j(ALLONES), generation(0) {}
+	Provenance(std::uint32_t parent, std::uint32_t connection, AutomatonBase::state_type newInitialState, std::uint32_t generatio)
+		: first(parent), second(ALLONES), i(connection), j(newInitialState), generation(generatio) {}
 	Provenance(std::uint32_t firstParent, std::uint32_t firstSplice, bool firstMirrored,
-			std::uint32_t secondParent, std::uint32_t secondSplice, bool secondMirrored)
+			std::uint32_t secondParent, std::uint32_t secondSplice, bool secondMirrored, std::uint32_t generatio)
 		: first(firstParent), second(secondParent),
 		  i(firstMirrored ? firstSplice | TOPBIT : firstSplice),
-		  j(secondMirrored ? secondSplice | TOPBIT : secondSplice) {}
+		  j(secondMirrored ? secondSplice | TOPBIT : secondSplice), generation(generatio) {}
 private:
 	static constexpr std::uint32_t ALLONES = std::numeric_limits<std::uint32_t>::max();
 	static constexpr std::uint32_t TOPBIT = 1 << 31;
@@ -170,6 +170,9 @@ public:
 	const Gadget& at(index_type i) const {
 		return graphs_[i];
 	}
+	const Provenance& provenance(index_type i) const {
+		return provenance_[i];
+	}
 	std::size_t waiting_size() const {
 		return waiting_.size();
 	}
@@ -180,6 +183,8 @@ private:
 	static bool queue_order(const std::pair<Gadget, Provenance>& left, const std::pair<Gadget, Provenance>& right) {
 		//std::*_heap works with max-heaps, grumble
 		return Gadget::larger_than(left.first, right.first);
+//		return left.second.generation > right.second.generation ||
+//				(left.second.generation == right.second.generation && Gadget::larger_than(left.first, right.first));
 	}
 
 	std::uint32_t size_;
@@ -221,7 +226,9 @@ OutputIterator combine(Registry::index_type l, bool leftMirror, Registry::index_
 			combined.minimize();
 			canonicalize(combined, left.locations_ + right.locations_);
 			*out++ = std::make_pair(Gadget(std::make_shared<const automaton_type>(std::move(combined)),
-					left.locations_ + right.locations_), Provenance(l, ll, leftMirror, r, rl, rightMirror));
+					left.locations_ + right.locations_), Provenance(l, ll, leftMirror, r, rl, rightMirror,
+					//TODO: make a reasoned choice for this function
+					std::max(registry.provenance(l).generation, registry.provenance(r).generation)+1));
 
 			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_-1, sliderotate.begin()+ll+right.locations_);
 		}
@@ -335,7 +342,8 @@ OutputIterator connect(Registry::index_type gadgetIndex, OutputIterator out) {
 			}
 			canonicalize(*op, static_cast<std::uint32_t>(active.size()));
 			*out++ = std::make_pair(Gadget(std::move(op), static_cast<std::uint32_t>(active.size())),
-					Provenance(gadgetIndex, l, s));
+					//TODO: reasoned choice for +1 generation
+					Provenance(gadgetIndex, l, s, registry.provenance(gadgetIndex).generation+1));
 		}
 	}
 	return out;
@@ -357,11 +365,12 @@ void mainloop(const automaton_type& target) {
 			std::exit(0);
 		}
 	}
-	std::cout << "gadget " << i << " " << registry.at(i).locations_ << " locations, "
+	std::cout << "gadget " << i << ", gen " << registry.provenance(i).generation << ", "
+			<< registry.at(i).locations_ << " locations, "
 			<< (registry.at(i).mirror_ ? "chiral, " : "")
 			<< "produced " << successors.size()
 			<< ", offered " << total << ", "
-			<< registry.waiting_size() << " waiting" << std::endl;
+			<< registry.waiting_size() << " waiting\n";// << std::endl;
 }
 
 int main(int argc, char* argv[]) {
