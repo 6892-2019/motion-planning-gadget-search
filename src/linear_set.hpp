@@ -97,6 +97,15 @@ public:
 		auto i = find(value);
 		if (i != end())
 			return {i, false};
+		return insert_absent(value);
+	}
+	/**
+	 * Inserts a value into this set that is known not to be in this set.
+	 * (Debug builds will check anyway.)
+	 * @return an iterator pointing to the inserted element, and true
+	 */
+	std::pair<iterator, bool> insert_absent(const value_type& value) {
+		assert(find(value) == end());
 		data_.push_back(value);
 		return {end()-1, true};
 	}

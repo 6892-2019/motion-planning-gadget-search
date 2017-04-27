@@ -391,7 +391,8 @@ public:
 		StateSet next;
 		for (const Transition& t : transitions_[current])
 			if (t.symbols_[symbol])
-				next.insert(t.next_);
+				//We can go to many t.next_, but to each t.next_ only once.
+				next.insert_absent(t.next_);
 		//We used to assert(next.size() <= 1 || !deterministic_), but the
 		//addTrans calls isStateDeterministic calls step (us) when checking
 		//whether to clear deterministic_.  If we change the implementation of
@@ -406,7 +407,7 @@ public:
 				SymbolSet ret;
 				for (symbol_type a = 0; a < alphabet_size(); ++a)
 					if (t.symbols_[a])
-						ret.insert(a);
+						ret.insert_absent(a);
 				return ret;
 			}
 		return {};
@@ -1191,7 +1192,7 @@ public:
 		SymbolSet set;
 		for (symbol_type s = 0; s < alphabet_size(); ++s)
 			if (mask[s])
-				set.insert(s);
+				set.insert_absent(s);
 		return set;
 	}
 
