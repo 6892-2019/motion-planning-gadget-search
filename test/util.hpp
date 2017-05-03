@@ -15,7 +15,7 @@ std::vector<std::vector<unsigned int>> allStrings(unsigned int alphabetSize, uns
  * strings up to the given length, and by other tests.  (Do not call this method
  * if the automata may differ on longer strings.)
  */
-template<int AlphabetSize>
+template<unsigned int AlphabetSize>
 void equivalentOnAllStrings(const automaton::Automaton<AlphabetSize>& a, const automaton::Automaton<AlphabetSize>& b, int length, int lineno = -1) {
 	for (auto& string : allStrings(AlphabetSize, length))
 		EXPECT_EQ(a.run(string), b.run(string)) << to_string(string) << " from line " << lineno;
