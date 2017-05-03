@@ -257,6 +257,31 @@ OutputIterator combine(Registry::index_type l, Registry::index_type r, OutputIte
 	return out;
 }
 
+bool acceptingClosure(automaton_type& connected, unsigned int locations) {
+	//Transitive closure.
+	//TODO: move to Automaton? (minus only being on non-accept states)
+	//If we renumbered l to m, transitive-closed, then deleted m, that would be enough (?).
+	using state_type = automaton_type::state_type;
+	using symbol_type = automaton_type::symbol_type;
+	bool progress, changed = false;
+	do {
+		//TODO: consider a worklist instead of fixpoint iteration
+		progress = false;
+		for (state_type s = 0; s < connected.size(); ++s) {
+			if (connected.accept(s)) continue;
+			for (symbol_type a = 0; a < locations; ++a) {
+				for (state_type d : connected.step(s, a)) {
+					assert(connected.accept(d));
+					for (state_type e : connected.step(d, a))
+						progress |= connected.addEpsilon(s, e);
+				}
+			}
+		}
+		changed |= progress;
+	} while (progress);
+	return changed;
+}
+
 template<typename OutputIterator>
 OutputIterator connect(Registry::index_type gadgetIndex, const automaton_type& a, OutputIterator out) {
 	const Gadget& g = registry.at(gadgetIndex);
@@ -267,45 +292,39 @@ OutputIterator connect(Registry::index_type gadgetIndex, const automaton_type& a
 
 	using state_type = automaton_type::state_type;
 	using symbol_type = automaton_type::symbol_type;
-	std::vector<automaton_type::symbol_type> alphamap(automaton_type::alphabet_size_v);
+	auto enjoin = [](automaton_type& a, symbol_type l, symbol_type m) -> bool {
+		bool progress, changed = false;
+		//TODO: instead of fixpoint iteration, we should put the changed state s
+		//on a worklist and iterate until it's empty
+		do {
+			progress = false;
+			for (state_type s = 0; s < a.size(); ++s) {
+				if (a.accept(s)) continue;
+				auto dests = a.step(s, l);
+				for (state_type d : dests) {
+					assert(a.accept(d));
+					for (state_type e : a.step(d, m))
+						progress |= a.addEpsilon(s, e);
+				}
+
+				dests = a.step(s, m);
+				for (state_type d : dests) {
+					assert(a.accept(d));
+					for (state_type e : a.step(d, l))
+						progress |= a.addEpsilon(s, e);
+				}
+			}
+			changed |= progress;
+		} while (progress);
+		return changed;
+	};
+
+	std::vector<symbol_type> alphamap(automaton_type::alphabet_size_v);
 	for (unsigned int l = 0; l < g.locations_; ++l) {
 		unsigned int m = (l+1) % g.locations_;
 		auto connected = std::make_shared<automaton_type>(a);
-		//TODO: fixpoint iteration may not actually be necessary
-		bool progress = true;
-		while (progress) {
-			progress = false;
-			for (state_type s = 0; s < connected->size(); ++s) {
-				if (connected->accept(s)) continue;
-				auto dests = connected->step(s, l);
-				for (state_type d : dests) {
-					assert(connected->accept(d));
-					for (state_type e : connected->step(d, m))
-						progress |= connected->addEpsilon(s, e);
-				}
-
-				dests = connected->step(s, m);
-				for (state_type d : dests) {
-					assert(connected->accept(d));
-					for (state_type e : connected->step(d, l))
-						progress |= connected->addEpsilon(s, e);
-				}
-			}
-
-			//Transitive closure.
-			//TODO: move to Automaton? (minus only being on non-accept states)
-			//If we renumbered l to m, transitive-closed, then deleted m, that would be enough (?).
-			for (state_type s = 0; s < connected->size(); ++s) {
-				if (connected->accept(s)) continue;
-				for (symbol_type a = 0; a < g.locations_; ++a) {
-					for (state_type d : connected->step(s, a)) {
-						assert(connected->accept(d));
-						for (state_type e : connected->step(d, a))
-							progress |= connected->addEpsilon(s, e);
-					}
-				}
-			}
-		}
+		enjoin(*connected, l, m);
+		acceptingClosure(*connected, g.locations_);
 
 		std::iota(alphamap.begin(), alphamap.begin()+g.locations_, 0);
 		std::fill(alphamap.begin()+g.locations_, alphamap.end(), std::numeric_limits<symbol_type>::max());
@@ -419,16 +438,24 @@ int main(int argc, char* argv[]) {
 //		mainloop(*split4);
 //	}
 
+	R noopR = R::star(R::alt({R::cat({R::lit(0), R::lit(0)}), R::cat({R::lit(1), R::lit(1)}), R::cat({R::lit(2), R::lit(2)}), R::cat({R::lit(3), R::lit(3)})}));
+	automaton_type noop = noopR.compile();
 	R ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(3), R::lit(2)})});
 	R rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(2), R::lit(3)})});
-	automaton_type parallelToggle = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
+	automaton_type parallelToggleBase = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
+	automaton_type parallelToggle = shuffleAccept(noop, parallelToggleBase);
+	acceptingClosure(parallelToggle, 4);
 	parallelToggle.minimize();
 	canonicalize(parallelToggle, 4);
 	registry.offer(Gadget(std::move(parallelToggle), 4), Provenance(1));
 
+	//TODO: declare well-known gadgets as constants (maybe functions to create them?)
+	//and test they do the right thing (may require teaching build script about
+	//sub-project tests...)
 	ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(2), R::lit(3)})});
 	rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(3), R::lit(2)})});
-	automaton_type antiparallelToggle = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
+	automaton_type antiparallelToggle = shuffleAccept(noop, R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile());
+	acceptingClosure(antiparallelToggle, 4);
 	antiparallelToggle.minimize();
 	canonicalize(antiparallelToggle, 4);
 	while (true) {
