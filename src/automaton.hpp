@@ -1767,19 +1767,56 @@ Automaton<N> any() {
 
 /**
  * Returns an Automaton that accepts only the string containing just the given
- * symbol.
+ * symbol(s).
  */
-template<unsigned int N>
-Automaton<N> lit(typename Automaton<N>::symbol_type symbol) {
+template<unsigned int N, typename... Symbols>
+Automaton<N> lit(Symbols... symbols) {
 	Automaton<N> a;
+	a.reserve(static_cast<typename Automaton<N>::state_type>(sizeof...(symbols) + 1));
 	a.addState();
-	a.addState();
-	a.setAccept(1);
-	a.addTrans(0, symbol, 1);
+	vta::map([&a](auto s) {
+		auto symbol = numeric_cast<typename Automaton<N>::symbol_type>(s);
+		a.addState();
+		a.addTrans(a.state_size()-2, symbol, a.state_size()-1);
+	})(symbols...);
+	a.setAccept(a.state_size()-1);
 	return a;
 }
 
-//TODO: varargs lit, iterator-range lit(?)
+namespace detail {
+template<class ForwardIterator, class = std::void_t<typename std::iterator_traits<ForwardIterator>::iterator_category>>
+AutomatonBase::state_type total_states(ForwardIterator begin, ForwardIterator end) {
+	return std::accumulate(begin, end, 0u, [](auto x, auto a){return x + a.state_size();});
+}
+template<class... Automata>
+AutomatonBase::state_type total_states(const AutomatonBase& first, Automata... rest) {
+	return vta::foldl([](AutomatonBase::state_type accum, const AutomatonBase& base) {
+		return accum + base.state_size();
+	})(0u, first, rest...);
+}
+
+template<unsigned int N>
+void cat_once(Automaton<N>& target, const Automaton<N>& source) {
+	auto base = target.append(source);
+	//Wire the previous automaton's accept states to the current initial
+	//state (base), modifying them to not accept.
+	//TODO: addEpsilon may cause p to become accepting again, so we have
+	//to scan from 0 each time.  We should probably keep a set of
+	//accepting /state indices to avoid the repeated scanning.
+	for (typename Automaton<N>::state_type p = 0; p < base; ++p) {
+		if (target.accept(p)) {
+			target.setAccept(p, false);
+			target.addEpsilon(p, base);
+		}
+	}
+}
+
+template<unsigned int N>
+void alt_once(Automaton<N>& target, const Automaton<N>& source) {
+	auto base = target.append(source);
+	target.addEpsilon(0, base);
+}
+} //namespace detail
 
 template<unsigned int N, class ForwardIterator>
 Automaton<N> cat(ForwardIterator begin, ForwardIterator end) {
@@ -1787,26 +1824,9 @@ Automaton<N> cat(ForwardIterator begin, ForwardIterator end) {
 		//the empty string is the identity element for concatenation
 		return epsilon<N>();
 
-	typename Automaton<N>::state_type totalStates = 0;
-	for (ForwardIterator i = begin; i != end; ++i)
-		totalStates += i->state_size();
-
 	Automaton<N> a;
-	a.reserve(totalStates);
-	for (ForwardIterator i = begin; i != end; ++i) {
-		typename Automaton<N>::state_type base = a.append(*i);
-		//Wire the previous automaton's accept states to the current initial
-		//state (base), modifying them to not accept.
-		//TODO: addEpsilon may cause p to become accepting again, so we have
-		//to scan from 0 each time.  We should probably keep a set of
-		//accepting /state indices to avoid the repeated scanning.
-		for (typename Automaton<N>::state_type p = 0; p < base; ++p) {
-			if (a.accept(p)) {
-				a.setAccept(p, false);
-				a.addEpsilon(p, base);
-			}
-		}
-	}
+	a.reserve(detail::total_states(begin, end));
+	std::for_each(begin, end, [&](auto& v){detail::cat_once(a, v);});
 	return a;
 }
 template<unsigned int N>
@@ -1814,28 +1834,52 @@ Automaton<N> cat(std::initializer_list<Automaton<N>> list) {
 	return cat<N>(list.begin(), list.end());
 }
 
+template<unsigned int N>
+Automaton<N> cat() {
+	return epsilon<N>();
+}
+template<unsigned int N, typename... Automata>
+std::enable_if_t<vta::are_same<Automaton<N>, std::decay_t<Automata>...>::value, Automaton<N>>
+cat(const Automaton<N>& first, Automata... rest) {
+	Automaton<N> a;
+	a.reserve(detail::total_states(first, rest...));
+	vta::map([&a](auto&& v){
+		detail::cat_once(a, v);
+	})(first, rest...);
+	return a;
+}
+
 template<unsigned int N, class ForwardIterator>
 Automaton<N> alt(ForwardIterator begin, ForwardIterator end) {
 	if (begin == end)
-		return {};
-
-	typename Automaton<N>::state_type totalStates = 0;
-	for (ForwardIterator i = begin; i != end; ++i)
-		totalStates += i->state_size();
+		return empty<N>();
 
 	Automaton<N> a;
-	a.reserve(totalStates);
+	a.reserve(detail::total_states(begin, end) + 1);
 	//initial state that transitions to the individual machines' states
 	a.addState();
-	for (ForwardIterator i = begin; i != end; ++i) {
-		typename Automaton<N>::state_type base = a.append(*i);
-		a.addEpsilon(0, base);
-	}
+	std::for_each(begin, end, [&](auto& v){detail::alt_once(a, v);});
 	return a;
 }
 template<unsigned int N>
 Automaton<N> alt(std::initializer_list<Automaton<N>> list) {
 	return alt<N>(list.begin(), list.end());
+}
+
+template<unsigned int N>
+Automaton<N> alt() {
+	return empty<N>();
+}
+template<unsigned int N, typename... Automata>
+std::enable_if_t<vta::are_same<Automaton<N>, std::decay_t<Automata>...>::value, Automaton<N>>
+alt(const Automaton<N>& first, Automata... rest) {
+	Automaton<N> a;
+	a.reserve(detail::total_states(first, rest...) + 1);
+	a.addState();
+	vta::map([&a](auto&& v){
+		detail::alt_once(a, v);
+	})(first, rest...);
+	return a;
 }
 
 template<unsigned int N>

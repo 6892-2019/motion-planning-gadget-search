@@ -90,6 +90,26 @@ TEST(AutomatonTest, Lit) {
 	EXPECT_FALSE(a.run({1, 0}));
 }
 
+TEST(AutomatonTest, VarargLit) {
+	auto a = lit<2>(0, 0, 0, 0, 0);
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_TRUE(a.run({0, 0, 0, 0, 0}));
+	EXPECT_FALSE(a.run({}));
+	EXPECT_FALSE(a.run({0, 0}));
+
+	a = lit<2>(0, 0, 0, 1, 0);
+	EXPECT_TRUE(a.deterministic());
+	EXPECT_FALSE(a.isEmpty());
+	EXPECT_FALSE(a.infinite());
+	EXPECT_TRUE(a.run({0, 0, 0, 1, 0}));
+	EXPECT_FALSE(a.run({}));
+	EXPECT_FALSE(a.run({0, 0}));
+
+	equivalentOnAllStrings<2>(lit<2>(), epsilon<2>(), 8, __LINE__);
+}
+
 TEST(AutomatonTest, Cat) {
 	auto a = lit<2>(0);
 	auto foo = cat<2>({a});
@@ -130,6 +150,42 @@ TEST(AutomatonTest, Cat) {
 	equivalentOnAllStrings<2>(e, f, 8, __LINE__);
 }
 
+TEST(AutomatonTest, EmptyCatList) {
+	auto a = cat<2>({});
+	equivalentOnAllStrings<2>(a, epsilon<2>(), 8, __LINE__);
+}
+
+TEST(AutomatonTest, EmptyVarargCat) {
+	auto a = cat<2>();
+	equivalentOnAllStrings<2>(a, epsilon<2>(), 8, __LINE__);
+}
+
+TEST(AutomatonTest, SingleVarargCat) {
+	auto a = cat<2>(lit<2>(0));
+	equivalentOnAllStrings<2>(a, lit<2>(0), 8, __LINE__);
+}
+
+TEST(AutomatonTest, VarargCat) {
+	auto a = lit<2>(0);
+	auto b = lit<2>(1);
+	auto foo = cat<2>(a, b, a);
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_FALSE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_FALSE(foo.run({1, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 1}));
+	EXPECT_TRUE(foo.run({0, 1, 0}));
+	EXPECT_FALSE(foo.run({0, 1, 1}));
+	EXPECT_FALSE(foo.run({1, 0, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 1}));
+	EXPECT_FALSE(foo.run({1, 1, 0}));
+	EXPECT_FALSE(foo.run({1, 1, 1}));
+}
+
 TEST(AutomatonTest, Alt) {
 	auto a = lit<2>(0);
 	auto foo = alt<2>({a});
@@ -161,6 +217,37 @@ TEST(AutomatonTest, Alt) {
 
 	auto c = cat<2>({lit<2>(1), lit<2>(0)});
 	foo = alt<2>({a, c});
+	EXPECT_FALSE(foo.isEmpty());
+	EXPECT_FALSE(foo.infinite());
+	EXPECT_FALSE(foo.run({}));
+	EXPECT_TRUE(foo.run({0}));
+	EXPECT_FALSE(foo.run({1}));
+	EXPECT_FALSE(foo.run({0, 1}));
+	EXPECT_TRUE(foo.run({1, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 0}));
+	EXPECT_FALSE(foo.run({0, 0, 1}));
+	EXPECT_FALSE(foo.run({0, 1, 0}));
+	EXPECT_FALSE(foo.run({0, 1, 1}));
+	EXPECT_FALSE(foo.run({1, 0, 0}));
+	EXPECT_FALSE(foo.run({1, 0, 1}));
+	EXPECT_FALSE(foo.run({1, 1, 0}));
+	EXPECT_FALSE(foo.run({1, 1, 1}));
+}
+
+TEST(AutomatonTest, EmptyAltList) {
+	auto a = alt<2>({});
+	equivalentOnAllStrings<2>(a, empty<2>(), 8, __LINE__);
+}
+
+TEST(AutomatonTest, EmptyVarargAlt) {
+	auto a = alt<2>();
+	equivalentOnAllStrings<2>(a, empty<2>(), 8, __LINE__);
+}
+
+TEST(AutomatonTest, VarargAlt) {
+	auto a = lit<2>(0);
+	auto c = cat<2>({lit<2>(1), lit<2>(0)});
+	auto foo = alt(a, c);
 	EXPECT_FALSE(foo.isEmpty());
 	EXPECT_FALSE(foo.infinite());
 	EXPECT_FALSE(foo.run({}));

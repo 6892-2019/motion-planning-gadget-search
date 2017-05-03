@@ -13,7 +13,7 @@ globals.update({
   'ldflags': '-lc ../nauty/nauty.a',
 })
 # must be inserted after its references
-globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem ../nauty/'
+globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem ../nauty/ -isystem ../vta/include/'
 globals['testldflags'] = '$ldflags -lgtest -lgtest_main'
 
 debug_cfg = {'config': 'debug', 'optflags': '-g -O0 -march=native -gsplit-dwarf -fdebug-types-section -grecord-gcc-switches'}
