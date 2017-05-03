@@ -110,6 +110,14 @@ TEST(AutomatonTest, VarargLit) {
 	equivalentOnAllStrings<2>(lit<2>(), epsilon<2>(), 8, __LINE__);
 }
 
+TEST(AutomatonTest, VarargRun) {
+	auto a = lit<2>(0, 0, 0, 1, 0);
+	EXPECT_TRUE(a.run(0, 0, 0, 1, 0));
+	EXPECT_FALSE(a.run());
+	EXPECT_FALSE(a.run(0, 0));
+	EXPECT_FALSE(a.run(0, 0, 0, 0, 0));
+}
+
 TEST(AutomatonTest, Cat) {
 	auto a = lit<2>(0);
 	auto foo = cat<2>({a});
