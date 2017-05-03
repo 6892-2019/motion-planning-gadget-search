@@ -337,6 +337,7 @@ private:
 
 template<unsigned int N> Automaton<N> empty();
 template<unsigned int N> Automaton<N> all();
+template<unsigned int N> Automaton<N> determinize(Automaton<N>);
 
 template<unsigned int AlphabetSize>
 class Automaton final : public AutomatonBase {
@@ -533,13 +534,12 @@ private:
 		return a;
 	}
 
-	/**
-	 * Computes the accepting shuffle of the given automata.  The accepting
-	 * shuffle is the language accepted by running both automata in parallel,
-	 * passing each character to one or the other automaton, switching the
-	 * active automaton only when both automata are in accepting states.
-	 */
 	static Automaton shuffleAccept(const Automaton& left, const Automaton& right) {
+		return shuffleAcceptDeterministic(left.deterministic() ? left : automaton::determinize(left),
+				right.deterministic() ? right : automaton::determinize(right));
+	}
+
+	static Automaton shuffleAcceptDeterministic(const Automaton& left, const Automaton& right) {
 		//(left state, right state, new state, left automation active)
 		using state_quad = std::tuple<state_type, state_type, state_type, bool>;
 		std::stack<state_quad> worklist;
@@ -1983,6 +1983,15 @@ Automaton<N> comp(Automaton<N> a) {
 template<unsigned int N>
 Automaton<N> shuffleAccept(const Automaton<N>& left, const Automaton<N>& right) {
 	return Automaton<N>::shuffleAccept(left, right);
+}
+
+/**
+ * @return a determinized copy of the given automaton
+ */
+template<unsigned int N>
+Automaton<N> determinize(Automaton<N> a) {
+	a.determinize();
+	return a;
 }
 
 /**

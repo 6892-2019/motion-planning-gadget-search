@@ -517,3 +517,10 @@ TEST(AutomatonTest, Comp) {
 	EXPECT_TRUE(u3c.run({1, 0}));
 	EXPECT_TRUE(u3c.run({1, 1}));
 }
+
+TEST(AutomatonTest, AltCatVsCatMaybe) {
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto foo = alt(ltr, cat(ltr, rtl));
+	auto bar = cat(ltr, maybe(rtl));
+	equivalentOnAllStrings(foo, bar, 4, __LINE__);
+}

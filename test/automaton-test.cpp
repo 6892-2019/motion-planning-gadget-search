@@ -379,3 +379,146 @@ TEST(AutomatonTest, MinimizeDeadEndAcceptStates) {
 			deadEndAccepts.push_back(s);
 	ASSERT_EQ(deadEndAccepts.size(), 1) << a;
 }
+
+TEST(AutomatonTest, ShuffleAccept01) {
+	auto left = lit<2>(0, 0), right = lit<2>(1, 1);
+	auto comb = shuffleAccept(left, right);
+	EXPECT_TRUE(comb.run(0, 0, 1, 1));
+	EXPECT_TRUE(comb.run(1, 1, 0, 0));
+	EXPECT_FALSE(comb.run(0, 0));
+	EXPECT_FALSE(comb.run(0, 0, 0, 0));
+	EXPECT_FALSE(comb.run(1, 1));
+	EXPECT_FALSE(comb.run(1, 1, 1, 1));
+	EXPECT_FALSE(comb.run(0, 1, 0, 1));
+	EXPECT_FALSE(comb.run(1, 0, 1, 0));
+	EXPECT_FALSE(comb.run());
+}
+
+TEST(AutomatonTest, ShuffleAccept02) {
+	auto left = star(lit<2>(0, 0)), right = lit<2>(1, 1);
+	auto comb = shuffleAccept(left, right);
+	EXPECT_FALSE(comb.run());
+	EXPECT_FALSE(comb.run(0, 0));
+	EXPECT_TRUE(comb.run(1, 1));
+	EXPECT_TRUE(comb.run(0, 0, 1, 1));
+	EXPECT_TRUE(comb.run(0, 0, 1, 1, 0, 0));
+	EXPECT_TRUE(comb.run(1, 1, 0, 0));
+	EXPECT_FALSE(comb.run(0, 0, 0, 0));
+	EXPECT_FALSE(comb.run(1, 1, 1, 1));
+	EXPECT_FALSE(comb.run(0, 1, 0, 1));
+	EXPECT_FALSE(comb.run(1, 0, 1, 0));
+}
+
+TEST(AutomatonTest, ShuffleAcceptWithEmpty) {
+	auto left = star(lit<2>(0, 0)), right = empty<2>();
+	auto comb = shuffleAccept(left, right);
+	equivalentOnAllStrings<2>(comb, empty<2>(), 8, __LINE__);
+}
+
+TEST(AutomatonTest, ShuffleAcceptSymmetry) {
+	auto left = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
+	auto right = plus<2>(nCopies<2>(any<2>(), 3));
+	equivalentOnAllStrings<2>(shuffleAccept(left, right), shuffleAccept(right, left), 8, __LINE__);
+	left.minimize();
+	right.minimize();
+	equivalentOnAllStrings<2>(shuffleAccept(left, right), shuffleAccept(right, left), 8, __LINE__);
+}
+
+TEST(AutomatonTest, ShuffleAcceptInvariantToDuplication) {
+	auto left = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
+	equivalentOnAllStrings<2>(shuffleAccept(left, left), shuffleAccept(left, alt(left, left)), 8, __LINE__);
+	equivalentOnAllStrings<2>(shuffleAccept(left, left), shuffleAccept(alt(left, left), left), 8, __LINE__);
+	equivalentOnAllStrings<2>(shuffleAccept(left, left), shuffleAccept(alt(left, left), alt(left, left)), 8, __LINE__);
+}
+
+TEST(AutomatonTest, ShuffleAcceptComposeMinimize) {
+	auto left = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
+	auto right = plus<2>(nCopies<2>(any<2>(), 3));
+	auto shuf = shuffleAccept(left, right);
+	shuf.minimize();
+	left.minimize();
+	right.minimize();
+	auto minshuf = shuffleAccept(left, right);
+	equivalentOnAllStrings<2>(shuf, minshuf, 8, __LINE__);
+}
+
+TEST(AutomatonTest, ShuffleAcceptSymmetry2) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase), rshuf = shuffleAccept(parallelToggleBase, noop);
+	equivalentOnAllStrings<4>(shuf, rshuf, 4, __LINE__);
+
+	noop.minimize();
+	parallelToggleBase.minimize();
+	auto mshuf = shuffleAccept(noop, parallelToggleBase), rmshuf = shuffleAccept(parallelToggleBase, noop);
+	equivalentOnAllStrings<4>(mshuf, rmshuf, 4, __LINE__);
+}
+
+TEST(AutomatonTest, ShuffleAcceptComposeMinimize2) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase), rshuf = shuffleAccept(parallelToggleBase, noop);
+	noop.minimize();
+	parallelToggleBase.minimize();
+	auto mshuf = shuffleAccept(noop, parallelToggleBase), rmshuf = shuffleAccept(parallelToggleBase, noop);
+	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
+	equivalentOnAllStrings<4>(rshuf, rmshuf, 4, __LINE__);
+}
+
+TEST(AutomatonTest, MinimizationPreservesLanguage) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto mnoop = noop;
+	mnoop.minimize();
+	equivalentOnAllStrings(noop, mnoop, 4, __LINE__);
+}
+
+TEST(AutomatonTest, MinimizationPreservesLanguage2) {
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto mp = parallelToggleBase;
+	mp.minimize();
+	equivalentOnAllStrings(parallelToggleBase, mp, 4, __LINE__);
+}
+
+TEST(AutomatonTest, MinimizationPreservesLanguage3) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	auto mshuf = shuf;
+	mshuf.minimize();
+	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
+}
+
+TEST(AutomatonTest, MinimizationPreservesLanguage4) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	noop.minimize();
+	parallelToggleBase.minimize();
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	auto mshuf = shuf;
+	mshuf.minimize();
+	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
+}
+
+TEST(AutomatonTest, MinimizationPreservesLanguage5) {
+	auto ltr = lit<4>(0, 1), rtl = lit<4>(1, 0);
+	auto parallelToggleBase = alt(ltr, cat(ltr, rtl));
+	auto mp = parallelToggleBase;
+	mp.minimize();
+	equivalentOnAllStrings(parallelToggleBase, mp, 4, __LINE__);
+}
+
+TEST(AutomatonTest, ShuffleAcceptComposeMinimize3) {
+	auto noop = lit<4>(0);
+	auto ltr = lit<4>(0, 1), rtl = lit<4>(1, 0);
+	auto parallelToggleBase = alt(ltr, cat(ltr, rtl));
+	auto shuf = shuffleAccept(noop, parallelToggleBase), rshuf = shuffleAccept(parallelToggleBase, noop);
+	parallelToggleBase.minimize();
+	auto mshuf = shuffleAccept(noop, parallelToggleBase), rmshuf = shuffleAccept(parallelToggleBase, noop);
+	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
+	equivalentOnAllStrings<4>(rshuf, rmshuf, 4, __LINE__);
+}
