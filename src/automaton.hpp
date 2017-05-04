@@ -402,6 +402,16 @@ public:
 		return next;
 	}
 
+	boost::optional<state_type> stepDeterministic(state_type current, symbol_type symbol) const {
+		assert(deterministic());
+		assert(current < transitions_.size());
+		assert(symbol < AlphabetSize);
+		for (const Transition& t : transitions_[current])
+			if (t.symbols_[symbol])
+				return t.next_;
+		return boost::none;
+	}
+
 	SymbolSet labels(state_type from, state_type to) const override {
 		for (const Transition& t : transitions_[from])
 			if (t.next_ == to) {
@@ -1406,12 +1416,10 @@ private:
 			unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
 			for (state_type s = 0; s < a_.size(); ++s) {
 				for (symbol_type a = 0; a < AlphabetSize; ++a) {
-					auto target = a_.step(s, a);
-					assert(target.size() <= 1 && "nondeterministic?");
-					if (target.empty())
-						crashed = true;
+					if (auto target = a_.stepDeterministic(s, a))
+						edgelist.push_back(InverseEntry{s, a, *target});
 					else
-						edgelist.push_back(InverseEntry{s, a, target.front()});
+						crashed = true;
 				}
 
 				if (a_.accept_[s])
@@ -1441,10 +1449,8 @@ private:
 					for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
 						newbounds.push_back(bounds[i]);
 						newbounds.push_back(std::partition(bounds[i], bounds[i+1], [this, s](state_type state) {
-							//TODO: we're really just checking if we crash; may be
-							//worth adding stepDeterministic or crashes or something
-							//else that stops at the first valid transition
-							return a_.step(state, s).empty();
+							//if we crash
+							return !a_.stepDeterministic(state, s).is_initialized();
 						}));
 						newbounds.push_back(bounds[i+1]);
 					}
@@ -1705,11 +1711,9 @@ private:
 			callback(symbolString);
 		//For large alphabets we're better off walking the bitsets.
 		for (symbol_type s = 0; s < AlphabetSize; ++s) {
-			auto nexts = step(cur, s);
-			assert(nexts.size() <= 1 && "should be deterministic");
-			if (nexts.empty())
-				continue;
-			state_type next = nexts.front();
+			auto nexts = stepDeterministic(cur, s);
+			if (!nexts) continue;
+			state_type next = nexts.get();
 			//We only enumerate finite languages, so we shouldn't visit the
 			//same state more than once.
 			assert(std::find(stateStack.begin(), stateStack.end(), next) == stateStack.end());

@@ -83,10 +83,8 @@ void canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool
 		for (symbol_type l = 0; l < locations; ++l) {
 			int vi = towerVertex(s, l);
 			sg.v[vi] = ei;
-			auto dests = a.step(s, l);
-			assert(dests.size() <= 1 && "should already be deterministic");
-			if (!dests.empty())
-				sg.e[ei++] = towerVertex(dests.front(), l);
+			if (auto dest = a.stepDeterministic(s, l))
+				sg.e[ei++] = towerVertex(*dest, l);
 			sg.d[vi] = static_cast<int>(ei - sg.v[vi]);
 		}
 
