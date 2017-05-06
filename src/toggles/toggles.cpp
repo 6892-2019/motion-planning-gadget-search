@@ -57,6 +57,42 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 
 	unsigned int inflight = 0;
 	Registry::index_type connectWatermark = 0;
+
+	auto is_combinable = [&](Registry::index_type i) {
+		return registry.at(i).locations_ + 2 < automaton_type::alphabet_size_v;
+	};
+	auto try_issue_combine = [&]() {
+		Registry::index_type i = registry.register_next();
+		if (!is_combinable(i)) return false;
+		issue.put(Combine(i, retire));
+		++inflight;
+		return true;
+	};
+	auto connect_pending = [&]() {
+		return connectWatermark != registry.registered_size();
+	};
+	auto issue_connect = [&]() {
+		issue.put(Connect(connectWatermark, registry.registered_size(), retire));
+		connectWatermark = registry.registered_size();
+		++inflight;
+	};
+	auto do_retire = [&]() {
+		Result res = retire.take();
+		--inflight;
+		for (auto r : res) { //TODO: decomposition declaration!
+			const Gadget& g = get<0>(r);
+			const Provenance& p = get<1>(r);
+			std::size_t hash = get<2>(r);
+			if (registry.offer(g, p, hash)) {
+				for (const auto& t : targets)
+					if (t.first == hash && t.second == *g.a_) {
+						std::cout << "found! TODO details" << std::endl;
+						std::exit(0);
+					}
+			}
+		}
+	};
+
 	//Initialization phase: issue until workers are busy, retiring only if necessary
 	auto in_init = [&](){return inflight < 3*std::thread::hardware_concurrency();};
 	while (in_init()) {
@@ -65,64 +101,25 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 			std::exit(0);
 		}
 
-		while (in_init() && registry.waiting_size()) {
-			Registry::index_type i = registry.register_next();
-			issue.put(Combine(i, retire));
-			++inflight;
-		}
-		if (in_init() && connectWatermark != registry.registered_size()) {
-			issue.put(Connect(connectWatermark, registry.registered_size(), retire));
-			connectWatermark = registry.registered_size();
-			++inflight;
-		}
-		if (in_init()) {
-			Result res = retire.take();
-			--inflight;
-			for (auto r : res) { //TODO: decomposition declaration!
-				const Gadget& g = get<0>(r);
-				const Provenance& p = get<1>(r);
-				std::size_t hash = get<2>(r);
-				if (registry.offer(g, p, hash)) {
-					for (const auto& t : targets)
-						if (t.first == hash && t.second == *g.a_) {
-							std::cout << "found! TODO details" << std::endl;
-							std::exit(0);
-						}
-				}
-			}
-		}
+		while (in_init() && registry.waiting_size())
+			try_issue_combine();
+		if (in_init() && connect_pending())
+			issue_connect();
+		if (in_init())
+			do_retire();
 	}
+	std::cout << "Completed initialization: " << registry.registered_size() << " registered, " << registry.waiting_size() << " waiting\n";
 
 	//Steady state: alternate issuance and retirement, periodically issuing a connect task
-	while (registry.waiting_size() || connectWatermark != registry.registered_size() || inflight) {
-		if ((connectWatermark + 100) < registry.registered_size() || !registry.waiting_size()) {
-			//TODO: this code duplicated from above -- use a lambda or function to deduplicate
-			issue.put(Connect(connectWatermark, registry.registered_size(), retire));
-			connectWatermark = registry.registered_size();
-			++inflight;
-		} else if (registry.waiting_size()) {
-			Registry::index_type i = registry.register_next();
-			//TODO: ignore uncombinable
-			issue.put(Combine(i, retire));
-			++inflight;
-		}
+	while (registry.waiting_size() || connect_pending() || inflight) {
+		if ((connectWatermark + 100) < registry.registered_size() || !registry.waiting_size())
+			issue_connect();
+		else while (registry.waiting_size())
+			if (try_issue_combine())
+				break;
 
-		if (inflight) {
-			Result res = retire.take();
-			--inflight;
-			for (auto r : res) { //TODO: decomposition declaration!
-				const Gadget& g = get<0>(r);
-				const Provenance& p = get<1>(r);
-				std::size_t hash = get<2>(r);
-				if (registry.offer(g, p, hash)) {
-					for (const auto& t : targets)
-						if (t.first == hash && t.second == *g.a_) {
-							std::cout << "found! TODO details" << std::endl;
-							std::exit(0);
-						}
-				}
-			}
-		}
+		if (inflight)
+			do_retire();
 	}
 	std::cout << "exiting after " << registry.registered_size() << " registrations" << std::endl;
 	std::exit(0);
