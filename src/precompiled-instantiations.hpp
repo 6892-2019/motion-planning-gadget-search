@@ -68,4 +68,6 @@ AUTOMATA_EXTERN_TEMPLATE template class dynarray<std::pair<unsigned int, unsigne
 
 AUTOMATA_EXTERN_TEMPLATE template class linear_set<unsigned int>;
 
+AUTOMATA_EXTERN_TEMPLATE template class bounded_queue<std::function<void()>>;
+
 //TODO: <algorithm> and following

@@ -3,6 +3,7 @@
 #include <vector>
 #include <queue>
 #include <stack>
+#include <boost/circular_buffer.hpp>
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
@@ -18,6 +19,7 @@
 #include "natural_map.hpp"
 #include "dynarray.hpp"
 #include "linear_set.hpp"
+#include "bounded_queue.hpp"
 
 #include <algorithm>
 #include <random>
@@ -29,6 +31,9 @@
 #include "algoutils.hpp"
 
 #include <atomic>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 
 #include <iostream>
 #include <fstream>
