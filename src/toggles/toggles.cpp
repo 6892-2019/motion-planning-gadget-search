@@ -10,8 +10,6 @@
 #include "ops.hpp"
 
 using std::get;
-using alphabet_type = ByteAlphabet<8>;
-using regex_type = automaton::Regex<alphabet_type>;
 
 static Registry registry(900001);
 static bounded_queue<std::function<void()>> issue(4*std::thread::hardware_concurrency());
@@ -131,60 +129,18 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 }
 
 int main(int argc, char* argv[]) {
-	using R = regex_type;
-//	automaton_type split = R::star(R::alt({
-//			R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
-//			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
-//			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
-	automaton_type split = R::star(R::alt({
-			R::cat({R::lit(0), R::alt({R::lit(0), R::lit(1), R::lit(2)})}),
-			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(1), R::lit(2)})}),
-			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(2)})})})).compile();
-	split.minimize();
-	canonicalize(split, 3);
-//	std::cout << split << std::endl;
-	auto splithash = std::hash<automaton_type>()(split);
-	registry.offer(Gadget(std::move(split), 3), Provenance(0), splithash);
+	auto split = known_gadget("split");
+	std::cout << *split.a_ << std::endl;
+	auto splithash = std::hash<automaton_type>()(*split.a_);
+	registry.offer(split, Provenance(0), splithash);
 
-//	automaton_ptr split4 = R::star(R::alt({
-//			R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2), R::lit(3)})}),
-//			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2), R::lit(3)})}),
-//			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(3)})}),
-//			R::cat({R::lit(3), R::alt({R::lit(0), R::lit(1), R::lit(2)})})})).compile();
-//	automaton_ptr split4 = R::star(R::alt({
-//			R::cat({R::lit(0), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})}),
-//			R::cat({R::lit(1), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})}),
-//			R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})}),
-//			R::cat({R::lit(3), R::alt({R::lit(0), R::lit(1), R::lit(2), R::lit(3)})})})).compile();
-//	split4->minimize();
-//	canonicalize(split4, 4);
-//	std::cout << *split4 << std::endl;
-//	while (true) {
-//		mainloop(*split4);
-//	}
+	auto parallelToggle = known_gadget("parallel-2-toggle");
+	std::cout << *parallelToggle.a_ << std::endl;
+	auto parallelToggleHash = std::hash<automaton_type>()(*parallelToggle.a_);
+	registry.offer(parallelToggle, Provenance(1), parallelToggleHash);
 
-	R noopR = R::star(R::alt({R::cat({R::lit(0), R::lit(0)}), R::cat({R::lit(1), R::lit(1)}), R::cat({R::lit(2), R::lit(2)}), R::cat({R::lit(3), R::lit(3)})}));
-	automaton_type noop = noopR.compile();
-	R ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(3), R::lit(2)})});
-	R rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(2), R::lit(3)})});
-	automaton_type parallelToggleBase = R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile();
-	automaton_type parallelToggle = shuffleAccept(noop, parallelToggleBase);
-	acceptingClosure(parallelToggle, 4);
-	parallelToggle.minimize();
-	canonicalize(parallelToggle, 4);
-	auto parallelToggleHash = std::hash<automaton_type>()(parallelToggle);
-	registry.offer(Gadget(std::move(parallelToggle), 4), Provenance(1), parallelToggleHash);
-
-	//TODO: declare well-known gadgets as constants (maybe functions to create them?)
-	//and test they do the right thing (may require teaching build script about
-	//sub-project tests...)
-	ltr = R::alt({R::cat({R::lit(0), R::lit(1)}), R::cat({R::lit(2), R::lit(3)})});
-	rtl = R::alt({R::cat({R::lit(1), R::lit(0)}), R::cat({R::lit(3), R::lit(2)})});
-	automaton_type antiparallelToggle = shuffleAccept(noop, R::alt({R::epsilon(), ltr, R::star(R::cat({ltr, rtl})), R::cat({ltr, R::star(R::cat({rtl, ltr}))})}).compile());
-	acceptingClosure(antiparallelToggle, 4);
-	antiparallelToggle.minimize();
-	canonicalize(antiparallelToggle, 4);
-
+	automaton_type antiparallelToggle = *known_gadget("antiparallel-2-toggle").a_;
+	std::cout << antiparallelToggle << std::endl;
 
 	//TODO: more targets (with/without noop)
 	std::vector<std::pair<std::size_t, automaton_type>> targets = {
@@ -199,51 +155,3 @@ int main(int argc, char* argv[]) {
 
 	return 0;
 }
-
-//int main(int argc, char* argv[]) {
-//	using R = regex_type;
-//	automaton_type split = R::star(R::alt({
-//		R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2)})}),
-//		R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2)})}),
-//		R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1)})})})).compile();
-//	split.minimize();
-//	canonicalize(split, 3);
-//	std::cout << split << std::endl;
-//	//TODO: provenance for initial gadgets
-//	registry.offer(Gadget(std::move(split), 3), Provenance(100000, 0));
-//	registry.register_next();
-//
-//	std::vector<std::pair<Gadget, Provenance>> successors;
-//	combine(0, 0, std::back_inserter(successors));
-//	bool offered = registry.offer(successors.front().first, successors.front().second);
-//	std::cout << offered << std::endl;
-//	std::cout << *successors.front().first.a_ << std::endl;
-//	successors.clear();
-//	registry.register_next();
-//
-//	connect(1, std::back_inserter(successors));
-//	for (auto& p : successors)
-//		std::cout << *p.first.a_ << std::endl;
-//	std::cout << "ASDFASDF" << std::endl;
-//	offered = registry.offer(successors[2].first, successors[2].second);
-//	std::cout << offered << std::endl;
-//	std::cout << *successors[2].first.a_ << std::endl;
-//	successors.clear();
-//	registry.register_next();
-//
-//	connect(2, std::back_inserter(successors));
-//	offered = registry.offer(successors.front().first, successors.front().second);
-//	std::cout << offered << std::endl;
-//	std::cout << *successors.front().first.a_ << std::endl;
-//	successors.clear();
-//	registry.register_next();
-//
-//	automaton_type split4 = R::star(R::alt({
-//		R::cat({R::lit(0), R::alt({R::lit(1), R::lit(2), R::lit(3)})}),
-//		R::cat({R::lit(1), R::alt({R::lit(0), R::lit(2), R::lit(3)})}),
-//		R::cat({R::lit(2), R::alt({R::lit(0), R::lit(1), R::lit(3)})}),
-//		R::cat({R::lit(3), R::alt({R::lit(0), R::lit(1), R::lit(2)})})})).compile();
-//	split4.minimize();
-//	canonicalize(split4, 4);
-//	std::cout << split4 << std::endl;
-//}

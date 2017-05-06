@@ -15,6 +15,7 @@ using automaton_const_ptr = std::shared_ptr<const automaton_type>;
 
 struct Gadget {
 	Gadget() = default;
+	Gadget(const automaton_type& a, unsigned int locations) : Gadget(automaton_type(a), locations) {}
 	Gadget(automaton_type&& a, unsigned int locations) : Gadget(std::make_shared<const automaton_type>(std::move(a)), locations) {}
 	Gadget(automaton_const_ptr a, unsigned int locations) : a_(a), mirror_(nullptr), locations_(locations) {}
 
@@ -202,6 +203,7 @@ private:
 };
 
 using Result = std::vector<std::tuple<Gadget, Provenance, std::size_t>>;
+Gadget known_gadget(const std::string& name);
 
 #endif /* TOGGLES_REGISTRY_HPP */
 
