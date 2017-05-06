@@ -10,7 +10,7 @@ globals.update({
   'builddir': 'build/$config/',
   'src_dir': 'src/',
   'test_dir': 'test/',
-  'ldflags': '../nauty/nauty.a -lc -lpthread',
+  'ldflags': '../nauty/nauty.a -ljemalloc_pic -lc -lpthread',
 })
 # must be inserted after its references
 globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem ../nauty/ -isystem ../vta/include/'
