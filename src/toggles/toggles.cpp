@@ -2,11 +2,12 @@
 #include "../automaton.hpp"
 #include "../regex.hpp"
 #include "../alphabet.hpp"
-#include "canonicalize.hpp"
+#include "../worker.hpp"
+#include "../pinning.hpp"
 
+#include "canonicalize.hpp"
 #include "registry.hpp"
 #include "ops.hpp"
-#include "../worker.hpp"
 
 using std::get;
 using alphabet_type = ByteAlphabet<8>;
@@ -54,7 +55,7 @@ void finish(Gadget&& gadget, Provenance provenance, Result& finishArg) {
 }
 
 void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, automaton_type>>& targets) {
-	//TODO: pin cores
+	pin_this_thread(core_number);
 
 	unsigned int inflight = 0;
 	Registry::index_type connectWatermark = 0;
