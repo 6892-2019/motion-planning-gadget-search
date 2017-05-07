@@ -641,19 +641,6 @@ private:
 
 public:
 	/**
-	 * Returns the number of edges in this automaton.  An edge is a (source,
-	 * symbol, dest) triple.  This is a logical measure of size not directly
-	 * related to the physical size of this Automaton object.
-	 */
-	std::size_t edges() const {
-		std::size_t answer = 0;
-		for (auto& ts : transitions_)
-			for (auto t : ts)
-				answer += t.symbols_.count();
-		return answer;
-	}
-
-	/**
 	 * Runs this automaton on the given string.
 	 * @returns true iff the machine accepts the given string of symbol indices
 	 */
