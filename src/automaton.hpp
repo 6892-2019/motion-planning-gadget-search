@@ -500,10 +500,6 @@ private:
 	//pollute the namespace
 	template<typename T, std::size_t N>
 	using small_vector = boost::container::small_vector<T, N>;
-//	template<typename K, typename V, typename Hash = std::hash<K>>
-//	using dense_hash_map = google::dense_hash_map<K, V, Hash>;
-//	template<typename T>
-//	using dense_hash_set = google::dense_hash_set<T>;
 private:
 	template <class Map>
 	static Automaton conj_impl(const Automaton& left, const Automaton& right) {
