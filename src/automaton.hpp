@@ -899,6 +899,33 @@ public:
 		minimal_ = true;
 	}
 
+private:
+	template<typename Iter>
+	void findCanonicalStateNumbering(Iter alphabetPerm, dynarray<state_type>& renumbering) {
+		//The numbering, chosen as the vistation order of the states.  Because
+		//we're using a FIFO queue, we can assign a visit number as we put the
+		//state in the queue, so the numbering also doubles as the closed set.
+		//(Once we queue something, any later queuing won't be the first visit
+		//of that vertex.)
+		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
+		std::queue<symbol_type> queue;
+		state_type idx = 0;
+		renumbering[0] = idx++;
+		queue.push(0);
+		while (!queue.empty()) {
+			state_type cur = queue.front();
+			queue.pop();
+			for (symbol_type a = 0; a < alphabet_size(); ++a) {
+				if (auto dest = stepDeterministic(cur, alphabetPerm[a]))
+					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
+						renumbering[*dest] = idx++;
+						queue.push(*dest);
+					}
+			}
+		}
+		assert(!std::count(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max()));
+	}
+public:
 	/**
 	 * Renumbers states to bring this automaton into a canonical form. Canonical
 	 * automata are structurally equal iff they accept the same language.
@@ -911,30 +938,8 @@ public:
 		}
 		minimize();
 
-		//The numbering, chosen as the vistation order of the states.  Because
-		//we're using a FIFO queue, we can assign a visit number as we put the
-		//state in the queue, so the numbering also doubles as the closed set.
-		//(Once we queue something, any later queuing won't be the first visit
-		//of that vertex.)
 		dynarray<state_type> renumbering(state_size());
-		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
-		std::queue<symbol_type> queue;
-		state_type idx = 0;
-		renumbering[0] = idx++;
-		queue.push(0);
-		while (!queue.empty()) {
-			state_type cur = queue.front();
-			queue.pop();
-			for (symbol_type a = 0; a < alphabet_size(); ++a) {
-				if (auto dest = stepDeterministic(cur, a))
-					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
-						renumbering[*dest] = idx++;
-						queue.push(*dest);
-					}
-			}
-		}
-
-		assert(!std::count(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max()));
+		findCanonicalStateNumbering(identity_permutation(), renumbering);
 		renumberStates(renumbering.begin());
 		prepareForEquals();
 		canonical_ = true;

@@ -57,6 +57,13 @@ void apply_reverse_permutation(Iter1 first, Iter1 last, Iter2 indices) {
 	}
 }
 
+struct identity_permutation {
+	template<typename T>
+	T operator[](const T& t) const {return t;}
+	template<typename T>
+	T operator[](T&& t) const {return t;}
+};
+
 template<typename Iter>
 bool is_possibly_mirrored_rotation_permutation(Iter first, Iter last) {
 	auto dist = std::distance(first, last);
