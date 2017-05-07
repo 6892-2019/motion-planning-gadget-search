@@ -126,23 +126,26 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 }
 
 int main(int argc, char* argv[]) {
-	auto split = known_gadget("split");
-	std::cout << *split.a_ << std::endl;
-	auto splithash = std::hash<automaton_type>()(*split.a_);
-	registry.offer(split, Provenance(0), splithash);
+	std::vector<std::string> tokens;
+	boost::algorithm::split(tokens, argv[1], boost::algorithm::is_any_of(","));
+	for (unsigned int i = 0; i < tokens.size(); ++i) {
+		auto g = known_gadget(tokens[i]);
+		auto hash = std::hash<automaton_type>()(*g.a_);
+		registry.offer(g, Provenance(i), hash);
+		std::cout << "input " << i << ": " << tokens[i] << "\n";
+	}
 
-	auto parallelToggle = known_gadget("parallel-2-toggle");
-	std::cout << *parallelToggle.a_ << std::endl;
-	auto parallelToggleHash = std::hash<automaton_type>()(*parallelToggle.a_);
-	registry.offer(parallelToggle, Provenance(1), parallelToggleHash);
+	std::vector<std::pair<std::size_t, automaton_type>> targets;
+	tokens.clear();
+	boost::algorithm::split(tokens, argv[2], boost::algorithm::is_any_of(","));
+	for (unsigned int i = 0; i < tokens.size(); ++i) {
+		auto g = known_gadget(tokens[i]);
+		auto hash = std::hash<automaton_type>()(*g.a_);
+		targets.emplace_back(hash, *g.a_);
+		std::cout << "target " << i << ": " << tokens[i] << "\n";
+	}
+	std::cout << std::flush;
 
-	automaton_type antiparallelToggle = *known_gadget("antiparallel-2-toggle").a_;
-	std::cout << antiparallelToggle << std::endl;
-
-	//TODO: more targets (with/without noop)
-	std::vector<std::pair<std::size_t, automaton_type>> targets = {
-		{std::hash<automaton_type>()(antiparallelToggle), std::move(antiparallelToggle)},
-	};
 	for (int i = 1; i < std::thread::hardware_concurrency(); ++i) {
 		std::thread worker(&worker_thread, i, std::ref(issue));
 		worker.detach();
