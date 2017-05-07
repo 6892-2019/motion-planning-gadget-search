@@ -928,6 +928,47 @@ public:
 		minimal_ = true;
 	}
 
+	/**
+	 * Renumbers states to bring this automaton into a canonical form. Canonical
+	 * automata are structurally equal iff they accept the same language.
+	 */
+	void canonicalize() {
+		if (canonical()) {
+			assert(deterministic());
+			assert(minimal());
+			return;
+		}
+		minimize();
+
+		//The numbering, chosen as the vistation order of the states.  Because
+		//we're using a FIFO queue, we can assign a visit number as we put the
+		//state in the queue, so the numbering also doubles as the closed set.
+		//(Once we queue something, any later queuing won't be the first visit
+		//of that vertex.)
+		dynarray<state_type> renumbering(state_size());
+		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
+		std::queue<symbol_type> queue;
+		state_type idx = 0;
+		renumbering[0] = idx++;
+		queue.push(0);
+		while (!queue.empty()) {
+			state_type cur = queue.front();
+			queue.pop();
+			for (symbol_type a = 0; a < alphabet_size(); ++a) {
+				if (auto dest = stepDeterministic(cur, a))
+					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
+						renumbering[*dest] = idx++;
+						queue.push(*dest);
+					}
+			}
+		}
+
+		assert(!std::count(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max()));
+		renumberStates(renumbering.begin());
+		prepareForEquals();
+		canonical_ = true;
+	}
+
 private:
 	template<class RandomAccessIterator>
 	static symbol_mask_type renumberAlphabet(symbol_mask_type cur, RandomAccessIterator map) {
@@ -2044,6 +2085,17 @@ Automaton<N> shuffleAccept(const Automaton<N>& left, const Automaton<N>& right) 
 template<unsigned int N>
 Automaton<N> determinize(Automaton<N> a) {
 	a.determinize();
+	return a;
+}
+
+//TODO: minimize(Automaton<N>)
+
+/**
+ * @return a canonicalized copy of the given automaton
+ */
+template<unsigned int N>
+Automaton<N> canonicalize(Automaton<N> a) {
+	a.canonicalize();
 	return a;
 }
 

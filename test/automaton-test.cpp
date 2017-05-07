@@ -522,3 +522,50 @@ TEST(AutomatonTest, ShuffleAcceptComposeMinimize3) {
 	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
 	equivalentOnAllStrings<4>(rshuf, rmshuf, 4, __LINE__);
 }
+
+TEST(AutomatonTest, Canonicalize) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	EXPECT_TRUE(same_language(noop, canonicalize(noop)));
+	auto redundant = alt(noop, noop, noop);
+	EXPECT_TRUE(same_language(redundant, canonicalize(redundant)));
+}
+
+TEST(AutomatonTest, Canonicalize1) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	auto cshuf = canonicalize(shuf);
+	dynarray<AutomatonBase::state_type> renumbering(cshuf.state_size()), work(cshuf.state_size());
+	std::iota(renumbering.begin(), renumbering.end(), 0);
+	do {
+		auto tshuf = cshuf;
+		std::copy(renumbering.begin(), renumbering.end(), work.begin());
+		tshuf.renumberStates(work.begin());
+		tshuf.canonicalize();
+		EXPECT_TRUE(tshuf.canonical());
+		EXPECT_TRUE(same_language(tshuf, cshuf));
+		ASSERT_EQ(tshuf, cshuf);
+	} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
+}
+
+TEST(AutomatonTest, Canonicalize2) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	auto cshuf = canonicalize(shuf);
+	dynarray<AutomatonBase::state_type> renumbering(shuf.state_size());
+	std::iota(renumbering.begin(), renumbering.end(), 0);
+	std::knuth_b rng(0);
+	for (int i = 0; i < 100; ++i) {
+		auto tshuf = shuf;
+		std::shuffle(renumbering.begin()+1, renumbering.end(), rng);
+		tshuf.renumberStates(renumbering.begin());
+		EXPECT_TRUE(same_language(tshuf, cshuf));
+		tshuf.canonicalize();
+		EXPECT_TRUE(tshuf.canonical());
+		EXPECT_TRUE(same_language(tshuf, cshuf));
+		ASSERT_EQ(tshuf, cshuf);
+	}
+}
