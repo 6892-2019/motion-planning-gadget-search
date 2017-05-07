@@ -641,14 +641,6 @@ private:
 
 public:
 	/**
-	 * Returns the number of transitions in this automaton.  This makes up part
-	 * of the physical size of this Automaton object.
-	 */
-	std::size_t numTransitions() const {
-		return std::accumulate(transitions_.begin(), transitions_.end(), static_cast<std::size_t>(0),
-				[](std::size_t l, const auto& r) {return l + r.size();});
-	}
-	/**
 	 * Returns the number of edges in this automaton.  An edge is a (source,
 	 * symbol, dest) triple.  This is a logical measure of size not directly
 	 * related to the physical size of this Automaton object.
@@ -1796,7 +1788,7 @@ private:
 	}
 
 	friend std::ostream& operator<<(std::ostream& o, const Automaton& a) {
-		o << a.state_size() << " states, " << a.numTransitions() << " transitions, "
+		o << a.state_size() << " states, " << a.edge_size() << " transitions, "
 				<< (a.deterministic() ? "" : "non") << "deterministic\n";
 		for (state_type i = 0; i < a.state_size(); ++i) {
 			o << "state " << i << (a.accept_[i] ? " [accept]:\n" : ":\n");

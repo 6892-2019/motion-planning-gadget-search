@@ -144,7 +144,7 @@ public:
 		//Empty automata can't be usefully combined, so no reason to store them.
 		//TODO: isEmpty() isn't const, so we can't call it here.
 		//TODO: we know/assume the automata are minimal here, no reason to iterate
-		if (g.a_->numTransitions() == 0) return false;
+		if (g.a_->edge_size() == 0) return false;
 		//Require a full set of active locations.
 		assert(g.a_->activeAlphabet().size() == g.locations_);
 
