@@ -354,7 +354,7 @@ public:
 	 * TODO: many methods assume there's at least one state; this isn't wrong,
 	 * but we should add assertions to make it explicit
 	 */
-	Automaton() : deterministic_(true) {}
+	Automaton() : deterministic_(true), minimal_(false), canonical_(false) {}
 	Automaton(const Automaton& a) = default;
 	Automaton(Automaton&& a) = default;
 	Automaton& operator=(const Automaton& a) = default;
@@ -380,6 +380,18 @@ public:
 				answer += t.symbols_.count();
 		return answer;
 	}
+	/**
+	 * Returns true if this automaton is known to be deterministic.
+	 */
+	bool deterministic() const {return deterministic_;}
+	/**
+	 * Returns true if this automaton is known to be minimal.
+	 */
+	bool minimal() const {return minimal_;}
+	/**
+	 * Returns true if this automaton is known to be canonical.
+	 */
+	bool canonical() const {return canonical_;}
 
 	bool accept(state_type state) const override {
 		assert(state < size());
@@ -433,6 +445,7 @@ public:
 		state_type s = static_cast<state_type>(transitions_.size());
 		transitions_.push_back({});
 		accept_.push_back(false);
+		minimal_ = canonical_ = false;
 		return s;
 	}
 
@@ -444,6 +457,7 @@ public:
 		}
 		for (const Transition& t : transitions_[to])
 			changed |= addTrans(from, t.symbols_, t.next_);
+		minimal_ = canonical_ = false;
 		return changed;
 	}
 
@@ -462,12 +476,14 @@ public:
 		transitions_[from].back().symbols_.set(symbol);
 		if (deterministic_ && !isStateDeterministic(from))
 			deterministic_ = false;
+		minimal_ = canonical_ = false;
 		return true;
 	}
 
 	bool setAccept(state_type state, bool accepts = true) override {
 		bool old = accept_.test(state);
 		accept_.set(state, accepts);
+		minimal_ = canonical_ = false;
 		return accepts == old;
 	}
 
@@ -475,6 +491,7 @@ public:
 		transitions_.clear();
 		accept_.clear();
 		deterministic_ = true;
+		minimal_ = canonical_ = false;
 	}
 
 
@@ -623,11 +640,6 @@ private:
 	friend Automaton<N> shuffleAccept(const Automaton<N>& left, const Automaton<N>& right);
 
 public:
-	/**
-	 * Returns true if this automaton is known to be deterministic.
-	 */
-	bool deterministic() const {return deterministic_;}
-
 	/**
 	 * Returns the number of states in this automaton.
 	 */
@@ -895,6 +907,10 @@ public:
 	}
 
 	void minimize() {
+		if (minimal()) {
+			assert(deterministic());
+			return;
+		}
 		determinize();
 		//The Java library explicitly checks for the all-strings automaton here,
 		//but it doesn't seem to be necessary.
@@ -909,6 +925,7 @@ public:
 		MAYBE_UNUSED std::size_t oldsize = size();
 		HopcroftMinimizer(*this).minimize();
 		AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << size() << std::endl);
+		minimal_ = true;
 	}
 
 private:
@@ -958,6 +975,7 @@ public:
 			if (deterministic() && !isStateDeterministic(s))
 				deterministic_ = false;
 		}
+		minimal_ = canonical_ = false;
 	}
 
 //	/**
@@ -1012,6 +1030,7 @@ public:
 			accept.set(states[i], accept_.test(i));
 		accept_ = std::move(accept);
 		apply_reverse_permutation(transitions_.begin(), transitions_.end(), states);
+		canonical_ = false;
 	}
 
 	/**
@@ -1034,6 +1053,7 @@ public:
 		accept_.set(b, aa);
 		using std::swap;
 		swap(transitions_[a], transitions_[b]);
+		canonical_ = false;
 	}
 
 	/**
@@ -1062,6 +1082,7 @@ public:
 			accept.set(states[i], accept_.test(i));
 		accept_ = std::move(accept);
 		apply_reverse_permutation(transitions_.begin(), transitions_.end(), states);
+		canonical_ = false;
 	}
 
 	/**
@@ -1149,6 +1170,14 @@ private:
 	 * True if this automaton is known to be deterministic and false otherwise.
 	 */
 	bool deterministic_;
+	/**
+	 * True if this automaton is known to be minimal and false otherwise.
+	 */
+	bool minimal_;
+	/**
+	 * True if this automaton is known to be canonical and false otherwise.
+	 */
+	bool canonical_;
 
 public:
 	/**
@@ -1171,6 +1200,7 @@ public:
 		for (std::size_t p = 0; p < b.size(); ++p)
 			accept_.push_back(b.accept_[p]);
 		deterministic_ &= b.deterministic();
+		minimal_ = canonical_ = false;
 		return base;
 	}
 
@@ -1195,6 +1225,7 @@ public:
 		transitions_[from].push_back(Transition(to, symbols));
 		if (deterministic_ && !isStateDeterministic(from))
 			deterministic_ = false;
+		minimal_ = canonical_ = false;
 		return true;
 	}
 
@@ -1739,6 +1770,17 @@ private:
 	}
 
 	friend class std::hash<Automaton>;
+	//Friend these to let them set minimal_ and canonical_.
+	template<unsigned int N>
+	friend Automaton<N> empty();
+	template<unsigned int N>
+	friend Automaton<N> all();
+	template<unsigned int N>
+	friend Automaton<N> epsilon();
+	template<unsigned int N>
+	friend Automaton<N> any();
+	template<unsigned int N, typename... Symbols>
+	friend Automaton<N> lit(Symbols... symbols);
 };
 
 /**
@@ -1748,6 +1790,7 @@ template<unsigned int N>
 Automaton<N> empty() {
 	Automaton<N> a;
 	a.addState();
+	a.minimal_ = a.canonical_ = true;
 	return a;
 }
 
@@ -1761,6 +1804,7 @@ Automaton<N> all() {
 	a.setAccept(0);
 	for (typename Automaton<N>::symbol_type s = 0; s < N; ++s)
 		a.addTrans(0, s, 0);
+	a.minimal_ = a.canonical_ = true;
 	return a;
 }
 
@@ -1772,6 +1816,7 @@ Automaton<N> epsilon() {
 	Automaton<N> a;
 	a.addState();
 	a.setAccept(0);
+	a.minimal_ = a.canonical_ = true;
 	return a;
 }
 
@@ -1786,6 +1831,7 @@ Automaton<N> any() {
 	a.setAccept(1);
 	for (typename Automaton<N>::symbol_type s = 0; s < N; ++s)
 		a.addTrans(0, s, 1);
+	a.minimal_ = a.canonical_ = true;
 	return a;
 }
 
@@ -1804,6 +1850,9 @@ Automaton<N> lit(Symbols... symbols) {
 		a.addTrans(a.state_size()-2, symbol, a.state_size()-1);
 	})(symbols...);
 	a.setAccept(a.state_size()-1);
+	a.minimal_ = true;
+	if (a.state_size() <= 2)
+		a.canonical_ = true;
 	return a;
 }
 
