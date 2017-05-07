@@ -27,23 +27,25 @@ std::unordered_map<std::string, Gadget> initialize_known_gadgets() {
 	canonicalize(split, 3);
 	ret["split"] = Gadget(split, 3);
 
-	auto make_toggle = [&](auto&& ltr, auto&& rtl) {
-		auto base = alt(epsilon<N>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto make_twostate = [&](auto&& state0, auto&& state1, const auto& nop) {
+		auto base = alt(epsilon<N>(), state0, star(cat(state0, state1)), cat(state0, star(cat(state1, state0))));
 		base.minimize();
 		unsigned int locations = static_cast<unsigned int>(base.activeAlphabet().size());
-		assert(locations == 4); //TODO: select other nops
-		auto toggle = shuffleAccept(base, nop4);
+		auto toggle = shuffleAccept(base, nop);
 		toggle.minimize();
 		acceptingClosure(toggle, locations);
 		toggle.minimize();
 		canonicalize(toggle, locations);
 		return Gadget(std::move(toggle), locations);
 	};
-	ret["parallel-2-toggle"] = make_toggle(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)));
-	ret["antiparallel-2-toggle"] = make_toggle(alt(lit(0, 1), lit(2, 3)), alt(lit(1, 0), lit(3, 2)));
-	ret["crossover-2-toggle"] = make_toggle(alt(lit(0, 2), lit(3, 1)), alt(lit(2, 0), lit(1, 3)));
+	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)), nop4);
+	ret["antiparallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(2, 3)), alt(lit(1, 0), lit(3, 2)), nop4);
+	ret["crossover-2-toggle"] = make_twostate(alt(lit(0, 2), lit(3, 1)), alt(lit(2, 0), lit(1, 3)), nop4);
 
-	//spinners
+	ret["3-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 0)),
+			alt(lit(1, 0), lit(2, 1), lit(0, 2)), nop3);
+	ret["4-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 3), lit(3, 0)),
+			alt(lit(1, 0), lit(2, 1), lit(3, 2), lit(0, 3)), nop4);
 
 	return ret;
 }
