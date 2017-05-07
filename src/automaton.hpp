@@ -2088,7 +2088,14 @@ Automaton<N> determinize(Automaton<N> a) {
 	return a;
 }
 
-//TODO: minimize(Automaton<N>)
+/**
+ * @return a minimized copy of the given automaton
+ */
+template<unsigned int N>
+Automaton<N> minimize(Automaton<N> a) {
+	a.minimize();
+	return a;
+}
 
 /**
  * @return a canonicalized copy of the given automaton
