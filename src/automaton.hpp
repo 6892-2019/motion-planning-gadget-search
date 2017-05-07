@@ -394,12 +394,12 @@ public:
 	bool canonical() const {return canonical_;}
 
 	bool accept(state_type state) const override {
-		assert(state < size());
+		assert(state < state_size());
 		return accept_[state];
 	}
 
 	StateSet step(state_type current, symbol_type symbol) const override {
-		assert(current < transitions_.size());
+		assert(current < state_size());
 		assert(symbol < AlphabetSize);
 		StateSet next;
 		for (const Transition& t : transitions_[current])
@@ -416,7 +416,7 @@ public:
 
 	boost::optional<state_type> stepDeterministic(state_type current, symbol_type symbol) const {
 		assert(deterministic());
-		assert(current < transitions_.size());
+		assert(current < state_size());
 		assert(symbol < AlphabetSize);
 		for (const Transition& t : transitions_[current])
 			if (t.symbols_[symbol])
@@ -442,7 +442,7 @@ public:
 	}
 
 	state_type addState() override {
-		state_type s = static_cast<state_type>(transitions_.size());
+		state_type s = state_size();
 		transitions_.push_back({});
 		accept_.push_back(false);
 		minimal_ = canonical_ = false;
@@ -510,7 +510,7 @@ private:
 		//(left state, right state, new state)
 		using state_triple = std::tuple<state_type, state_type, state_type>;
 		std::stack<state_triple> worklist;
-		Map newstates(left.size(), right.size());
+		Map newstates(left.state_size(), right.state_size());
 
 		Automaton a;
 		//TODO: are we sure?
@@ -556,7 +556,7 @@ private:
 		if (!a.isEmpty())
 			//No try-catch here because there's no further recovery
 			a = conj_impl<detail::SparseConjMap>(left, right);
-		AUTOMATON_DEBUG(std::cout << "intersection: " << left.size() << ", " << right.size() << " -> " << a.size() << std::endl);
+		AUTOMATON_DEBUG(std::cout << "intersection: " << left.state_size() << ", " << right.state_size() << " -> " << a.state_size() << std::endl);
 		a.removeDeadStates();
 		return a;
 	}
@@ -570,7 +570,7 @@ private:
 		//(left state, right state, new state, left automation active)
 		using state_quad = std::tuple<state_type, state_type, state_type, bool>;
 		std::stack<state_quad> worklist;
-		detail::DenseShuffleAcceptMap newstates(left.size(), right.size());
+		detail::DenseShuffleAcceptMap newstates(left.state_size(), right.state_size());
 
 		Automaton a;
 		//TODO: are we sure?
@@ -640,10 +640,6 @@ private:
 	friend Automaton<N> shuffleAccept(const Automaton<N>& left, const Automaton<N>& right);
 
 public:
-	/**
-	 * Returns the number of states in this automaton.
-	 */
-	state_type size() const {return static_cast<state_type>(transitions_.size());}
 	/**
 	 * Returns the number of transitions in this automaton.  This makes up part
 	 * of the physical size of this Automaton object.
@@ -732,7 +728,7 @@ public:
 	 */
 	bool isEmpty() {
 		removeDeadStates();
-		return size() == 1U && accept_.none();
+		return state_size() == 1U && accept_.none();
 	}
 
 	/**
@@ -747,8 +743,8 @@ public:
 		//If all states are live, we need only check for a cycle.
 		//We could use a dynamic_bitset or a simple byte array here instead (or
 		//a specialized 0..n set, if there's such a type).
-		google::dense_hash_set<state_type> visited(static_cast<state_type>(size()));
-		visited.set_empty_key(static_cast<state_type>(size()));
+		google::dense_hash_set<state_type> visited(state_size());
+		visited.set_empty_key(state_size());
 		std::vector<state_type> path;
 		std::stack<boost::optional<state_type>> nexts;
 
@@ -827,10 +823,10 @@ public:
 			}
 		}
 
-		MAYBE_UNUSED std::size_t oldsize = size();
+		MAYBE_UNUSED std::size_t oldsize = state_size();
 		*this = std::move(a);
 		assert(deterministic());
-		AUTOMATON_DEBUG(std::cout << "determinize: " << oldsize << " -> " << size() << std::endl);
+		AUTOMATON_DEBUG(std::cout << "determinize: " << oldsize << " -> " << state_size() << std::endl);
 	}
 
 	/**
@@ -840,7 +836,7 @@ public:
 	void totalize() {
 		state_type crash;
 		bool madeCrashState = false;
-		for (state_type s = 0; s < transitions_.size(); ++s) {
+		for (state_type s = 0; s < state_size(); ++s) {
 			symbol_mask_type missing = ~outgoing(s);
 			if (missing.any()) {
 				if (!madeCrashState) {
@@ -857,7 +853,7 @@ public:
 	 */
 	void removeDeadStates() {
 		auto live = liveStates();
-		if (live.size() == size())
+		if (live.size() == state_size())
 			return;
 		if (live.empty()) {
 			*this = empty<AlphabetSize>();
@@ -865,9 +861,9 @@ public:
 		}
 		//If any states are live, the initial state must be one of them.
 		assert(live.count(0) == 1);
-		MAYBE_UNUSED std::size_t oldsize = size();
+		MAYBE_UNUSED std::size_t oldsize = state_size();
 		//maps old state numbers to new state numbers
-		natural_map<state_type, state_type> renumber(static_cast<state_type>(size()));
+		natural_map<state_type, state_type> renumber(state_size());
 		boost::dynamic_bitset<std::size_t> newnumbers(live.size());
 		newnumbers.set();
 		for (state_type s : live)
@@ -903,7 +899,7 @@ public:
 		transitions_.resize(live.size());
 		accept_.resize(live.size());
 		//TODO: shrink_to_fit?
-		AUTOMATON_DEBUG(std::cout << "removeDeadStates: " << oldsize << " -> " << size() << std::endl);
+		AUTOMATON_DEBUG(std::cout << "removeDeadStates: " << oldsize << " -> " << state_size() << std::endl);
 	}
 
 	void minimize() {
@@ -922,9 +918,9 @@ public:
 		//transitions to dead states from distinguishing states that are
 		//otherwise equivalent.
 		removeDeadStates();
-		MAYBE_UNUSED std::size_t oldsize = size();
+		MAYBE_UNUSED std::size_t oldsize = state_size();
 		HopcroftMinimizer(*this).minimize();
-		AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << size() << std::endl);
+		AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << state_size() << std::endl);
 		minimal_ = true;
 	}
 
@@ -995,7 +991,7 @@ public:
 	 */
 	template<class RandomAccessIterator>
 	void renumberAlphabet(RandomAccessIterator symbols) {
-		renumberAlphabet(0, size(), symbols);
+		renumberAlphabet(0, state_size(), symbols);
 	}
 
 	/**
@@ -1231,14 +1227,14 @@ public:
 	state_type append(const Automaton& b) {
 		//TODO: this may result in pathological behavior if we're appending
 		//repeatedly, each time allocating "just enough" instead of e.g. doubling
-		reserve(size() + b.size());
-		state_type base = static_cast<state_type>(transitions_.size());
+		reserve(state_size() + b.state_size());
+		state_type base = state_size();
 		for (const auto& t : b.transitions_) {
 			transitions_.push_back(t);
 			for (Transition& nt : transitions_.back())
 				nt.next_ += base;
 		}
-		for (std::size_t p = 0; p < b.size(); ++p)
+		for (std::size_t p = 0; p < b.state_size(); ++p)
 			accept_.push_back(b.accept_[p]);
 		deterministic_ &= b.deterministic();
 		minimal_ = canonical_ = false;
@@ -1339,15 +1335,15 @@ public:
 	google::dense_hash_set<state_type> liveStates() const {
 		//This set will be used as the visited set for the forward search, then
 		//reused as the live set for the backward search.
-		google::dense_hash_set<state_type> live(static_cast<state_type>(size()));
-		live.set_empty_key(static_cast<state_type>(size()));
+		google::dense_hash_set<state_type> live(state_size());
+		live.set_empty_key(state_size());
 
 		//TODO: there's not yet a good way to use std::sort on separate vectors
 		//See http://stackoverflow.com/q/13840998/3614835.
 		std::vector<std::pair<state_type, state_type>> inverseEdgelist;
 		//Exact sizing (counting transitions) is probably not worth it, but we
 		//know there's at least this much.
-		inverseEdgelist.reserve(size());
+		inverseEdgelist.reserve(state_size());
 
 		std::stack<state_type> nexts;
 		nexts.push(0);
@@ -1369,10 +1365,10 @@ public:
 		std::transform(inverseEdgelist.begin(), inverseEdgelist.end(),
 			std::back_inserter(inverse), [](const auto& p){return p.second;});
 		std::vector<decltype(inverse)::iterator> inverseIdx;
-		inverseIdx.reserve(size() + 1);
+		inverseIdx.reserve(state_size() + 1);
 		inverseIdx.push_back(inverse.begin());
 		decltype(inverseEdgelist)::iterator edgelistPos = inverseEdgelist.begin();
-		for (state_type s = 0; s < size(); ++s) {
+		for (state_type s = 0; s < state_size(); ++s) {
 			edgelistPos = std::find_if_not(edgelistPos, inverseEdgelist.end(), [s](auto& p){return p.first == s;});
 			inverseIdx.push_back(inverse.begin() + std::distance(inverseEdgelist.begin(), edgelistPos));
 		}
@@ -1390,7 +1386,7 @@ public:
 		//another pass to initialize the live set.  (It's tempting to just clear
 		//the accept flag for those states, but liveStates() is const.)
 		google::dense_hash_set<state_type> unreachableAccepts;
-		unreachableAccepts.set_empty_key(static_cast<state_type>(size()));
+		unreachableAccepts.set_empty_key(state_size());
 		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s)) {
 			state_type state = static_cast<state_type>(s);
 			if (!live.count(state))
@@ -1399,7 +1395,7 @@ public:
 		live.clear_no_resize();
 		assert(nexts.empty());
 		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s)) {
-			assert(s < size());
+			assert(s < state_size());
 			state_type state = static_cast<state_type>(s);
 			if (!unreachableAccepts.count(state)) {
 				live.insert(state);
@@ -1419,13 +1415,13 @@ public:
 private:
 	class HopcroftMinimizer final {
 	public:
-		HopcroftMinimizer(Automaton& a) : a_(a), partitions_(a.size()), partitionBounds_(),
+		HopcroftMinimizer(Automaton& a) : a_(a), partitions_(a.state_size()), partitionBounds_(),
 				//TODO: now that the automaton isn't total, inv_ should be
 				//allocated after building the inverse edge list, so that it can
 				//be sized just right.
-				stateToPartition_(a.size()), inv_(a.size() * AlphabetSize),
-				invStart_(a.size() * (AlphabetSize+1)), L_(), inL_(a.size()),
-				move_(a.size()), moveSize_(), suspects_() {}
+				stateToPartition_(a.state_size()), inv_(a.state_size() * AlphabetSize),
+				invStart_(a.state_size() * (AlphabetSize+1)), L_(), inL_(a.state_size()),
+				move_(a.state_size()), moveSize_(), suspects_() {}
 
 		void minimize() {
 			if (!buildInverseAndInitializePartitions()) return;
@@ -1438,7 +1434,7 @@ private:
 				//is cheap (because partitions are singletons), so it may not be
 				//worth checking in this loop.  If not, we definitely want to
 				//check in finish() to avoid copying a bunch for no reason.
-				if (partitionBounds_.size() == a_.size())
+				if (partitionBounds_.size() == a_.state_size())
 					return;
 			}
 			finish();
@@ -1483,10 +1479,10 @@ private:
 			};
 
 			std::vector<InverseEntry> edgelist;
-			edgelist.reserve(a_.size() * AlphabetSize + 1);
+			edgelist.reserve(a_.state_size() * AlphabetSize + 1);
 			bool crashed = false;
 			unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
-			for (state_type s = 0; s < a_.size(); ++s) {
+			for (state_type s = 0; s < a_.state_size(); ++s) {
 				for (symbol_type a = 0; a < AlphabetSize; ++a) {
 					if (auto target = a_.stepDeterministic(s, a))
 						edgelist.push_back(InverseEntry{s, a, *target});
@@ -1551,7 +1547,7 @@ private:
 			//TODO: use a parallel sort (beyond a size threshold)
 			std::sort(edgelist.begin(), edgelist.end());
 			std::size_t invEltsIdx = 0;
-			for (state_type stateIdx = 0; stateIdx < a_.size(); ++stateIdx) {
+			for (state_type stateIdx = 0; stateIdx < a_.state_size(); ++stateIdx) {
 				for (symbol_type symbolIdx = 0; symbolIdx < AlphabetSize; ++symbolIdx) {
 					invStart_[stateIdx * (AlphabetSize+1) + symbolIdx] = invEltsIdx;
 					while (edgelist[invEltsIdx].target == stateIdx &&
@@ -1712,7 +1708,7 @@ private:
 			return boost::make_iterator_range(&partitions_[0] + p.first, &partitions_[0] + p.second);
 		}
 		boost::iterator_range<const state_type*> inverseStep(state_type target, symbol_type symbol) const {
-			assert(target <= a_.size());
+			assert(target <= a_.state_size());
 			assert(symbol <= AlphabetSize);
 			std::size_t start = target * (AlphabetSize+1) + symbol;
 			assert((start + 1) < invStart_.size());
@@ -1800,9 +1796,9 @@ private:
 	}
 
 	friend std::ostream& operator<<(std::ostream& o, const Automaton& a) {
-		o << a.size() << " states, " << a.numTransitions() << " transitions, "
+		o << a.state_size() << " states, " << a.numTransitions() << " transitions, "
 				<< (a.deterministic() ? "" : "non") << "deterministic\n";
-		for (state_type i = 0; i < a.size(); ++i) {
+		for (state_type i = 0; i < a.state_size(); ++i) {
 			o << "state " << i << (a.accept_[i] ? " [accept]:\n" : ":\n");
 			for (const Transition& t : a.transitions_[i])
 				o << "  to " << t.next_ << " on " << t.symbols_ << '\n';
@@ -2006,12 +2002,12 @@ Automaton<N> conj(const Automaton<N>& left, const Automaton<N>& right) {
 template<unsigned int N>
 Automaton<N> star(const Automaton<N>& b) {
 	Automaton<N> a;
-	a.reserve(b.size() + 1);
+	a.reserve(b.state_size() + 1);
 	a.addState();
 	a.setAccept(0);
 	typename Automaton<N>::state_type base = a.append(b);
 	a.addEpsilon(0, 1);
-	for (typename Automaton<N>::state_type p = base; p < a.size(); ++p)
+	for (typename Automaton<N>::state_type p = base; p < a.state_size(); ++p)
 		if (a.accept(p))
 			a.addEpsilon(p, 0);
 	return a;
@@ -2045,7 +2041,7 @@ Automaton<N> range(const Automaton<N>& a, unsigned int min, unsigned int max) {
 	assert(max > min);
 	//TODO: inlining nCopies would save a copy
 	Automaton<N> ret = nCopies(a, min);
-	ret.reserve(max * a.size());
+	ret.reserve(max * a.state_size());
 	//like cat, but not clearing the accept states (and so not scanning from state 0 each time)
 	typename Automaton<N>::state_type lastbase = 0;
 	for (typename Automaton<N>::state_type i = 0; i < max - min; ++i) {
@@ -2063,7 +2059,7 @@ Automaton<N> comp(Automaton<N> a) {
 	a.determinize();
 	a.totalize();
 	//TODO: we could add a method to flip everything at once (or make comp a friend)
-	for (typename Automaton<N>::state_type s = 0; s < a.size(); ++s)
+	for (typename Automaton<N>::state_type s = 0; s < a.state_size(); ++s)
 		a.setAccept(s, !a.accept(s));
 	return a;
 }
@@ -2139,7 +2135,7 @@ template<unsigned int N>
 struct hash<automaton::Automaton<N>> {
 	size_t operator()(const automaton::Automaton<N>& a) const {
 		size_t h = 13;
-		h = h * 31 + a.size();
+		h = h * 31 + a.state_size();
 		for (const auto& ts : a.transitions_) {
 			h = h * 31 + ts.size();
 			for (auto t : ts) {

@@ -11,7 +11,7 @@ bool acceptingClosure(automaton_type& connected, unsigned int locations) {
 	do {
 		//TODO: consider a worklist instead of fixpoint iteration
 		progress = false;
-		for (state_type s = 0; s < connected.size(); ++s) {
+		for (state_type s = 0; s < connected.state_size(); ++s) {
 			if (connected.accept(s)) continue;
 			for (symbol_type a = 0; a < locations; ++a) {
 				for (state_type d : connected.step(s, a)) {
@@ -35,7 +35,7 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 		//on a worklist and iterate until it's empty
 		do {
 			progress = false;
-			for (state_type s = 0; s < a.size(); ++s) {
+			for (state_type s = 0; s < a.state_size(); ++s) {
 				if (a.accept(s)) continue;
 				auto dests = a.step(s, l);
 				for (state_type d : dests) {
@@ -71,7 +71,7 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 		//pad with 0
 		alphamap.push_back(std::numeric_limits<symbol_type>::max());
 		alphamap.push_back(std::numeric_limits<symbol_type>::max());
-		connected->renumberAlphabet(0, connected->size(), alphamap.begin());
+		connected->renumberAlphabet(0, connected->state_size(), alphamap.begin());
 
 		//We may have disconnected the automaton (disconnecting the
 		//configuration graph of the gadget it represents).  We will swap each
