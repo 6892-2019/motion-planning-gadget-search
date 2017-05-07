@@ -990,38 +990,6 @@ public:
 		minimal_ = canonical_ = false;
 	}
 
-//	/**
-//	 * Adjust the transitions from each state in the given range by adding
-//	 * distance (which may be negative) to each symbol starting with symbolBegin.
-//	 */
-//	void slideAlphabet(state_type stateBegin, state_type stateEnd,
-//			symbol_type symbolBegin, std::make_signed_t<symbol_type> distance) {
-//		if (distance == 0) return;
-//		for (state_type s = stateBegin; s != stateEnd; ++s)
-//			//We could slide the only bit off the right or overwrite the only bit while sliding left.
-//			for (auto ti = transitions_[s].begin(); ti != transitions_[s].end();) {
-//				ti->symbols_.slide(symbolBegin, distance);
-//				if (ti->symbols_.none())
-//					ti = transitions_[s].erase(ti);
-//				else
-//					++ti;
-//			}
-//		//TODO: update determinism flag
-//	}
-//
-//	/**
-//	 * Adjust the transitions from each state in the given range by rotating the
-//	 * symbols in the given range right by the given distance.
-//	 */
-//	void rotateAlphabet(state_type stateBegin, state_type stateEnd,
-//			symbol_type symbolBegin, symbol_type symbolEnd, std::make_signed_t<symbol_type> distance) {
-//		if (distance == 0) return;
-//		for (state_type s = stateBegin; s != stateEnd; ++s)
-//			for (Transition& t : transitions_[s])
-//				t.symbols_.rotate_range(symbolBegin, symbolEnd, distance);
-//		//TODO: update determinism flag
-//	}
-
 	/**
 	 * Renumbers states.  After this method returns, state i is numbered
 	 * states[i].  The given iterator must point to a permutation of size equal
