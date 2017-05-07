@@ -108,7 +108,7 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 		if (in_init())
 			do_retire();
 	}
-	std::cout << "Completed initialization: " << registry.registered_size() << " registered, " << registry.waiting_size() << " waiting\n";
+	std::cout << "Completed initialization: " << registry.registered_size() << " registered, " << registry.waiting_size() << " waiting\n" << std::flush;
 
 	//Steady state: alternate issuance and retirement, periodically issuing a connect task
 	while (registry.waiting_size() || connect_pending() || inflight) {
