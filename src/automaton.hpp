@@ -128,6 +128,11 @@ public:
 
 	//TODO: equality, somehow (false if alphabet sizes disagree)
 
+	//Strictly speaking, this should be private virtual, existing purely to be
+	//called from std::hash<AutomatonBase>.  But std::hash is just awkward
+	//enough that I'm happy to expose this here.
+	virtual std::size_t hash() const = 0;
+
 	//TODO: we should have a sufficiently rich set of observer methods to
 	//implement printing just once for this interface
 //	friend std::ostream& operator<<(std::ostream& o, const AutomatonBase& a) {
@@ -1170,6 +1175,20 @@ public:
 		return !(*this == other);
 	}
 
+	std::size_t hash() const override {
+		size_t h = 13;
+		h = h * 31 + state_size();
+		for (const auto& ts : transitions_) {
+			h = h * 31 + ts.size();
+			for (auto t : ts) {
+				h = h * 31 + t.next_;
+				h = h * 31 + std::hash<symbol_mask_type>()(t.symbols_);
+			}
+		}
+		//punt on accept_ for now
+		return h;
+	}
+
 private:
 
 	struct Transition {
@@ -1797,7 +1816,6 @@ private:
 		return o;
 	}
 
-	friend class std::hash<Automaton>;
 	//Friend these to let them set minimal_ and canonical_.
 	template<unsigned int N>
 	friend Automaton<N> empty();
@@ -2135,17 +2153,7 @@ namespace std {
 template<unsigned int N>
 struct hash<automaton::Automaton<N>> {
 	size_t operator()(const automaton::Automaton<N>& a) const {
-		size_t h = 13;
-		h = h * 31 + a.state_size();
-		for (const auto& ts : a.transitions_) {
-			h = h * 31 + ts.size();
-			for (auto t : ts) {
-				h = h * 31 + t.next_;
-				h = h * 31 + std::hash<automaton::bitset<N>>()(t.symbols_);
-			}
-		}
-		//punt on accept_ for now
-		return h;
+		return a.hash();
 	}
 };
 } //namespace std

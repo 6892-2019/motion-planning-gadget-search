@@ -8,7 +8,7 @@ AutomatonBase::~AutomatonBase() = default;
 namespace detail {
 std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs) {
 	const AutomatonBase& a = rs.a;
-	os << "Automaton<" << a.alphabet_size() << "> make() {\n";
+	os << "Automaton<" << a.alphabet_size() << "> make" << a.hash()<< "() {\n";
 	os << "\tAutomaton<" << a.alphabet_size() << "> a;\n";
 	os << "\ta.reserve(" << a.state_size() << ");\n";
 	os << "\tfor (AutomatonBase::state_type s = 0; s < " << a.state_size() << "; ++s)\n";
