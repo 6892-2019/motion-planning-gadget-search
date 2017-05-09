@@ -901,7 +901,8 @@ public:
 
 private:
 	template<typename Iter>
-	void findCanonicalStateNumbering(Iter alphabetPerm, dynarray<state_type>& renumbering) {
+	void findCanonicalStateNumbering(Iter alphabetPerm, dynarray<state_type>& renumbering,
+			dynarray<std::tuple<state_type, state_type, symbol_type>>& renumberedTransitionList) {
 		//The numbering, chosen as the vistation order of the states.  Because
 		//we're using a FIFO queue, we can assign a visit number as we put the
 		//state in the queue, so the numbering also doubles as the closed set.
@@ -909,20 +910,24 @@ private:
 		//of that vertex.)
 		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
 		std::queue<symbol_type> queue;
-		state_type idx = 0;
+		state_type idx = 0, transIdx = 0;
 		renumbering[0] = idx++;
 		queue.push(0);
 		while (!queue.empty()) {
 			state_type cur = queue.front();
 			queue.pop();
 			for (symbol_type a = 0; a < alphabet_size(); ++a) {
-				if (auto dest = stepDeterministic(cur, alphabetPerm[a]))
+				if (auto dest = stepDeterministic(cur, alphabetPerm[a])) {
 					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
 						renumbering[*dest] = idx++;
 						queue.push(*dest);
 					}
+					renumberedTransitionList[transIdx++] = {renumbering[cur], renumbering[*dest], a};
+				}
 			}
 		}
+		assert(idx == state_size());
+		assert(transIdx == transition_size());
 		assert(!std::count(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max()));
 	}
 public:
@@ -939,8 +944,46 @@ public:
 		minimize();
 
 		dynarray<state_type> renumbering(state_size());
-		findCanonicalStateNumbering(identity_permutation(), renumbering);
+		//In theory, the compiler is allowed to eliminate all writes to this
+		//allocation because it's never read, and then the allocation itself can
+		//be elided.
+		dynarray<std::tuple<state_type, state_type, symbol_type>> transitions(transition_size());
+		findCanonicalStateNumbering(identity_permutation(), renumbering, transitions);
 		renumberStates(renumbering.begin());
+		prepareForEquals();
+		canonical_ = true;
+	}
+
+	/**
+	 * Renumbers states and symbols to bring this automaton into a canonical
+	 * form, possibly with a different accepted language.
+	 */
+	template<typename Iter>
+	void canonicalizeRenumber(Iter alphabetPermsBegin, Iter alphabetPermsEnd) {
+		assert(alphabetPermsBegin != alphabetPermsEnd);
+		//Can't test canonical_ here, because it means "canonical with respect
+		//to the accepted language", and we might change the language.  We still
+		//set canonical_ when we're done, because we are canonical for the new
+		//language.
+		minimize();
+
+		dynarray<state_type> leastStates(state_size()), workingStates(state_size());
+		dynarray<std::tuple<state_type, state_type, symbol_type>> leastTrans(transition_size()), workingTrans(transition_size());
+		auto i = alphabetPermsBegin, best = i;
+		using std::begin;
+		using std::swap;
+		findCanonicalStateNumbering(begin(*i++), leastStates, leastTrans);
+		while (i != alphabetPermsEnd) {
+			auto cur = i++;
+			findCanonicalStateNumbering(begin(*cur), workingStates, workingTrans);
+			if (std::lexicographical_compare(workingTrans.begin(), workingTrans.end(),
+					leastTrans.begin(), leastTrans.end())) {
+				swap(workingTrans, leastTrans);
+				swap(workingStates, leastStates);
+				best = cur;
+			}
+		}
+		renumber(leastStates.begin(), begin(*best));
 		prepareForEquals();
 		canonical_ = true;
 	}
@@ -2047,6 +2090,16 @@ Automaton<N> minimize(Automaton<N> a) {
 template<unsigned int N>
 Automaton<N> canonicalize(Automaton<N> a) {
 	a.canonicalize();
+	return a;
+}
+
+/**
+ * @return a canonicalized, possibly-symbol-renumbered copy of the given
+ * automaton
+ */
+template<unsigned int N, typename Iter>
+Automaton<N> canonicalizeRenumber(Automaton<N> a, Iter alphabetPermsBegin, Iter alphabetPermsEnd) {
+	a.canonicalizeRenumber(alphabetPermsBegin, alphabetPermsEnd);
 	return a;
 }
 

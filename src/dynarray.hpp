@@ -90,10 +90,22 @@ public:
 		data_.reset(nullptr);
 		size_ = 0;
 	}
+
+	void swap(dynarray& other) noexcept {
+		data_.swap(other.data_);
+		std::swap(size_, other.size_);
+	}
 private:
 	std::unique_ptr<value_type[]> data_;
 	size_type size_;
 };
+
+namespace std {
+template<typename T>
+void swap(dynarray<T>& left, dynarray<T>& right) noexcept {
+	left.swap(right);
+}
+}
 
 #endif /* DYNARRAY_HPP */
 
