@@ -336,6 +336,17 @@ public:
 private:
 	google::dense_hash_map<key_type, state_type, boost::hash<key_type>> map_;
 };
+
+template<typename T>
+auto begin(const T& t) {
+	using std::begin;
+	return begin(t);
+}
+//work around array-pointer decay for half-ranges, where the length is irrelevant
+template<typename T>
+auto begin(T* ptr) {
+	return ptr;
+}
 } //namespace detail
 
 
@@ -975,7 +986,7 @@ public:
 		dynarray<state_type> leastStates(state_size()), workingStates(state_size());
 		dynarray<std::tuple<state_type, state_type, symbol_type>> leastTrans(transition_size()), workingTrans(transition_size());
 		auto i = alphabetPermsBegin, best = i;
-		using std::begin;
+		using automaton::detail::begin;
 		using std::swap;
 		findCanonicalStateNumbering(begin(*i++), leastStates, leastTrans);
 		while (i != alphabetPermsEnd) {

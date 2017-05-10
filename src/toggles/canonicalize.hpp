@@ -30,25 +30,13 @@ inline void dotfile(const sparsegraph& sg, std::ostream& destination = std::cout
 	destination << "}" << std::endl;
 }
 
+std::pair<const unsigned int* const*, const unsigned int* const*>
+getPerms(unsigned int alphabetSize, unsigned int locations, bool normal, bool mirrored);
+
 template<unsigned int N>
 void canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool allowMirroring = true) {
-	using symbol_type = automaton::AutomatonBase::symbol_type;
-	std::vector<std::vector<symbol_type>> perms;
-	std::vector<symbol_type> perm(N);
-	std::iota(perm.begin(), perm.end(), 0);
-	for (unsigned int i = 0; i < locations; ++i) {
-		perms.push_back(perm);
-		std::rotate(perm.begin(), perm.begin()+1, perm.begin()+locations);
-	}
-	if (allowMirroring) {
-		std::iota(perm.begin(), perm.end(), 0);
-		std::reverse(perm.begin(), perm.begin()+locations);
-		for (unsigned int i = 0; i < locations; ++i) {
-			perms.push_back(perm);
-			std::rotate(perm.begin(), perm.begin()+1, perm.begin()+locations);
-		}
-	}
-	a.canonicalizeRenumber(perms.begin(), perms.end());
+	auto perms = getPerms(a.alphabet_size(), locations, true, allowMirroring);
+	a.canonicalizeRenumber(perms.first, perms.second);
 }
 
 template<unsigned int N>
