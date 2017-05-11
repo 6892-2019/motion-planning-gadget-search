@@ -108,7 +108,7 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 void connect(Registry::index_type gadgetIndex, const Registry& registry, Result& finishArg) {
 	const Gadget& g = registry.at(gadgetIndex);
 	if (g.locations_ <= 3) {
-		std::cout << "Skipping connect due to size (" << g.locations_ <<")\n";
+//		std::cout << "Skipping connect due to size (" << g.locations_ <<")\n";
 		return;
 	}
 	const Provenance& p = registry.provenance(gadgetIndex);

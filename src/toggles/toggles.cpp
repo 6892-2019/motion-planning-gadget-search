@@ -11,6 +11,18 @@
 
 using std::get;
 
+template<typename Duration>
+std::string hms(Duration diff) {
+	using std::chrono::duration_cast;
+	auto hours = duration_cast<std::chrono::hours>(diff);
+	auto minutes = duration_cast<std::chrono::minutes>(diff) - hours;
+	auto seconds = duration_cast<std::chrono::seconds>(diff) - hours - minutes;
+	return std::to_string(hours.count()) + "h" + std::to_string(minutes.count()) + "m" + std::to_string(seconds.count()) + "s";
+}
+std::string hms(std::chrono::steady_clock::time_point end, std::chrono::steady_clock::time_point begin) {
+	return hms(end - begin);
+}
+
 static Registry registry(900001);
 static bounded_queue<std::function<void()>> issue(4*std::thread::hardware_concurrency());
 static bounded_queue<Result> retire(4*std::thread::hardware_concurrency());
@@ -93,6 +105,8 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 		}
 	};
 
+	const auto threadStarted = std::chrono::steady_clock::now();
+
 	//Initialization phase: issue until workers are busy, retiring only if necessary
 	auto in_init = [&](){return inflight < 3*std::thread::hardware_concurrency();};
 	while (in_init()) {
@@ -110,6 +124,7 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 	}
 	std::cout << "Completed initialization: " << registry.registered_size() << " registered, " << registry.waiting_size() << " waiting\n" << std::flush;
 
+	auto lastReport = std::chrono::steady_clock::now();
 	//Steady state: alternate issuance and retirement, periodically issuing a connect task
 	while (registry.waiting_size() || connect_pending() || inflight) {
 		if ((connectWatermark + 100) < registry.registered_size() || !registry.waiting_size())
@@ -120,6 +135,27 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 
 		if (inflight)
 			do_retire();
+
+		using namespace std::chrono_literals;
+		auto now = std::chrono::steady_clock::now();
+		if ((now - lastReport) > 30s) {
+			auto elapsed = now - threadStarted;
+			auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed);
+			rusage usagestats = {};
+			getrusage(RUSAGE_SELF, &usagestats);
+			std::chrono::seconds userSeconds(usagestats.ru_utime.tv_sec);
+			double efficiency = ((double)userSeconds.count())/((double)elapsedSeconds.count());
+			double gb = ((double)usagestats.ru_maxrss) / (1024*1024);
+
+			//TODO: CPU time used (and efficiency coefficient vs hardware_concurrency())
+			//TODO: memory usage
+			std::cout << std::fixed << std::setprecision(2);
+			std::cout << registry.registered_size() << " registered, " << registry.waiting_size() << " waiting, "
+					<< hms(elapsed) << " elapsed, " << hms(userSeconds) << " user (" << efficiency << "), "
+					<< gb << " GiB"
+					<< std::endl;
+			lastReport = now;
+		}
 	}
 	std::cout << "exiting after " << registry.registered_size() << " registrations" << std::endl;
 	std::exit(0);
