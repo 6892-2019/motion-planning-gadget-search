@@ -56,6 +56,7 @@ private:
 };
 
 void finish(Gadget&& gadget, Provenance provenance, Result& finishArg) {
+	assert(gadget.a_->canonical());
 	std::size_t hash = std::hash<automaton_type>()(*gadget.a_);
 	//TODO: we could augment Result with a hash table to avoid this scan
 	for (auto& r : finishArg)
