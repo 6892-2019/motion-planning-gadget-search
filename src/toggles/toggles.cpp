@@ -147,8 +147,6 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 			double efficiency = ((double)userSeconds.count())/((double)elapsedSeconds.count());
 			double gb = ((double)usagestats.ru_maxrss) / (1024*1024);
 
-			//TODO: CPU time used (and efficiency coefficient vs hardware_concurrency())
-			//TODO: memory usage
 			std::cout << std::fixed << std::setprecision(2);
 			std::cout << registry.registered_size() << " registered, " << registry.waiting_size() << " waiting, "
 					<< hms(elapsed) << " elapsed, " << hms(userSeconds) << " user (" << efficiency << "), "
