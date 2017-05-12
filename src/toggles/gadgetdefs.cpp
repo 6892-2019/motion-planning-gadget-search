@@ -12,6 +12,11 @@ std::unordered_map<std::string, Gadget> initialize_known_gadgets() {
 	constexpr unsigned int N = automaton_type::alphabet_size_v;
 	auto lit = [](auto... symbols){return automaton::lit<N>(symbols...);};
 
+	automaton_type nop2 = star(alt(lit(0, 0), lit(1, 1)));
+	nop2.minimize();
+	canonicalize(nop2, 2);
+	ret["2-nop"] = Gadget(nop2, 2);
+
 	automaton_type nop3 = star(alt(lit(0, 0), lit(1, 1), lit(2, 2)));
 	nop3.minimize();
 	canonicalize(nop3, 3);
@@ -38,9 +43,37 @@ std::unordered_map<std::string, Gadget> initialize_known_gadgets() {
 		canonicalize(toggle, locations);
 		return Gadget(std::move(toggle), locations);
 	};
+	ret["1-toggle"] = make_twostate(lit(0, 1), lit(1, 0), nop2);
 	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)), nop4);
 	ret["antiparallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(2, 3)), alt(lit(1, 0), lit(3, 2)), nop4);
 	ret["crossover-2-toggle"] = make_twostate(alt(lit(0, 2), lit(3, 1)), alt(lit(2, 0), lit(1, 3)), nop4);
+
+	ret["noncrossing-tripwire-lock"] = make_twostate(
+			alt(lit(0, 1), lit(1, 0), lit(3, 2), lit(2, 3)),
+			alt(lit(0, 1), lit(1, 0)),
+			nop4);
+	ret["crossing-tripwire-lock"] = make_twostate(
+			alt(lit(0, 2), lit(2, 0), lit(3, 1), lit(1, 3)),
+			alt(lit(0, 2), lit(2, 0)),
+			nop4);
+
+	ret["noncrossing-toggle-lock"] = make_twostate(
+			alt(lit(0, 1), lit(3, 2), lit(2, 3)),
+			alt(lit(1, 0)),
+			nop4);
+	ret["crossing-toggle-lock"] = make_twostate(
+			alt(lit(0, 2), lit(3, 1), lit(1, 3)),
+			alt(lit(2, 0)),
+			nop4);
+
+	ret["noncrossing-tripwire-toggle"] = make_twostate(
+			alt(lit(0, 1), lit(3, 2), lit(2, 3)),
+			alt(lit(1, 0), lit(3, 2), lit(2, 3)),
+			nop4);
+	ret["crossing-tripwire-toggle"] = make_twostate(
+			alt(lit(0, 2), lit(3, 1), lit(1, 3)),
+			alt(lit(2, 0), lit(3, 1), lit(1, 3)),
+			nop4);
 
 	ret["3-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 0)),
 			alt(lit(1, 0), lit(2, 1), lit(0, 2)), nop3);
