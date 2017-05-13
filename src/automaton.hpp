@@ -86,6 +86,11 @@ public:
 	 */
 	virtual StateSet step(state_type state, symbol_type symbol) const = 0;
 	/**
+	 * Calls the given function once for each state directly reachable from the
+	 * given state, in an arbitrary order.
+	 */
+	virtual void for_each_destination(state_type state, std::function<void(state_type)> action) const = 0;
+	/**
 	 * Returns a set of the labels on the edge between from and to.  This set is
 	 * empty if there is no edge between from and to.
 	 *
@@ -439,6 +444,15 @@ public:
 				return t.next_;
 		return boost::none;
 	}
+
+	void for_each_destination(state_type state, std::function<void(state_type)> action) const override {
+		assert(state < state_size());
+		for (const auto& t : transitions_[state])
+			action(t.next_);
+	}
+
+	//TODO: templated overload of for_each_destination, for use when this
+	//object's actual type is known (not via AutomatonBase)
 
 	SymbolSet labels(state_type from, state_type to) const override {
 		for (const Transition& t : transitions_[from])
@@ -2156,6 +2170,80 @@ struct ComparisonResult {
 template<unsigned int N>
 ComparisonResult<N> compare_languages(const Automaton<N>& left, const Automaton<N>& right) {
 	return {conj(left, comp(right)), conj(comp(left), right)};
+}
+
+namespace detail {
+struct Tarjan;
+}
+
+class SCCs {
+public:
+	unsigned int size() const {
+		return static_cast<unsigned int>(indices_.size()-1);
+	}
+	auto begin(unsigned int component) const {
+		return components_.begin() + indices_[component];
+	}
+	auto end(unsigned int component) const {
+		return components_.begin() + indices_[component+1];
+	}
+private:
+	using state_type = AutomatonBase::state_type;
+	std::vector<AutomatonBase::state_type> components_;
+	std::vector<unsigned int> indices_;
+	friend struct detail::Tarjan;
+};
+
+namespace detail {
+struct Tarjan {
+	Tarjan(const AutomatonBase& a_) : a(a_), lowlink(a.state_size()), number(a.state_size()) {
+		std::fill(number.begin(), number.end(), std::numeric_limits<state_type>::max());
+		result.components_.reserve(a.state_size());
+	}
+	const AutomatonBase& a;
+	unsigned int index;
+	std::vector<state_type> stack;
+	dynarray<state_type> lowlink, number;
+	SCCs result;
+
+	void strongconnect(state_type v) {
+		lowlink[v] = number[v] = index++;
+		stack.push_back(v);
+		a.for_each_destination(v, [&](state_type w) {
+			if (number[w] == std::numeric_limits<state_type>::max()) {
+				strongconnect(w);
+				//TODO: apparently lowlink is only used in strongconnect(v), so
+				//we could make it the return value instead of an array
+				lowlink[v] = std::min(lowlink[v], lowlink[w]);
+			} else if (number[w] < number[v] && std::find(stack.begin(), stack.end(), w) != stack.end())
+				lowlink[v] = std::min(lowlink[v], number[w]);
+		});
+		if (lowlink[v] == number[v]) {
+			result.indices_.push_back(static_cast<unsigned int>(result.components_.size()));
+			while (!stack.empty() && number[stack.back()] >= number[v]) {
+				result.components_.push_back(stack.back());
+				stack.pop_back();
+			}
+		}
+	}
+	SCCs compute() {
+		for (state_type w = 0; w < a.state_size(); ++w)
+			if (number[w] == std::numeric_limits<state_type>::max())
+				strongconnect(w);
+		result.indices_.push_back(static_cast<unsigned int>(result.components_.size()));
+
+		for (state_type s = 0; s < a.state_size(); ++s)
+			//Each state is in exactly one component.
+			assert(std::count(result.components_.begin(), result.components_.end(), s) == 1);
+
+		return std::move(result);
+	}
+};
+} //namespace detail
+
+template<unsigned int N>
+SCCs find_components(const Automaton<N>& a) {
+	return detail::Tarjan(a).compute();
 }
 
 } //namespace automaton

@@ -522,3 +522,37 @@ TEST(AutomatonTest, ShuffleAcceptComposeMinimize3) {
 	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
 	equivalentOnAllStrings<4>(rshuf, rmshuf, 4, __LINE__);
 }
+
+TEST(AutomatonTest, TrivialTarjan0) {
+	SCCs sccs = find_components(empty<2>());
+	EXPECT_EQ(sccs.size(), 1);
+	EXPECT_EQ(*sccs.begin(0), 0);
+}
+
+TEST(AutomatonTest, TrivialTarjan1) {
+	SCCs sccs = find_components(lit<2>(0, 1, 0, 1, 1));
+	EXPECT_EQ(sccs.size(), 6);
+	EXPECT_EQ(*sccs.begin(0), 5);
+	EXPECT_EQ(*sccs.begin(1), 4);
+	EXPECT_EQ(*sccs.begin(2), 3);
+	EXPECT_EQ(*sccs.begin(3), 2);
+	EXPECT_EQ(*sccs.begin(4), 1);
+	EXPECT_EQ(*sccs.begin(5), 0);
+}
+
+TEST(AutomatonTest, ConnectedTarjan) {
+	auto a = cat(minimize(star(lit<2>(0, 0, 0, 0))), minimize(star(lit<2>(1, 1, 1, 1, 1))));
+	SCCs sccs = find_components(a);
+	EXPECT_EQ(sccs.size(), 2);
+	EXPECT_TRUE(unordered_equal(sccs.begin(1), sccs.end(1), {0, 1, 2, 3}));
+	EXPECT_TRUE(unordered_equal(sccs.begin(0), sccs.end(0), {4, 5, 6, 7, 8}));
+}
+
+TEST(AutomatonTest, DisconnectedTarjan) {
+	auto a = minimize(star(lit<2>(0, 0, 0, 0)));
+	a.append(minimize(star(lit<2>(1, 1, 1, 1, 1))));
+	SCCs sccs = find_components(a);
+	EXPECT_EQ(sccs.size(), 2);
+	EXPECT_TRUE(unordered_equal(sccs.begin(0), sccs.end(0), {0, 1, 2, 3}));
+	EXPECT_TRUE(unordered_equal(sccs.begin(1), sccs.end(1), {4, 5, 6, 7, 8}));
+}
