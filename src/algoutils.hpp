@@ -93,6 +93,30 @@ bool is_possibly_mirrored_rotation_permutation(std::initializer_list<T> list) {
 	return is_possibly_mirrored_rotation_permutation(list.begin(), list.end());
 }
 
+
+template<typename LeftIter, typename RightIter, class Compare = std::less<>>
+bool unordered_equal(LeftIter first1, LeftIter end1, RightIter first2, RightIter end2, Compare cmp = Compare()) {
+	if (std::distance(first1, end1) != std::distance(first2, end2))
+		return false;
+	for (LeftIter i = first1; i != end1; ++i)
+		if (std::count(first1, end1, *i) != std::count(first2, end2, *i))
+			return false;
+	return true;
+}
+template<typename T, typename RightIter, class Compare = std::less<>>
+bool unordered_equal(std::initializer_list<T> left, RightIter first2, RightIter end2, Compare cmp = Compare()) {
+	return unordered_equal(left.begin(), left.end(), first2, end2, cmp);
+}
+template<typename T, typename LeftIter, class Compare = std::less<>>
+bool unordered_equal(LeftIter first1, LeftIter end1, std::initializer_list<T> right, Compare cmp = Compare()) {
+	return unordered_equal(first1, end1, right.begin(), right.end(), cmp);
+}
+template<typename T, typename U, class Compare = std::less<>>
+bool unordered_equal(std::initializer_list<T> left, std::initializer_list<U> right, Compare cmp = Compare()) {
+	return unordered_equal(left.begin(), left.end(), right.begin(), right.end(), cmp);
+}
+
+
 template<typename T, typename Compare = std::less<T>>
 int sgncmp(const T& left, const T& right, Compare comp = Compare()) {
 	if (comp(left, right)) return -1;

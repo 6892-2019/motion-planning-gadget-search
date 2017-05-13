@@ -35,3 +35,13 @@ TEST(AlgoutilsTest, IsPossiblyMirroredRotationPermutation) {
 	ASSERT_FALSE(is_possibly_mirrored_rotation_permutation({0, 2, 1, 3}));
 	ASSERT_FALSE(is_possibly_mirrored_rotation_permutation({1, 0, 2, 3}));
 }
+
+TEST(AlgoutilsTest, UnorderedEqual) {
+	ASSERT_TRUE(unordered_equal({0}, {0}));
+	ASSERT_TRUE(unordered_equal({1, 0}, {0, 1}));
+	ASSERT_TRUE(unordered_equal({0, 0}, {0, 0}));
+	ASSERT_TRUE(unordered_equal({0, 1, 0}, {1, 0, 0}));
+
+	ASSERT_FALSE(unordered_equal({0}, {1}));
+	ASSERT_FALSE(unordered_equal({0, 0}, {0}));
+}
