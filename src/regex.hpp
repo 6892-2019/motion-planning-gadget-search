@@ -189,7 +189,7 @@ public:
 	template<class Callable>
 	void enumerate(Callable callback) const {
 		auto automaton = impl::interpret<Alphabet::size>(pimpl_);
-		automaton.enumerate<Alphabet>(callback);
+		automaton.template enumerate<Alphabet>(callback);
 	}
 
 	friend std::ostream& operator<<(std::ostream& o, const Regex& r) {
