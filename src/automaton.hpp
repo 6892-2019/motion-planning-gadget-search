@@ -1962,7 +1962,7 @@ void alt_once(Automaton<N>& target, const Automaton<N>& source) {
 }
 } //namespace detail
 
-template<unsigned int N, class ForwardIterator>
+template<class ForwardIterator, unsigned int N = std::iterator_traits<ForwardIterator>::value_type::alphabet_size_v>
 Automaton<N> cat(ForwardIterator begin, ForwardIterator end) {
 	if (begin == end)
 		//the empty string is the identity element for concatenation
@@ -1975,7 +1975,7 @@ Automaton<N> cat(ForwardIterator begin, ForwardIterator end) {
 }
 template<unsigned int N>
 Automaton<N> cat(std::initializer_list<Automaton<N>> list) {
-	return cat<N>(list.begin(), list.end());
+	return cat(list.begin(), list.end());
 }
 
 template<unsigned int N>
@@ -1993,8 +1993,8 @@ cat(const Automaton<N>& first, Automata... rest) {
 	return a;
 }
 
-template<unsigned int N, class ForwardIterator>
-Automaton<N> alt(ForwardIterator begin, ForwardIterator end) {
+template<class ForwardIterator, unsigned int N = std::iterator_traits<ForwardIterator>::value_type::alphabet_size_v>
+auto alt(ForwardIterator begin, ForwardIterator end) {
 	if (begin == end)
 		return empty<N>();
 
@@ -2007,7 +2007,7 @@ Automaton<N> alt(ForwardIterator begin, ForwardIterator end) {
 }
 template<unsigned int N>
 Automaton<N> alt(std::initializer_list<Automaton<N>> list) {
-	return alt<N>(list.begin(), list.end());
+	return alt(list.begin(), list.end());
 }
 
 template<unsigned int N>
@@ -2058,7 +2058,7 @@ Automaton<N> maybe(const Automaton<N>& a) {
 template<unsigned int N>
 Automaton<N> nCopies(const Automaton<N>& a, unsigned int count) {
 	std::vector<const Automaton<N>*> v(count, &a);
-	return cat<N>(boost::make_indirect_iterator(v.begin()),
+	return cat(boost::make_indirect_iterator(v.begin()),
 					boost::make_indirect_iterator(v.end()));
 }
 template<unsigned int N>
@@ -2067,7 +2067,7 @@ Automaton<N> nOrMore(const Automaton<N>& a, unsigned int min) {
 	std::vector<const Automaton<N>*> v(min, &a);
 	Automaton<N> rest = star(a);
 	v.push_back(&rest);
-	return cat<N>(boost::make_indirect_iterator(v.begin()),
+	return cat(boost::make_indirect_iterator(v.begin()),
 					boost::make_indirect_iterator(v.end()));
 }
 template<unsigned int N>

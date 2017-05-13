@@ -64,13 +64,13 @@ Automaton<AlphabetSize> interpret(Expr::const_ptr expr) {
 		children.reserve(e->children().size());
 		for (typename Expr::ptr p : e->children())
 			children.push_back(recurse(p));
-		return cat<AlphabetSize>(children.begin(), children.end());
+		return cat(children.begin(), children.end());
 	} else if (auto e = cast<const Alternation>(expr)) {
 		std::vector<Automaton<AlphabetSize>> children;
 		children.reserve(e->children().size());
 		for (typename Expr::ptr p : e->children())
 			children.push_back(recurse(p));
-		return alt<AlphabetSize>(children.begin(), children.end());
+		return alt(children.begin(), children.end());
 	}
 	assert(false && "reached end of interpret");
 	__builtin_unreachable();
