@@ -1077,6 +1077,8 @@ public:
 	 */
 	template<class RandomAccessIterator>
 	void renumberStates(RandomAccessIterator states) {
+		if (states[0] != 0)
+			minimal_ = false;
 		for (auto& ts : transitions_)
 			for (Transition& t : ts)
 				t.next_ = states[t.next_];
@@ -1112,6 +1114,8 @@ public:
 		using std::swap;
 		swap(transitions_[a], transitions_[b]);
 		canonical_ = false;
+		if (a == 0 || b == 0)
+			minimal_ = false;
 	}
 
 	/**
@@ -1121,6 +1125,8 @@ public:
 	 */
 	template<class RandomAccessIterator1, class RandomAccessIterator2>
 	void renumber(RandomAccessIterator1 states, RandomAccessIterator2 symbols) {
+		if (states[0] != 0)
+			minimal_ = false;
 		//Renumber transitions_[*].next_ and .symbols_, then swap transitions_.
 		//This doesn't just call renumberStates followed by renumberAlphabet to
 		//preserve locality when iterating transitions_.
