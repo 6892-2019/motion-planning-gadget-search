@@ -1,6 +1,8 @@
 #include "precompiled.hpp"
 #include "ops.hpp"
 
+using namespace automaton;
+
 bool acceptingClosure(automaton_type& connected, unsigned int locations) {
 	//Transitive closure.
 	//TODO: move to Automaton? (minus only being on non-accept states)
@@ -25,6 +27,26 @@ bool acceptingClosure(automaton_type& connected, unsigned int locations) {
 	} while (progress);
 	return changed;
 }
+
+void setInitialStates(automaton_type& a, const StateSet& initialStates) {
+	using state_type = automaton_type::state_type;
+	state_type s = a.addState();
+	for (state_type t : initialStates)
+		a.addEpsilon(s, t);
+	a.swapStateNumbers(0, s);
+}
+
+namespace {
+template<class Iter>
+void setInitialStatesToAcceptingStatesInRange(automaton_type& a, Iter first, Iter last) {
+	using state_type = automaton_type::state_type;
+	state_type s = a.addState();
+	for (state_type t : make_range_for_pair(first, last))
+		if (a.accept(t))
+			a.addEpsilon(s, t);
+	a.swapStateNumbers(0, s);
+}
+} //anonymous namespace
 
 void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Gadget& g, const Provenance& p, Result& finishArg) {
 	using state_type = automaton_type::state_type;
@@ -74,18 +96,12 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 		connected->renumberAlphabet(0, connected->state_size(), alphamap.begin());
 
 		//We may have disconnected the automaton (disconnecting the
-		//configuration graph of the gadget it represents).  We will swap each
-		//accepting state into state 0 instead.
-		unsigned int processed = 0;
-		const auto accept_size = connected->accept_size();
-		for (state_type s = 0; processed < accept_size && s < connected->state_size(); ++s) {
-			if (!connected->accept(s)) continue;
-			++processed;
+		//configuration graph of the gadget it represents).
+		SCCs sccs = find_components(*connected);
+		for (unsigned int c = 0; c < sccs.size(); ++c) {
 			//last one can move, others have to copy
-			auto op = processed == accept_size ? std::move(connected) : std::make_shared<automaton_type>(*connected);
-			op->swapStateNumbers(0, s);
-			//TODO: this repeated minimization is annoying in the case where we
-			//didn't disconnect the automaton...
+			auto op = (c == sccs.size()-1) ? std::move(connected) : std::make_shared<automaton_type>(*connected);
+			setInitialStatesToAcceptingStatesInRange(*op, sccs.begin(c), sccs.end(c));
 			op->minimize();
 			SymbolSet active = op->activeAlphabet();
 			if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
@@ -95,11 +111,14 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 				std::copy(active.begin(), active.end(), alphamap.begin());
 				std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
 				op->renumberAlphabet(alphamap.begin());
+				//Because we're deleting unused symbols, we don't need to
+				//minimize again; any two equivalent states would differ only in
+				//the symbols we deleted, but those symbols were inactive.
 			}
 			canonicalize(*op, static_cast<std::uint32_t>(active.size()));
 			finish(Gadget(std::move(op), static_cast<std::uint32_t>(active.size())),
 					//TODO: reasoned choice for +1 generation
-					Provenance(gadgetIndex, l, s, p.generation+1),
+					Provenance(gadgetIndex, l, c, p.generation+1),
 					finishArg);
 		}
 	}

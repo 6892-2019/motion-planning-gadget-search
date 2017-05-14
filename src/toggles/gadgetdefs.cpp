@@ -7,78 +7,77 @@
 using namespace automaton;
 
 namespace {
+automaton_type make_nop(unsigned int locations) {
+	std::vector<automaton_type> automata;
+	for (unsigned int i = 0; i < locations; ++i)
+		automata.push_back(lit<automaton_type::alphabet_size_v>(i, i));
+	return star(alt(automata.begin(), automata.end()));
+}
+
+Gadget prepare(automaton_type a, unsigned int locations) {
+	a.minimize();
+	a = shuffleAccept(a, make_nop(locations));
+	a.minimize();
+	acceptingClosure(a, locations);
+
+	//branch-to-any-accept-state
+	StateSet accepting;
+	for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
+		if (a.accept(s))
+			accepting.insert_absent(s);
+	setInitialStates(a, accepting);
+
+	a.minimize();
+	canonicalize(a, locations);
+	return {a, locations};
+}
+
 std::unordered_map<std::string, Gadget> initialize_known_gadgets() {
 	std::unordered_map<std::string, Gadget> ret;
 	constexpr unsigned int N = automaton_type::alphabet_size_v;
 	auto lit = [](auto... symbols){return automaton::lit<N>(symbols...);};
 
-	automaton_type nop2 = star(alt(lit(0, 0), lit(1, 1)));
-	nop2.minimize();
-	canonicalize(nop2, 2);
-	ret["2-nop"] = Gadget(nop2, 2);
+	ret["2-nop"] = prepare(make_nop(2), 2);
+	ret["3-nop"] = prepare(make_nop(3), 3);
+	ret["3-nop"] = prepare(make_nop(4), 4);
 
-	automaton_type nop3 = star(alt(lit(0, 0), lit(1, 1), lit(2, 2)));
-	nop3.minimize();
-	canonicalize(nop3, 3);
-	ret["3-nop"] = Gadget(nop3, 3);
+	ret["split"] = prepare(star(nCopies(alt(lit(0), lit(1), lit(2)), 2)), 3);
 
-	automaton_type nop4 = star(alt(lit(0, 0), lit(1, 1), lit(2, 2), lit(3, 3)));
-	nop4.minimize();
-	canonicalize(nop4, 4);
-	ret["4-nop"] = Gadget(nop4, 4);
-
-	automaton_type split = star(nCopies(alt(lit(0), lit(1), lit(2)), 2));
-	split.minimize();
-	canonicalize(split, 3);
-	ret["split"] = Gadget(split, 3);
-
-	auto make_twostate = [&](auto&& state0, auto&& state1, const auto& nop) {
+	auto make_twostate = [&](auto&& state0, auto&& state1) {
 		auto base = alt(epsilon<N>(), state0, star(cat(state0, state1)), cat(state0, star(cat(state1, state0))));
-		base.minimize();
 		unsigned int locations = static_cast<unsigned int>(base.activeAlphabet().size());
-		auto toggle = shuffleAccept(base, nop);
-		toggle.minimize();
-		acceptingClosure(toggle, locations);
-		toggle.minimize();
-		canonicalize(toggle, locations);
-		return Gadget(std::move(toggle), locations);
+		return prepare(base, locations);
 	};
-	ret["1-toggle"] = make_twostate(lit(0, 1), lit(1, 0), nop2);
-	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)), nop4);
-	ret["antiparallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(2, 3)), alt(lit(1, 0), lit(3, 2)), nop4);
-	ret["crossover-2-toggle"] = make_twostate(alt(lit(0, 2), lit(3, 1)), alt(lit(2, 0), lit(1, 3)), nop4);
+	ret["1-toggle"] = make_twostate(lit(0, 1), lit(1, 0));
+	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)));
+	ret["antiparallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(2, 3)), alt(lit(1, 0), lit(3, 2)));
+	ret["crossover-2-toggle"] = make_twostate(alt(lit(0, 2), lit(3, 1)), alt(lit(2, 0), lit(1, 3)));
 
 	ret["noncrossing-tripwire-lock"] = make_twostate(
 			alt(lit(0, 1), lit(1, 0), lit(3, 2), lit(2, 3)),
-			alt(lit(0, 1), lit(1, 0)),
-			nop4);
+			alt(lit(0, 1), lit(1, 0)));
 	ret["crossing-tripwire-lock"] = make_twostate(
 			alt(lit(0, 2), lit(2, 0), lit(3, 1), lit(1, 3)),
-			alt(lit(0, 2), lit(2, 0)),
-			nop4);
+			alt(lit(0, 2), lit(2, 0)));
 
 	ret["noncrossing-toggle-lock"] = make_twostate(
 			alt(lit(0, 1), lit(3, 2), lit(2, 3)),
-			alt(lit(1, 0)),
-			nop4);
+			alt(lit(1, 0)));
 	ret["crossing-toggle-lock"] = make_twostate(
 			alt(lit(0, 2), lit(3, 1), lit(1, 3)),
-			alt(lit(2, 0)),
-			nop4);
+			alt(lit(2, 0)));
 
 	ret["noncrossing-tripwire-toggle"] = make_twostate(
 			alt(lit(0, 1), lit(3, 2), lit(2, 3)),
-			alt(lit(1, 0), lit(3, 2), lit(2, 3)),
-			nop4);
+			alt(lit(1, 0), lit(3, 2), lit(2, 3)));
 	ret["crossing-tripwire-toggle"] = make_twostate(
 			alt(lit(0, 2), lit(3, 1), lit(1, 3)),
-			alt(lit(2, 0), lit(3, 1), lit(1, 3)),
-			nop4);
+			alt(lit(2, 0), lit(3, 1), lit(1, 3)));
 
 	ret["3-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 0)),
-			alt(lit(1, 0), lit(2, 1), lit(0, 2)), nop3);
+			alt(lit(1, 0), lit(2, 1), lit(0, 2)));
 	ret["4-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 3), lit(3, 0)),
-			alt(lit(1, 0), lit(2, 1), lit(3, 2), lit(0, 3)), nop4);
+			alt(lit(1, 0), lit(2, 1), lit(3, 2), lit(0, 3)));
 
 	return ret;
 }
