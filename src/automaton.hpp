@@ -524,6 +524,13 @@ public:
 		minimal_ = canonical_ = false;
 	}
 
+	void shrink_to_fit() {
+		transitions_.shrink_to_fit();
+		for (auto& ts : transitions_)
+			ts.shrink_to_fit();
+		accept_.shrink_to_fit();
+	}
+
 
 private:
 	//because just "using foo;" is illegal in class scopes, and we don't want to

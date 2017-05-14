@@ -116,6 +116,8 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 				//the symbols we deleted, but those symbols were inactive.
 			}
 			canonicalize(*op, static_cast<std::uint32_t>(active.size()));
+			//TODO: only do this immediately before offer (make Gadget::a_ non-const, or something)
+			op->shrink_to_fit();
 			finish(Gadget(std::move(op), static_cast<std::uint32_t>(active.size())),
 					//TODO: reasoned choice for +1 generation
 					Provenance(gadgetIndex, l, c, p.generation+1),

@@ -23,6 +23,8 @@ void combine(Registry::index_type l, bool leftMirror, Registry::index_type r, bo
 			automaton_type combined = automaton::shuffleAccept(lm, rm);
 			combined.minimize();
 			canonicalize(combined, left.locations_ + right.locations_);
+			//TODO: only do this immediately before offer (make Gadget::a_ non-const, or something)
+			combined.shrink_to_fit();
 			finish(Gadget(std::make_shared<const automaton_type>(std::move(combined)),
 					left.locations_ + right.locations_),
 					Provenance(l, ll, leftMirror, r, rl, rightMirror,
