@@ -55,7 +55,13 @@ public:
 	/**
 	 * @return the number of accepting states in this automaton
 	 */
-	virtual state_type accept_size() const = 0;
+	virtual state_type accept_size() const {
+		state_type count = 0;
+		for (state_type s = 0; s < state_size(); ++s)
+			if (accept(s))
+				++count;
+		return count;
+	}
 	/**
 	 * @return the alphabet size of this automaton
 	 */
