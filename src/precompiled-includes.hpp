@@ -9,6 +9,7 @@
 #include <string>
 #include <experimental/string_view>
 #include <tuple>
+#include <optional>
 #include <boost/optional.hpp>
 #include <boost/container/small_vector.hpp>
 #include <boost/dynamic_bitset.hpp>

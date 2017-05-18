@@ -149,6 +149,16 @@ template<typename T>
 auto begin(T* ptr) {
 	return ptr;
 }
+
+template<unsigned int N>
+SymbolSet set_of_indices(automaton::bitset<N> mask) {
+	SymbolSet set;
+	set.reserve(mask.count());
+	for (typename automaton::bitset<N>::size_type s = 0; s < mask.size(); ++s)
+		if (mask[s])
+			set.insert_absent(s);
+	return set;
+}
 } //namespace detail
 
 
@@ -198,18 +208,10 @@ public:
 				answer += t.symbols_.count();
 		return answer;
 	}
-	/**
-	 * Returns true if this automaton is known to be deterministic.
-	 */
-	bool deterministic() const {return deterministic_;}
-	/**
-	 * Returns true if this automaton is known to be minimal.
-	 */
-	bool minimal() const {return minimal_;}
-	/**
-	 * Returns true if this automaton is known to be canonical.
-	 */
-	bool canonical() const {return canonical_;}
+
+	bool deterministic() const override {return deterministic_;}
+	bool minimal() const override {return minimal_;}
+	bool canonical() const override {return canonical_;}
 
 	bool accept(state_type state) const override {
 		assert(state < state_size());
@@ -232,14 +234,29 @@ public:
 		return next;
 	}
 
-	boost::optional<state_type> stepDeterministic(state_type current, symbol_type symbol) const {
+	SymbolSet outgoing(state_type state) const override {
+		return detail::set_of_indices(outgoing_mask(state));
+	}
+
+	/**
+	 * Returns the states directly reachable from the given state.
+	 * @return the states directly reachable from the given state
+	 */
+	StateSet destinations(state_type state) const override {
+		StateSet dest;
+		for (const Transition& t : transitions_[state])
+			dest.insert_absent(t.next_);
+		return dest;
+	}
+
+	std::optional<state_type> stepDeterministic(state_type current, symbol_type symbol) const override {
 		assert(deterministic());
 		assert(current < state_size());
 		assert(symbol < AlphabetSize);
 		for (const Transition& t : transitions_[current])
 			if (t.symbols_[symbol])
 				return t.next_;
-		return boost::none;
+		return std::nullopt;
 	}
 
 	void for_each_destination(state_type state, std::function<void(state_type)> action) const override {
@@ -253,13 +270,8 @@ public:
 
 	SymbolSet labels(state_type from, state_type to) const override {
 		for (const Transition& t : transitions_[from])
-			if (t.next_ == to) {
-				SymbolSet ret;
-				for (symbol_type a = 0; a < alphabet_size(); ++a)
-					if (t.symbols_[a])
-						ret.insert_absent(a);
-				return ret;
-			}
+			if (t.next_ == to)
+				return detail::set_of_indices(t.symbols_);
 		return {};
 	}
 
@@ -646,7 +658,7 @@ public:
 		state_type crash;
 		bool madeCrashState = false;
 		for (state_type s = 0; s < state_size(); ++s) {
-			symbol_mask_type missing = ~outgoing(s);
+			symbol_mask_type missing = ~outgoing_mask(s);
 			if (missing.any()) {
 				if (!madeCrashState) {
 					crash = addState();
@@ -1117,7 +1129,7 @@ public:
 	 * @return a mask of the symbols for which the given state has outgoing
 	 * transitions.
 	 */
-	symbol_mask_type outgoing(state_type state) const {
+	symbol_mask_type outgoing_mask(state_type state) const {
 		symbol_mask_type mask;
 		for (const Transition& t : transitions_[state])
 			mask |= t.symbols_;
@@ -1131,31 +1143,8 @@ public:
 	SymbolSet activeAlphabet() const {
 		symbol_mask_type mask;
 		for (state_type s = 0; s < state_size(); ++s)
-			mask |= outgoing(s);
-		SymbolSet set;
-		for (symbol_type s = 0; s < alphabet_size(); ++s)
-			if (mask[s])
-				set.insert_absent(s);
-		return set;
-	}
-
-	/**
-	 * Returns the states directly reachable from the given state.
-	 * @return the states directly reachable from the given state
-	 */
-	small_vector<state_type, 4> destinations(state_type state) const {
-		small_vector<state_type, 4> dest;
-		for (const Transition& t : transitions_[state])
-			dest.push_back(t.next_);
-#ifndef NDEBUG
-		//addTrans enforces we don't have duplicate transitions; check that here.
-		//Use a copy to avoid changing the semantics of debug and release builds
-		//(though logically it shouldn't matter...).
-		small_vector<state_type, 4> destcopy(dest);
-		std::sort(destcopy.begin(), destcopy.end());
-		assert(std::adjacent_find(dest.begin(), dest.end()) == dest.end());
-#endif
-		return dest;
+			mask |= outgoing_mask(s);
+		return detail::set_of_indices(mask);
 	}
 
 	/**
@@ -1363,7 +1352,7 @@ private:
 						newbounds.push_back(bounds[i]);
 						newbounds.push_back(std::partition(bounds[i], bounds[i+1], [this, s](state_type state) {
 							//if we crash
-							return !a_.stepDeterministic(state, s).is_initialized();
+							return !a_.stepDeterministic(state, s).has_value();
 						}));
 						newbounds.push_back(bounds[i+1]);
 					}

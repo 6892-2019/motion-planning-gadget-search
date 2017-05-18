@@ -73,6 +73,19 @@ public:
 	 */
 	virtual std::size_t transition_size() const = 0;
 
+	/**
+	 * @return true iff this automaton is known to be deterministic
+	 */
+	virtual bool deterministic() const = 0;
+	/**
+	 * @return true iff this automaton is known to be minimal
+	 */
+	virtual bool minimal() const = 0;
+	/**
+	 * @return true iff this automaton is known to be canonical
+	 */
+	virtual bool canonical() const = 0;
+
 	virtual bool accept(state_type state) const = 0;
 	/**
 	 * Returns the possible next states of the automaton when reading the given
@@ -81,10 +94,63 @@ public:
 	 */
 	virtual StateSet step(state_type state, symbol_type symbol) const = 0;
 	/**
+	 * Returns the next state of the automaton when reading the given symbol in
+	 * the given current state, or nullopt if the automaton crashed.  If the
+	 * automaton is nondeterministic, the behavior is undefined.
+	 */
+	virtual std::optional<state_type> stepDeterministic(state_type state, symbol_type symbol) const {
+		assert(deterministic());
+		assert(state < state_size());
+		assert(symbol < alphabet_size());
+		StateSet nexts = step(state, symbol);
+		assert(nexts.size() <= 1);
+		return nexts.size() ? std::make_optional(nexts.front()) : std::nullopt;
+	}
+
+	/**
+	 * @return a set containing the symbols appearing on transitions from the
+	 * given state (possibly empty)
+	 */
+	virtual SymbolSet outgoing(state_type state) const {
+		assert(state < state_size());
+		SymbolSet ret;
+		if (deterministic())
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				if (stepDeterministic(state, a))
+					ret.insert_absent(a);
+		else
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				for (MAYBE_UNUSED state_type next : step(state, a))
+					ret.insert(a);
+		return ret;
+	}
+	/**
+	 * @return a set containing the states directly reachable from the given
+	 * state (possibly empty)
+	 */
+	virtual StateSet destinations(state_type state) const {
+		assert(state < state_size());
+		StateSet ret;
+		if (deterministic())
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				if (auto next = stepDeterministic(state, a); next)
+					ret.insert(*next);
+		else
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				for (state_type next : step(state, a))
+					ret.insert(next);
+		return ret;
+	}
+
+	/**
 	 * Calls the given function once for each state directly reachable from the
 	 * given state, in an arbitrary order.
 	 */
-	virtual void for_each_destination(state_type state, std::function<void(state_type)> action) const = 0;
+	virtual void for_each_destination(state_type state, std::function<void(state_type)> action) const {
+		assert(state < state_size());
+		for (state_type dest : destinations(state))
+			action(dest);
+	}
 	/**
 	 * Returns a set of the labels on the edge between from and to.  This set is
 	 * empty if there is no edge between from and to.
@@ -93,7 +159,23 @@ public:
 	 * where a symbol leads to, while label tells what symbols lead to a
 	 * particular place.
 	 */
-	virtual SymbolSet labels(state_type from, state_type to) const = 0;
+	virtual SymbolSet labels(state_type from, state_type to) const {
+		assert(from < state_size());
+		assert(to < state_size());
+		SymbolSet ret;
+		if (deterministic())
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				if (auto next = stepDeterministic(from, a); next && *next == to)
+					ret.insert_absent(a);
+		else
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				for (MAYBE_UNUSED state_type next : step(from, a))
+					if (next == to) {
+						ret.insert_absent(a);
+						break;
+					}
+		return ret;
+	}
 
 	range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> edges(state_type from) const;
 
