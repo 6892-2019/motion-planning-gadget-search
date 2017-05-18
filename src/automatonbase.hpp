@@ -67,17 +67,28 @@ public:
 	 */
 	virtual symbol_type alphabet_size() const = 0;
 	/**
-	 * Returns the number of edges in this automaton.  This is related to the
-	 * physical size of this object.
+	 * Returns the number of edges in this automaton.  This is the number of
+	 * distinct (from, to) pairs in this automaton.
 	 * @return the number of edges in this automaton
 	 */
-	virtual std::size_t edge_size() const = 0;
+	virtual std::size_t edge_size() const {
+		std::size_t count = 0;
+		for (state_type s = 0; s < state_size(); ++s)
+			count += destinations(s).size();
+		return count;
+	}
 	/**
-	 * Returns the number of transitions in this automaton.  This is a logical
-	 * notion; multiple transitions may be stored in one physical edge.
+	 * Returns the number of transitions in this automaton.  This is the number
+	 * of (from, on, to) triples in this automaton.
 	 * @return the number of transitions in this automaton
 	 */
-	virtual std::size_t transition_size() const = 0;
+	virtual std::size_t transition_size() const {
+		std::size_t count = 0;
+		for (state_type s = 0; s < state_size(); ++s)
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				count += step(s, a).size();
+		return count;
+	}
 
 	/**
 	 * @return true iff this automaton is known to be deterministic
