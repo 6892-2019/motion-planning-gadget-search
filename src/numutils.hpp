@@ -19,7 +19,7 @@ Target numeric_cast(Source src) noexcept {
 			boost::numeric::conversion_traits<Target, Source>, //the default
 			detail::assert_on_overflow
 			>;
-	return converter::convert(std::forward<Target>(src));
+	return converter::convert(std::forward<Source>(src));
 }
 
 #endif /* NUMUTILS_HPP */
