@@ -4,6 +4,33 @@
 using namespace automaton;
 
 namespace {
+bool compare_working(const detail::WorkingAutomaton& left, const detail::WorkingAutomaton& right) {
+	assert(left.alphabet_size() == right.alphabet_size()); //should already have been checked in the caller
+	switch (left.alphabet_size()) {
+#define COMPARE_WORKING_CASE(N) case N: return static_cast<const Automaton<N>&>(left) == static_cast<const Automaton<N>&>(right);
+		COMPARE_WORKING_CASE(1)
+		COMPARE_WORKING_CASE(2)
+		COMPARE_WORKING_CASE(3)
+		COMPARE_WORKING_CASE(4)
+		COMPARE_WORKING_CASE(5)
+		COMPARE_WORKING_CASE(6)
+		COMPARE_WORKING_CASE(7)
+		COMPARE_WORKING_CASE(8)
+		COMPARE_WORKING_CASE(9)
+		COMPARE_WORKING_CASE(10)
+		COMPARE_WORKING_CASE(11)
+		COMPARE_WORKING_CASE(12)
+		COMPARE_WORKING_CASE(13)
+		COMPARE_WORKING_CASE(14)
+		COMPARE_WORKING_CASE(15)
+		COMPARE_WORKING_CASE(16)
+#undef COMPARE_WORKING_CASE
+	default:
+		std::cout << "unhandled compare_working: " << typeid(left).name() << ", " << typeid(right).name();
+		std::terminate();
+	}
+}
+
 bool compare_slowpath(const AutomatonBase& left, const AutomatonBase& right) {
 	//TODO: these are only useful optimizations if both left and right override
 	//their default implementations; otherwise we're just wasting time
@@ -49,8 +76,10 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 	if (left.alphabet_size() != right.alphabet_size()) return false;
 	if (left.state_size() != right.state_size()) return false;
 
-	//TODO: delegate to Automaton<T> (possibly adding WorkingAutomaton non-template
-	//base to avoid lots of dynamic_casting) and to PackedAutomaton
+	if (auto l = dynamic_cast<const detail::WorkingAutomaton*>(&left),
+			r = dynamic_cast<const detail::WorkingAutomaton*>(&right); l && r)
+		return compare_working(*l, *r);
+	//TODO: PackedAutomaton comparison
 
 	return compare_slowpath(left, right);
 }

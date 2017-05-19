@@ -318,27 +318,25 @@ TEST(AutomatonTest, HashSanity) {
 	std::hash<Automaton<2>>()(a);
 }
 
-template<class A>
-bool eq(const A& left, const A& right) {
-	bool e = left == right;
-	if (e)
-		//ASSERT_EQ can only be used in functions returning void, for whatever reason
-		assert(std::hash<A>()(left) == std::hash<A>()(right));
-	return e;
+void equal_base(const AutomatonBase& l, const AutomatonBase& r) {
+	EXPECT_EQ(l, r);
+	EXPECT_EQ(l.hash(), r.hash());
 }
-template<unsigned int S>
-bool eq(boost::intrusive_ptr<Automaton<S>> left, boost::intrusive_ptr<Automaton<S>> right) {
-	return eq(*left, *right);
+void unequal_base(const AutomatonBase& l, const AutomatonBase& r) {
+	EXPECT_NE(l, r);
 }
 
 TEST(AutomatonTest, EqualitySanity) {
-	ASSERT_TRUE(eq(any<2>(), any<2>()));
-	ASSERT_TRUE(eq(any<4>(), any<4>()));
-	ASSERT_TRUE(eq(any<5>(), any<5>()));
-	ASSERT_TRUE(eq(any<12>(), any<12>()));
+	EXPECT_EQ(any<2>(), any<2>());
+	EXPECT_EQ(lit<2>(0), lit<2>(0));
+	EXPECT_NE(lit<2>(0), lit<2>(1));
+}
 
-	ASSERT_TRUE(eq(lit<2>(0), lit<2>(0)));
-	ASSERT_FALSE(eq(lit<2>(0), lit<2>(1)));
+TEST(AutomatonTest, BaseEqualitySanity) {
+	equal_base(any<2>(), any<2>());
+	equal_base(lit<2>(0), lit<2>(0));
+	unequal_base(lit<2>(0), lit<2>(1));
+	unequal_base(lit<2>(0), lit<4>(0));
 }
 
 TEST(AutomatonTest, MinimizeDeadEndAcceptStates) {

@@ -23,6 +23,11 @@ template<unsigned int AlphabetSize>
 class Automaton;
 
 namespace detail {
+
+class WorkingAutomaton : public AutomatonBase {
+	virtual std::size_t working_hash() const = 0;
+};
+
 using state_type = AutomatonBase::state_type;
 using state_pair = std::pair<state_type, state_type>;
 //We can't templatize this together with the other maps because dense_hash_map
@@ -168,7 +173,7 @@ template<unsigned int N> Automaton<N> all();
 template<unsigned int N> Automaton<N> determinize(Automaton<N>);
 
 template<unsigned int AlphabetSize>
-class Automaton final : public AutomatonBase {
+class Automaton final : public detail::WorkingAutomaton {
 public:
 	//awkward name to avoid clash with member function name
 	//(virtual functions can't also be static constexpr)
@@ -1022,7 +1027,7 @@ public:
 		return !(*this == other);
 	}
 
-	std::size_t working_hash() const {
+	std::size_t working_hash() const override {
 		size_t h = 13;
 		h = h * 31 + state_size();
 		for (const auto& ts : transitions_) {
