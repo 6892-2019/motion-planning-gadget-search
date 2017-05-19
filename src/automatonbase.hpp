@@ -131,11 +131,11 @@ public:
 	virtual SymbolSet outgoing(state_type state) const {
 		assert(state < state_size());
 		SymbolSet ret;
-		if (deterministic())
+		if (deterministic()) {
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
 				if (stepDeterministic(state, a))
 					ret.insert_absent(a);
-		else
+		} else
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
 				for (MAYBE_UNUSED state_type next : step(state, a))
 					ret.insert(a);
@@ -148,11 +148,11 @@ public:
 	virtual StateSet destinations(state_type state) const {
 		assert(state < state_size());
 		StateSet ret;
-		if (deterministic())
+		if (deterministic()) {
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
 				if (auto next = stepDeterministic(state, a); next)
 					ret.insert(*next);
-		else
+		} else
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
 				for (state_type next : step(state, a))
 					ret.insert(next);
@@ -180,11 +180,11 @@ public:
 		assert(from < state_size());
 		assert(to < state_size());
 		SymbolSet ret;
-		if (deterministic())
+		if (deterministic()) {
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
 				if (auto next = stepDeterministic(from, a); next && *next == to)
 					ret.insert_absent(a);
-		else
+		} else
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
 				for (MAYBE_UNUSED state_type next : step(from, a))
 					if (next == to) {
