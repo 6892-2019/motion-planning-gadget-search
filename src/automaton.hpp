@@ -1620,7 +1620,7 @@ private:
 		for (symbol_type s = 0; s < AlphabetSize; ++s) {
 			auto nexts = stepDeterministic(cur, s);
 			if (!nexts) continue;
-			state_type next = nexts.get();
+			state_type next = *nexts;
 			//We only enumerate finite languages, so we shouldn't visit the
 			//same state more than once.
 			assert(std::find(stateStack.begin(), stateStack.end(), next) == stateStack.end());
