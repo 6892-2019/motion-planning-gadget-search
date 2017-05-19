@@ -1022,7 +1022,7 @@ public:
 		return !(*this == other);
 	}
 
-	std::size_t hash() const override {
+	std::size_t working_hash() const {
 		size_t h = 13;
 		h = h * 31 + state_size();
 		for (const auto& ts : transitions_) {

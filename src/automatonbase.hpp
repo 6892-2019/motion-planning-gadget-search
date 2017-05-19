@@ -227,10 +227,15 @@ public:
 
 	//TODO: equality, somehow (false if alphabet sizes disagree)
 
-	//Strictly speaking, this should be private virtual, existing purely to be
-	//called from std::hash<AutomatonBase>.  But std::hash is just awkward
-	//enough that I'm happy to expose this here.
-	virtual std::size_t hash() const = 0;
+	/**
+	 * Computes a hash of this object suitable for comparison against other
+	 * hashes computed by this method, across all AutomatonBase implementations.
+	 * Implementations may expose more efficient hashes valid only in their
+	 * subhierarchy.
+	 *
+	 * Calling this method when canonical() returns false is usually an error.
+	 */
+	std::size_t hash() const;
 
 	//TODO: we should have a sufficiently rich set of observer methods to
 	//implement printing just once for this interface
@@ -315,6 +320,11 @@ inline bool operator!=(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 
 inline range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> AutomatonBase::edges(state_type from) const {
 	return make_range_for_pair(detail::EdgeRangeFront(this, from), detail::EdgeRangeSentinel(this, from));
+}
+
+bool operator==(const AutomatonBase& left, const AutomatonBase& right);
+inline bool operator!=(const AutomatonBase& left, const AutomatonBase& right) {
+	return !(left == right);
 }
 
 } //namespace automaton

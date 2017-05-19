@@ -1,9 +1,59 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
 
+using namespace automaton;
+
+namespace {
+bool compare_slowpath(const AutomatonBase& left, const AutomatonBase& right) {
+	//TODO: these are only useful optimizations if both left and right override
+	//their default implementations; otherwise we're just wasting time
+	if (left.accept_size() != right.accept_size()) return false;
+	if (left.edge_size() != right.edge_size()) return false;
+	if (left.transition_size() != right.transition_size()) return false;
+
+	for (AutomatonBase::state_type s = 0; s < left.state_size(); ++s) {
+		if (left.accept(s) != right.accept(s)) return false;
+		for (AutomatonBase::symbol_type a = 0; a < left.alphabet_size(); ++a) {
+			StateSet ld = left.step(s, a), rd = right.step(s, a);
+			ld.sort();
+			rd.sort();
+			if (ld != rd) return false;
+		}
+	}
+	return true;
+}
+} //anonymous namespace
+
+
+
 namespace automaton {
 
 AutomatonBase::~AutomatonBase() = default;
+std::size_t AutomatonBase::hash() const {
+	std::size_t h = 13;
+	h = 31*h + state_size();
+	h = 31*h + alphabet_size();
+	for (state_type s = 0; s < state_size(); ++s) {
+		for (symbol_type a = 0; a < alphabet_size(); ++a) {
+			StateSet dests = step(s, a);
+			dests.sort();
+			for (state_type d : dests)
+				h = 31*h + d;
+		}
+		//If we ever want to mix in accept, find a way to do it more than one bit at a time.
+	}
+	return h;
+}
+
+bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
+	if (left.alphabet_size() != right.alphabet_size()) return false;
+	if (left.state_size() != right.state_size()) return false;
+
+	//TODO: delegate to Automaton<T> (possibly adding WorkingAutomaton non-template
+	//base to avoid lots of dynamic_casting) and to PackedAutomaton
+
+	return compare_slowpath(left, right);
+}
 
 namespace detail {
 std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs) {
