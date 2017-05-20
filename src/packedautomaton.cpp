@@ -6,36 +6,56 @@ using state_type = AutomatonBase::state_type;
 using symbol_type = AutomatonBase::symbol_type;
 using StateSet = AutomatonBase::StateSet;
 using SymbolSet = AutomatonBase::SymbolSet;
+template<typename T>
+using limits = std::numeric_limits<T>;
 
 namespace {
 
-class DimunitivePackedAutomaton : public PackedAutomaton {
+struct ReinterpretWriter {
+	unsigned char* p;
+	//Because we're required to specify T at the call site, we can't name this
+	//operator().  (Well, we could if we called it as w.operator()<T>(arg).)
+	template<typename T, typename V>
+	void write(V value) {
+		*reinterpret_cast<T*>(p) = numeric_cast<T>(value);
+		p += sizeof(T);
+	}
+};
+
+/**
+ * Stores the accept bit in the high bit of the offset.
+ */
+template<typename StateSizeType, typename OutgoingMaskType, typename OffsetType>
+class OffsetAcceptAutomaton : public PackedAutomaton {
 public:
 	static bool can_represent(const AutomatonBase& a) {
-		return a.alphabet_size() <= CHAR_BIT &&
-				a.state_size() <= std::numeric_limits<unsigned char>::max() &&
-				a.transition_size() <= (std::numeric_limits<unsigned char>::max() >> 1);
+		return a.alphabet_size() <= limits<OutgoingMaskType>::digits &&
+				a.state_size() <= limits<StateSizeType>::max() &&
+				a.transition_size() <= (limits<OffsetType>::max() >> 1);
 	}
 	static std::size_t extra_storage(const AutomatonBase& a) {
-		return 2 //state and alphabet size
-				+ 1 * a.state_size() //bitmasks
-				+ 1 * a.state_size() //offsets
-				+ 1 * a.transition_size() //transitions
-				;
+		return 1 //alphabet size
+				+ sizeof(StateSizeType)
+				+ sizeof(OutgoingMaskType) * a.state_size()
+				+ sizeof(OffsetType) * a.state_size()
+				+ sizeof(StateSizeType) * a.transition_size();
 	}
 
-	DimunitivePackedAutomaton(const AutomatonBase& a) {
+	OffsetAcceptAutomaton(const AutomatonBase& a) {
 		assert(can_represent(a));
-		unsigned char* p = storage_begin();
-		*p++ = numeric_cast<unsigned char>(a.state_size());
-		*p++ = numeric_cast<unsigned char>(a.alphabet_size());
+		ReinterpretWriter p = {storage_begin()};
+		p.write<StateSizeType>(a.state_size());
+		p.write<unsigned char>(a.alphabet_size());
 
+		//TODO: if we know where offsets start, we can make this one big loop,
+		//so we only call a.outgoing(s) once
 		for (state_type s = 0; s < a.state_size(); ++s)
-			*p++ = set_to_mask(a.outgoing(s));
-		unsigned char offset = 0;
+			p.write<OutgoingMaskType>(set_to_mask(a.outgoing(s)));
+		OffsetType offset = 0;
 		for (state_type s = 0; s < a.state_size(); ++s) {
-			*p++ = a.accept(s) ? (offset | 1 << 7) : offset;
-			offset = numeric_cast<unsigned char>(offset + __builtin_popcount(outgoing_mask(s)));
+			p.write<OffsetType>(offset | (a.accept(s) ? 1 << (limits<OffsetType>::digits - 1) : 0));
+			//TODO: want an overflow-checked add here, I guess
+			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
 		}
 		for (state_type s = 0; s < a.state_size(); ++s) {
 			SymbolSet syms = a.outgoing(s);
@@ -43,22 +63,23 @@ public:
 			for (symbol_type c : syms) {
 				auto next = a.stepDeterministic(s, c);
 				assert(next);
-				*p++ = numeric_cast<unsigned char>(*next);
+				p.write<StateSizeType>(*next);
 			}
 		}
-		assert(p == storage_end());
+		assert(p.p == storage_end());
 	}
+
 	state_type state_size() const override {
-		return *storage_begin();
+		return *reinterpret_cast<const StateSizeType*>(storage_begin());
 	}
 	symbol_type alphabet_size() const override {
-		return *(storage_begin() + 1);
+		return *(storage_begin() + sizeof(StateSizeType));
 	}
 	bool deterministic() const override {return true;}
 	bool minimal() const override {return true;}
 	bool canonical() const override {return true;}
 	bool accept(state_type state) const override {
-		return offset(state) & (1 << 7);
+		return offset(state) & (1 << (limits<OutgoingMaskType>::digits - 1));
 	}
 	StateSet step(state_type state, symbol_type symbol) const override {
 		if (auto next = stepDeterministic(state, symbol)) {
@@ -69,8 +90,8 @@ public:
 		return {};
 	}
 	std::optional<state_type> stepDeterministic(state_type state, symbol_type symbol) const override {
-		unsigned char outgoing = outgoing_mask(state);
-		if (!(outgoing & (1 << symbol))) return std::nullopt;
+		OutgoingMaskType outgoing = outgoing_mask(state);
+		if (!(outgoing & (1u << symbol))) return std::nullopt;
 		//how many symbols came before
 		auto suboffset = count_set_left(outgoing, symbol);
 		return *(destinations_begin(state) + suboffset);
@@ -86,38 +107,38 @@ private:
 	const unsigned char* storage_end() const override {
 		return storage_begin() + extra_storage(*this); //TODO: slow computation
 	}
-	const unsigned char* outgoing_begin() const {
-		return storage_begin() + 2;
+	const OutgoingMaskType* outgoing_begin() const {
+		return reinterpret_cast<const OutgoingMaskType*>(storage_begin() + sizeof(StateSizeType) + 1);
 	}
-	const unsigned char* outgoing_end() const {
+	const OutgoingMaskType* outgoing_end() const {
 		return outgoing_begin() + state_size();
 	}
-	unsigned char outgoing_mask(state_type state) const {
+	OutgoingMaskType outgoing_mask(state_type state) const {
 		return outgoing_begin()[state];
 	}
 
-	const unsigned char* offsets_begin() const {
-		return outgoing_end();
+	const OffsetType* offsets_begin() const {
+		return reinterpret_cast<const OffsetType*>(outgoing_end());
 	}
-	const unsigned char* offsets_end() const {
+	const OffsetType* offsets_end() const {
 		return offsets_begin() + state_size();
 	}
-	unsigned char offset(state_type state) const {
+	OffsetType offset(state_type state) const {
 		return offsets_begin()[state];
 	}
 
-	const unsigned char* destinations_begin(state_type state) const {
-		return offsets_end() + (offset(state) & ~(1 << 7));
+	const StateSizeType* destinations_begin(state_type state) const {
+		return reinterpret_cast<const StateSizeType*>(offsets_end()) + (offset(state) & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
 	}
-	const unsigned char* destinations_end(state_type state) const {
+	const StateSizeType* destinations_end(state_type state) const {
 		return destinations_begin(state) + __builtin_popcount(outgoing_mask(state));
 	}
 
-	static unsigned char set_to_mask(SymbolSet set) {
-		unsigned int mask = 0;
+	static OutgoingMaskType set_to_mask(SymbolSet set) {
+		std::size_t mask = 0;
 		for (symbol_type s : set)
 			mask |= 1u << s;
-		return numeric_cast<unsigned char>(mask);
+		return numeric_cast<OutgoingMaskType>(mask);
 	}
 	static unsigned int high_zeroes(unsigned int x) {
 		//fxtbook 1.6.2, page 17
@@ -157,8 +178,8 @@ std::unique_ptr<const PackedAutomaton> pack(const AutomatonBase& a) {
 
 	//Ideally we'd walk through all of them and pick the smallest valid one, but
 	//for now we'll assume they're ordered by size.
-	if (DimunitivePackedAutomaton::can_represent(a))
-		return make_pack<DimunitivePackedAutomaton>(a);
+	if (OffsetAcceptAutomaton<unsigned char, unsigned char, unsigned char>::can_represent(a))
+		return make_pack<OffsetAcceptAutomaton<unsigned char, unsigned char, unsigned char>>(a);
 	std::cout << "couldn't pack" << std::endl;
 	std::terminate();
 }
