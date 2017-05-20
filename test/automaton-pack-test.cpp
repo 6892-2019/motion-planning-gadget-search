@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
 #include "packedautomaton.hpp"
+#include "packedautomaton-detail.hpp"
 #include "util.hpp"
 #include <gtest/gtest.h>
 
@@ -9,10 +10,10 @@ using state_type = AutomatonBase::state_type;
 using symbol_type = AutomatonBase::symbol_type;
 
 namespace {
-template<unsigned int N>
-void packtest(Automaton<N> a) {
-	a.canonicalize();
-	std::unique_ptr<const PackedAutomaton> packed = pack(a);
+template<class PackImpl>
+void pack_impl_test(const AutomatonBase& a) {
+	assert(a.canonical());
+	std::unique_ptr<const PackedAutomaton> packed = detail::make_pack<PackImpl>(a);
 	EXPECT_EQ(packed->state_size(), a.state_size());
 	EXPECT_EQ(packed->alphabet_size(), a.alphabet_size());
 	EXPECT_EQ(packed->accept_size(), a.accept_size());
@@ -32,26 +33,41 @@ void packtest(Automaton<N> a) {
 	EXPECT_EQ(packed->hash(), a.hash());
 	EXPECT_EQ(*packed, a);
 
-	std::unique_ptr<const PackedAutomaton> repacked = pack(*packed);
+	std::unique_ptr<const PackedAutomaton> repacked = detail::make_pack<PackImpl>(*packed);
 	EXPECT_EQ(*repacked, *packed);
 	EXPECT_EQ(repacked->packed_hash(), packed->packed_hash());
+
+	packed = pack(*packed); //allow type to be freely chosen
+	repacked = pack(*repacked);
+	EXPECT_EQ(*repacked, *packed);
+	EXPECT_EQ(repacked->packed_hash(), packed->packed_hash());
+}
+
+template<unsigned int N>
+void test_pack(Automaton<N> a) {
+	a.canonicalize();
+	pack_impl_test<detail::Diminutive8OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Tiny8OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Small8OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Medium8OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Large8OffsetPackedAutomaton>(a);
 }
 } //anonymous namespace
 
 TEST(AutomatonTest, Pack0) {
-	packtest(lit<8>(0, 1, 2, 3));
+	test_pack(lit<8>(0, 1, 2, 3));
 }
 TEST(AutomatonTest, Pack1) {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
-	packtest(noop);
+	test_pack(noop);
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
-	packtest(ltr);
-	packtest(rtl);
+	test_pack(ltr);
+	test_pack(rtl);
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
-	packtest(parallelToggleBase);
+	test_pack(parallelToggleBase);
 	auto shuf = shuffleAccept(noop, parallelToggleBase), rshuf = shuffleAccept(parallelToggleBase, noop);
-	packtest(shuf);
-	packtest(rshuf);
+	test_pack(shuf);
+	test_pack(rshuf);
 	shuf.canonicalize();
 	rshuf.canonicalize();
 	EXPECT_EQ(*pack(shuf), *pack(rshuf));
