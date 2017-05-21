@@ -524,3 +524,137 @@ TEST(AutomatonTest, AltCatVsCatMaybe) {
 	auto bar = cat(ltr, maybe(rtl));
 	equivalentOnAllStrings(foo, bar, 4, __LINE__);
 }
+
+TEST(AutomatonTest, DeducedCatViaBase) {
+	Automaton<2> foo = lit<2>(0);
+	AutomatonBase& r = foo;
+	const AutomatonBase& cr = foo;
+	auto golden = cat(foo, foo, foo);
+	equivalentOnAllStrings(cat(foo, r, cr), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(r, foo, cr), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(r, cr, foo), golden, 8, __LINE__);
+
+	equivalentOnAllStrings(cat(foo, r, foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(foo, cr, foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(r, foo, foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(cr, foo, foo), golden, 8, __LINE__);
+
+	equivalentOnAllStrings(cat(foo, r, lit<2>(0)), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(foo, cr, lit<2>(0)), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(lit<2>(0), foo, r), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(lit<2>(0), foo, cr), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(r, lit<2>(0), foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat(cr, lit<2>(0), foo), golden, 8, __LINE__);
+}
+
+TEST(AutomatonTest, DeducibleButSpecifiedCatViaBase) {
+	Automaton<2> foo = lit<2>(0);
+	AutomatonBase& r = foo;
+	const AutomatonBase& cr = foo;
+	auto golden = cat(foo, foo, foo);
+	equivalentOnAllStrings(cat<2>(foo, r, cr), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(r, foo, cr), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(r, cr, foo), golden, 8, __LINE__);
+
+	equivalentOnAllStrings(cat<2>(foo, r, foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(foo, cr, foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(r, foo, foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(cr, foo, foo), golden, 8, __LINE__);
+
+	equivalentOnAllStrings(cat<2>(foo, r, lit<2>(0)), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(foo, cr, lit<2>(0)), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(lit<2>(0), foo, r), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(lit<2>(0), foo, cr), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(r, lit<2>(0), foo), golden, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(cr, lit<2>(0), foo), golden, 8, __LINE__);
+}
+
+TEST(AutomatonTest, SpecifiedCatViaBase) {
+	Automaton<2> foo = lit<2>(0);
+	AutomatonBase& r = foo;
+	const AutomatonBase& cr = foo;
+	auto golden2 = cat(foo, foo), golden3 = cat(foo, foo, foo);
+	equivalentOnAllStrings(cat<2>(r, r), golden2, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(r, cr), golden2, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(cr, r), golden2, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(cr, cr), golden2, 8, __LINE__);
+
+	equivalentOnAllStrings(cat<2>(r, lit<2>(0)), golden2, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(cr, lit<2>(0)), golden2, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(lit<2>(0), r), golden2, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(lit<2>(0), cr), golden2, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(r, lit<2>(0), cr), golden3, 8, __LINE__);
+	equivalentOnAllStrings(cat<2>(cr, lit<2>(0), r), golden3, 8, __LINE__);
+}
+
+TEST(AutomatonTest, DeducedAltViaBase) {
+	Automaton<4> a = lit<4>(0), b = lit<4>(1), c = lit<4>(2);
+	AutomatonBase& ra = a;
+	AutomatonBase& rb = b;
+	AutomatonBase& rc = c;
+	const AutomatonBase& cra = a;
+	const AutomatonBase& crb = b;
+	const AutomatonBase& crc = c;
+	auto golden = alt(a, b, c);
+	equivalentOnAllStrings(alt(a, rb, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(ra, b, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(ra, crb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(ra, rb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(cra, crb, c), golden, 4, __LINE__);
+
+	equivalentOnAllStrings(alt(ra, b, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(a, rb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(a, b, rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(cra, b, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(a, crb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(a, b, crc), golden, 4, __LINE__);
+
+	equivalentOnAllStrings(alt(lit<4>(0), rb, rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(ra, lit<4>(1), rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(ra, rb, lit<4>(2)), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(lit<4>(0), crb, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(cra, lit<4>(1), crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(cra, crb, lit<4>(2)), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(lit<4>(0), rb, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(ra, lit<4>(1), crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(ra, crb, lit<4>(2)), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(lit<4>(0), crb, rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(cra, lit<4>(1), rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt(cra, rb, lit<4>(2)), golden, 4, __LINE__);
+}
+
+TEST(AutomatonTest, DeducibleButSpecifiedAltViaBase) {
+	Automaton<4> a = lit<4>(0), b = lit<4>(1), c = lit<4>(2);
+	AutomatonBase& ra = a;
+	AutomatonBase& rb = b;
+	AutomatonBase& rc = c;
+	const AutomatonBase& cra = a;
+	const AutomatonBase& crb = b;
+	const AutomatonBase& crc = c;
+	auto golden = alt(a, b, c);
+	equivalentOnAllStrings(alt<4>(a, rb, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(ra, b, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(ra, crb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(ra, rb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(cra, crb, c), golden, 4, __LINE__);
+
+	equivalentOnAllStrings(alt<4>(ra, b, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(a, rb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(a, b, rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(cra, b, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(a, crb, c), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(a, b, crc), golden, 4, __LINE__);
+
+	equivalentOnAllStrings(alt<4>(lit<4>(0), rb, rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(ra, lit<4>(1), rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(ra, rb, lit<4>(2)), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(lit<4>(0), crb, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(cra, lit<4>(1), crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(cra, crb, lit<4>(2)), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(lit<4>(0), rb, crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(ra, lit<4>(1), crc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(ra, crb, lit<4>(2)), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(lit<4>(0), crb, rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(cra, lit<4>(1), rc), golden, 4, __LINE__);
+	equivalentOnAllStrings(alt<4>(cra, rb, lit<4>(2)), golden, 4, __LINE__);
+}

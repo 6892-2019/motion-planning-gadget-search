@@ -1087,8 +1087,6 @@ public:
 	 * equivalently, the number of the first inserted state (if any)
 	 */
 	state_type append(const Automaton& b) {
-		//TODO: this may result in pathological behavior if we're appending
-		//repeatedly, each time allocating "just enough" instead of e.g. doubling
 		reserve(state_size() + b.state_size());
 		state_type base = state_size();
 		for (const auto& t : b.transitions_) {
@@ -1096,14 +1094,41 @@ public:
 			for (Transition& nt : transitions_.back())
 				nt.next_ += base;
 		}
-		for (std::size_t p = 0; p < b.state_size(); ++p)
-			accept_.push_back(b.accept_[p]);
+		for (state_type p = 0; p < b.state_size(); ++p)
+			accept_.push_back(b.accept(p));
 		deterministic_ &= b.deterministic();
 		minimal_ = canonical_ = false;
 		return base;
 	}
 
+	state_type append(Automaton&& b) {
+		reserve(state_size() + b.state_size());
+		state_type base = state_size();
+		transitions_.insert(transitions_.end(), std::make_move_iterator(b.transitions_.begin()),
+				std::make_move_iterator(b.transitions_.end()));
+		for (state_type s = base; s < state_size(); ++s)
+			for (Transition& nt : transitions_[s])
+				nt.next_ += base;
+		for (state_type p = 0; p < b.state_size(); ++p)
+			accept_.push_back(b.accept(p));
+		deterministic_ &= b.deterministic();
+		minimal_ = canonical_ = false;
+		return base;
+	}
 
+	state_type append(const AutomatonBase& b) {
+		reserve(state_size() + b.state_size());
+		state_type base = state_size();
+		for (state_type i = 0; i < b.state_size(); ++i) {
+			addState();
+			setAccept(base + i, b.accept(i));
+		}
+		b.for_each_transition([&](state_type from, symbol_type on, state_type to) {
+			addTrans(from + base, on, to + base);
+		});
+		minimal_ = canonical_ = false;
+		return base;
+	}
 
 	/**
 	 * Adds the given transitions to this automaton.
@@ -1732,20 +1757,63 @@ Automaton<N> lit(Symbols... symbols) {
 }
 
 namespace detail {
+
+template<class A>
+struct not_an_automaton {}; //doesn't define value
+
+template<class A>
+struct alphabet_size_if_known : std::conditional_t<
+	std::is_base_of_v<AutomatonBase, A>, std::integral_constant<unsigned int, 0>, not_an_automaton<A>> {};
+template<unsigned int N>
+struct alphabet_size_if_known<Automaton<N>> : std::integral_constant<unsigned int, N> {};
+
+template<unsigned int Current, unsigned int Size, unsigned int... Rest>
+constexpr unsigned int deduce_size_recurse_check();
+template<unsigned int Current>
+constexpr unsigned int deduce_size_recurse_check();
+
+template<unsigned int Size, unsigned int... Rest>
+constexpr unsigned int deduce_size_recurse() {
+	if constexpr (Size != 0)
+		return deduce_size_recurse_check<Size, Rest...>();
+	else if constexpr (sizeof...(Rest) > 0)
+		return deduce_size_recurse<Rest...>();
+	else
+		//trigger SFINAE if this branch is taken (break constexpr)
+		//static_assert is a hard error
+		throw 0;
+}
+template<unsigned int Current, unsigned int Size, unsigned int... Rest>
+constexpr unsigned int deduce_size_recurse_check() {
+	if constexpr (Size == 0 || Size == Current)
+		return deduce_size_recurse<Current, Rest...>();
+	else
+		throw "size mismatch";
+}
+template<unsigned int Current>
+constexpr unsigned int deduce_size_recurse_check() {
+	return Current;
+}
+
+template<class... Automata, unsigned int N = deduce_size_recurse<alphabet_size_if_known<std::decay_t<Automata>>::value...>()>
+constexpr unsigned int deduce_size() {
+	return N;
+}
+
 template<class ForwardIterator, class = std::void_t<typename std::iterator_traits<ForwardIterator>::iterator_category>>
 AutomatonBase::state_type total_states(ForwardIterator begin, ForwardIterator end) {
 	return std::accumulate(begin, end, 0u, [](auto x, auto a){return x + a.state_size();});
 }
 template<class... Automata>
-AutomatonBase::state_type total_states(const AutomatonBase& first, Automata... rest) {
+AutomatonBase::state_type total_states(const AutomatonBase& first, const Automata&... rest) {
 	return vta::foldl([](AutomatonBase::state_type accum, const AutomatonBase& base) {
 		return accum + base.state_size();
 	})(0u, first, rest...);
 }
 
-template<unsigned int N>
-void cat_once(Automaton<N>& target, const Automaton<N>& source) {
-	auto base = target.append(source);
+template<unsigned int N, class Source, class = std::enable_if_t<std::is_base_of<AutomatonBase, std::decay_t<Source>>::value>>
+void cat_once(Automaton<N>& target, Source&& source) {
+	auto base = target.append(std::forward<Source&&>(source));
 	//Wire the previous automaton's accept states to the current initial
 	//state (base), modifying them to not accept.
 	//TODO: addEpsilon may cause p to become accepting again, so we have
@@ -1759,9 +1827,9 @@ void cat_once(Automaton<N>& target, const Automaton<N>& source) {
 	}
 }
 
-template<unsigned int N>
-void alt_once(Automaton<N>& target, const Automaton<N>& source) {
-	auto base = target.append(source);
+template<unsigned int N, class Source, class = std::enable_if_t<std::is_base_of<AutomatonBase, std::decay_t<Source>>::value>>
+void alt_once(Automaton<N>& target, Source&& source) {
+	auto base = target.append(std::forward<Source&&>(source));
 	target.addEpsilon(0, base);
 }
 } //namespace detail
@@ -1786,14 +1854,20 @@ template<unsigned int N>
 Automaton<N> cat() {
 	return epsilon<N>();
 }
+
+template<typename... Automata>
+auto cat(Automata&&... rest) {
+	constexpr unsigned int N = detail::deduce_size<Automata...>();
+	return cat<N, Automata...>(std::forward<Automata&&>(rest)...);
+}
 template<unsigned int N, typename... Automata>
-std::enable_if_t<vta::are_same<Automaton<N>, std::decay_t<Automata>...>::value, Automaton<N>>
-cat(const Automaton<N>& first, Automata... rest) {
+Automaton<N> cat(Automata&&... rest) {
 	Automaton<N> a;
-	a.reserve(detail::total_states(first, rest...));
+	a.reserve(detail::total_states(rest...));
 	vta::map([&a](auto&& v){
-		detail::cat_once(a, v);
-	})(first, rest...);
+		assert(v.alphabet_size() == N);
+		detail::cat_once(a, std::forward<decltype(v)>(v));
+	})(std::forward<Automata&&>(rest)...);
 	return a;
 }
 
@@ -1818,15 +1892,20 @@ template<unsigned int N>
 Automaton<N> alt() {
 	return empty<N>();
 }
+
+template<typename... Automata>
+auto alt(Automata&&... rest) {
+	constexpr unsigned int N = detail::deduce_size<Automata...>();
+	return alt<N, Automata...>(std::forward<Automata&&>(rest)...);
+}
 template<unsigned int N, typename... Automata>
-std::enable_if_t<vta::are_same<Automaton<N>, std::decay_t<Automata>...>::value, Automaton<N>>
-alt(const Automaton<N>& first, Automata... rest) {
+Automaton<N> alt(Automata&&... rest) {
 	Automaton<N> a;
-	a.reserve(detail::total_states(first, rest...) + 1);
-	a.addState();
+	a.reserve(detail::total_states(rest...));
 	vta::map([&a](auto&& v){
-		detail::alt_once(a, v);
-	})(first, rest...);
+		assert(v.alphabet_size() == N);
+		detail::alt_once(a, std::forward<decltype(v)>(v));
+	})(std::forward<Automata&&>(rest)...);
 	return a;
 }
 

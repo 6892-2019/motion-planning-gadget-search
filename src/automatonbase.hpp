@@ -150,7 +150,7 @@ public:
 		StateSet ret;
 		if (deterministic()) {
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				if (auto next = stepDeterministic(state, a); next)
+				if (auto next = stepDeterministic(state, a))
 					ret.insert(*next);
 		} else
 			for (symbol_type a = 0; a < alphabet_size(); ++a)
@@ -168,6 +168,23 @@ public:
 		for (state_type dest : destinations(state))
 			action(dest);
 	}
+
+	/**
+	 * Calls the given function once for each transition out of the given state,
+	 * in an arbitrary order.
+	 */
+	virtual void for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const {
+		assert(state < state_size());
+		if (deterministic()) {
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				if (auto next = stepDeterministic(state, a))
+					action(a, *next);
+		} else
+			for (symbol_type a = 0; a < alphabet_size(); ++a)
+				for (state_type next : step(state, a))
+					action(a, next);
+	}
+
 	/**
 	 * Returns a set of the labels on the edge between from and to.  This set is
 	 * empty if there is no edge between from and to.
@@ -192,6 +209,23 @@ public:
 						break;
 					}
 		return ret;
+	}
+
+	/**
+	 * Calls the given function once for each transition in this automaton, in
+	 * an arbitrary order.
+	 */
+	virtual void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const {
+		if (deterministic()) {
+			for (symbol_type from = 0; from < state_size(); ++from)
+				for (symbol_type a = 0; a < alphabet_size(); ++a)
+					if (auto next = stepDeterministic(from, a))
+						action(from, a, *next);
+		} else
+			for (symbol_type from = 0; from < state_size(); ++from)
+				for (symbol_type a = 0; a < alphabet_size(); ++a)
+					for (state_type next : step(from, a))
+						action(from, a, next);
 	}
 
 	range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> edges(state_type from) const;
