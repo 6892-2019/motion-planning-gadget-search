@@ -32,7 +32,8 @@ public:
 	Combine(Registry::index_type i, bounded_queue<Result>& retire) : i_(i), retire_(retire) {}
 	void operator()() {
 		Result result;
-		for (Registry::index_type j = 0; j <= i_; ++j)
+//		for (Registry::index_type j = 0; j <= i_; ++j)
+		for (Registry::index_type j = 0; j <= i_ && registry.provenance(j).isInput(); ++j)
 			combine(i_, j, registry, result);
 		retire_.put(std::move(result));
 	}
@@ -89,6 +90,8 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 		connectWatermark = registry.registered_size();
 		++inflight;
 	};
+	automaton_type::state_type maxstates = 0;
+	std::size_t maxedges = 0, maxtransitions = 0, totaledges = 0, totaltransitions = 0;
 	auto do_retire = [&]() {
 		Result res = retire.take();
 		--inflight;
@@ -103,6 +106,11 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 						std::exit(0);
 					}
 			}
+			maxstates = std::max(maxstates, g.a_->state_size());
+			totaledges += g.a_->edge_size();
+			maxedges = std::max(maxedges, g.a_->edge_size());
+			totaltransitions += g.a_->transition_size();
+			maxtransitions = std::max(maxtransitions, g.a_->transition_size());
 		}
 	};
 
@@ -152,15 +160,23 @@ void registrar_thread(int core_number, const std::vector<std::pair<std::size_t, 
 			std::cout << registry.registered_size() << " registered, " << registry.waiting_size() << " waiting, "
 					<< hms(elapsed) << " elapsed, " << hms(userSeconds) << " user (" << efficiency << "), "
 					<< gb << " GiB"
+					<< ", " << maxstates << " maxstates, " << maxedges << " maxedges, " << maxtransitions << " maxtransitions, "
+					<< totaledges << " totaledges, " << totaltransitions << " totaltransitions"
 					<< std::endl;
 			lastReport = now;
 		}
+
+		if (registry.registered_size() >= 4000)
+			std::exit(0);
 	}
 	std::cout << "exiting after " << registry.registered_size() << " registrations" << std::endl;
 	std::exit(0);
 }
 
 int main(int argc, char* argv[]) {
+	std::cout << sizeof(automaton_type) << " " << sizeof(Gadget) << " " << sizeof(Provenance) << std::endl;
+	std::cout << sizeof(std::pair<Gadget, Provenance>) << " " << alignof(std::pair<Gadget, Provenance>) << std::endl;
+
 	std::vector<std::string> tokens;
 	boost::algorithm::split(tokens, argv[1], boost::algorithm::is_any_of(","));
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
@@ -181,7 +197,8 @@ int main(int argc, char* argv[]) {
 	}
 	std::cout << std::flush;
 
-	for (int i = 1; i < std::thread::hardware_concurrency(); ++i) {
+//	for (int i = 1; i < std::thread::hardware_concurrency(); ++i) {
+	for (int i = 1; i < 2; ++i) {
 		std::thread worker(&worker_thread, i, std::ref(issue));
 		worker.detach();
 	}

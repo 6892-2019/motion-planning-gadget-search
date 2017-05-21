@@ -33,7 +33,7 @@ struct Gadget {
 		auto ls = left.a_->state_size(), rs = right.a_->state_size();
 //		int ls = std::abs(21 - (signed int)left.a_->size()), rs = std::abs(21 - (signed int)right.a_->size());
 //		return std::tie(left.locations_, ls) > std::tie(right.locations_, rs);
-		return std::tie(ls, left.locations_) > std::tie(rs, right.locations_);
+		return std::tie(ls, left.locations_) < std::tie(rs, right.locations_);
 	}
 
 	automaton_const_ptr a_;
@@ -65,6 +65,8 @@ struct Provenance {
 		: first(firstParent), second(secondParent),
 		  i(firstMirrored ? firstSplice | TOPBIT : firstSplice),
 		  j(secondMirrored ? secondSplice | TOPBIT : secondSplice), generation(generatio) {}
+
+	bool isInput() const {return first == ALLONES;}
 private:
 	static constexpr std::uint32_t ALLONES = std::numeric_limits<std::uint32_t>::max();
 	static constexpr std::uint32_t TOPBIT = 1 << 31;
@@ -91,7 +93,7 @@ public:
 		deleted_->addState();
 		deleted_->addTrans(0, 2, 1);
 		deleted_->setAccept(1);
-		waiting_.set_empty_key(empty_.get());
+//		waiting_.set_empty_key(empty_.get());
 		waiting_.set_deleted_key(deleted_.get());
 	}
 
@@ -185,9 +187,9 @@ private:
 
 	static bool queue_order(const std::pair<Gadget, Provenance>& left, const std::pair<Gadget, Provenance>& right) {
 		//std::*_heap works with max-heaps, grumble
-		return Gadget::larger_than(left.first, right.first);
-//		return left.second.generation > right.second.generation ||
-//				(left.second.generation == right.second.generation && Gadget::larger_than(left.first, right.first));
+//		return Gadget::larger_than(left.first, right.first);
+		return left.second.generation > right.second.generation ||
+				(left.second.generation == right.second.generation && Gadget::larger_than(left.first, right.first));
 	}
 
 	std::uint32_t size_;
@@ -196,7 +198,7 @@ private:
 	dynarray<std::uint32_t> closed_;
 	std::vector<std::pair<Gadget, Provenance>> queue_;
 	//non-owning pointer to the automata managed by Gadget's shared_ptr
-	google::dense_hash_set<const automaton_type*, indirect_hash, indirect_equal> waiting_;
+	google::sparse_hash_set<const automaton_type*, indirect_hash, indirect_equal> waiting_;
 
 	//dummy automata used for waiting_'s empty and deleted keys
 	std::shared_ptr<automaton_type> empty_, deleted_;

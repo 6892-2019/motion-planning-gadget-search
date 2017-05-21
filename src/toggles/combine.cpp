@@ -29,7 +29,7 @@ void combine(Registry::index_type l, bool leftMirror, Registry::index_type r, bo
 					left.locations_ + right.locations_),
 					Provenance(l, ll, leftMirror, r, rl, rightMirror,
 					//TODO: make a reasoned choice for this function
-					(registry.provenance(l).generation + registry.provenance(r).generation)+1),
+					std::max(registry.provenance(l).generation, registry.provenance(r).generation)+1),
 					finishArg);
 			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+right.locations_-1, sliderotate.begin()+ll+right.locations_);
 		}

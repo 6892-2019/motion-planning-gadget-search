@@ -101,6 +101,7 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 		for (unsigned int c = 0; c < sccs.size(); ++c) {
 			//last one can move, others have to copy
 			auto op = (c == sccs.size()-1) ? std::move(connected) : std::make_shared<automaton_type>(*connected);
+			state_type oldsize = op->state_size();
 			setInitialStatesToAcceptingStatesInRange(*op, sccs.begin(c), sccs.end(c));
 			op->minimize();
 			SymbolSet active = op->activeAlphabet();
@@ -116,6 +117,9 @@ void connect(Registry::index_type gadgetIndex, const automaton_type& a, const Ga
 				//the symbols we deleted, but those symbols were inactive.
 			}
 			canonicalize(*op, static_cast<std::uint32_t>(active.size()));
+			state_type newsize = op->state_size();
+//			if (newsize > oldsize)
+//				std::cout << sccs.size() << " " << oldsize << " -> " << newsize << "\n";
 			//TODO: only do this immediately before offer (make Gadget::a_ non-const, or something)
 			op->shrink_to_fit();
 			finish(Gadget(std::move(op), static_cast<std::uint32_t>(active.size())),

@@ -14,19 +14,20 @@ automaton_type make_nop(unsigned int locations) {
 	return star(alt(automata.begin(), automata.end()));
 }
 
-Gadget prepare(automaton_type a, unsigned int locations) {
-	a.minimize();
-	a = shuffleAccept(a, make_nop(locations));
-	a.minimize();
-	acceptingClosure(a, locations);
-
-	//branch-to-any-accept-state
+void branchToAnyAcceptState(automaton_type& a) {
 	StateSet accepting;
 	for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
 		if (a.accept(s))
 			accepting.insert_absent(s);
 	setInitialStates(a, accepting);
+}
 
+Gadget prepare(automaton_type a, unsigned int locations) {
+	a.minimize();
+	a = shuffleAccept(a, make_nop(locations));
+	a.minimize();
+	acceptingClosure(a, locations);
+	branchToAnyAcceptState(a);
 	a.minimize();
 	canonicalize(a, locations);
 	return {a, locations};
