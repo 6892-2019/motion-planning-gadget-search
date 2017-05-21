@@ -157,10 +157,26 @@ struct indirect_equal {
 		//maybe as identical_or_indirect_equal?
 		return *l == *r;
 	}
+	template<typename L, typename R>
+	bool operator()(const std::unique_ptr<L>& l, const std::unique_ptr<R>& r) const noexcept(noexcept(*l == *r)) {
+		return *l == *r;
+	}
+	template<typename T>
+	std::size_t operator()(const std::unique_ptr<const T>& p) const noexcept(noexcept(std::hash<T>()(*p))) {
+		return std::hash<T>()(*p);
+	}
 };
 struct indirect_hash {
 	template<typename T>
 	std::size_t operator()(const T* p) const noexcept(noexcept(std::hash<T>()(*p))) {
+		return std::hash<T>()(*p);
+	}
+	template<typename T>
+	std::size_t operator()(const std::unique_ptr<T>& p) const noexcept(noexcept(std::hash<T>()(*p))) {
+		return std::hash<T>()(*p);
+	}
+	template<typename T>
+	std::size_t operator()(const std::unique_ptr<const T>& p) const noexcept(noexcept(std::hash<T>()(*p))) {
 		return std::hash<T>()(*p);
 	}
 };

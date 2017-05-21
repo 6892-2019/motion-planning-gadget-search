@@ -14,6 +14,14 @@ automaton_type make_nop(unsigned int locations) {
 	return star(alt(automata.begin(), automata.end()));
 }
 
+void setInitialStates(automaton_type& a, const StateSet& initialStates) {
+	using state_type = automaton_type::state_type;
+	state_type s = a.addState();
+	for (state_type t : initialStates)
+		a.addEpsilon(s, t);
+	a.swapStateNumbers(0, s);
+}
+
 void branchToAnyAcceptState(automaton_type& a) {
 	StateSet accepting;
 	for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
@@ -22,32 +30,31 @@ void branchToAnyAcceptState(automaton_type& a) {
 	setInitialStates(a, accepting);
 }
 
-Gadget prepare(automaton_type a, unsigned int locations) {
+automaton_type prepare(automaton_type a) {
 	a.minimize();
-	a = shuffleAccept(a, make_nop(locations));
+	a = shuffleAccept(a, make_nop(a.active_alphabet_size()));
 	a.minimize();
-	acceptingClosure(a, locations);
+	acceptingClosure(a, a.active_alphabet_size());
 	branchToAnyAcceptState(a);
 	a.minimize();
-	canonicalize(a, locations);
-	return {a, locations};
+	canonicalize(a, a.active_alphabet_size());
+	return a;
 }
 
-std::unordered_map<std::string, Gadget> initialize_known_gadgets() {
-	std::unordered_map<std::string, Gadget> ret;
+std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
+	std::unordered_map<std::string, automaton_type> ret;
 	constexpr unsigned int N = automaton_type::alphabet_size_v;
 	auto lit = [](auto... symbols){return automaton::lit<N>(symbols...);};
 
-	ret["2-nop"] = prepare(make_nop(2), 2);
-	ret["3-nop"] = prepare(make_nop(3), 3);
-	ret["3-nop"] = prepare(make_nop(4), 4);
+	ret["2-nop"] = prepare(make_nop(2));
+	ret["3-nop"] = prepare(make_nop(3));
+	ret["3-nop"] = prepare(make_nop(4));
 
-	ret["split"] = prepare(star(nCopies(alt(lit(0), lit(1), lit(2)), 2)), 3);
+	ret["split"] = prepare(star(nCopies(alt(lit(0), lit(1), lit(2)), 2)));
 
 	auto make_twostate = [&](auto&& state0, auto&& state1) {
 		auto base = alt(epsilon<N>(), state0, star(cat(state0, state1)), cat(state0, star(cat(state1, state0))));
-		unsigned int locations = static_cast<unsigned int>(base.activeAlphabet().size());
-		return prepare(base, locations);
+		return prepare(base);
 	};
 	ret["1-toggle"] = make_twostate(lit(0, 1), lit(1, 0));
 	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)));
@@ -84,8 +91,8 @@ std::unordered_map<std::string, Gadget> initialize_known_gadgets() {
 }
 } //anonymous namespace
 
-Gadget known_gadget(const std::string& name) {
-	static std::unordered_map<std::string, Gadget> map = initialize_known_gadgets();
+automaton_type known_gadget(const std::string& name) {
+	static std::unordered_map<std::string, automaton_type> map = initialize_known_gadgets();
 	auto i = map.find(name);
 	if (i == map.end()) {
 		std::cout << "couldn't find " << name << std::endl;

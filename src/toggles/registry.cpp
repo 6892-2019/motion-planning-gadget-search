@@ -1,8 +1,6 @@
 #include "precompiled.hpp"
 #include "registry.hpp"
 
-constexpr Registry::index_type Registry::ABSENT;
-
 automaton_type mirror(const automaton_type& a, unsigned int locations) {
 	//TODO: precompute and reuse for 2..automaton_type::alphabet_size_v
 	//TODO: can we replace this with canonicalize-renumber using mirrored perms only?
