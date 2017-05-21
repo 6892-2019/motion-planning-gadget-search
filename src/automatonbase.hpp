@@ -217,12 +217,12 @@ public:
 	 */
 	virtual void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const {
 		if (deterministic()) {
-			for (symbol_type from = 0; from < state_size(); ++from)
+			for (state_type from = 0; from < state_size(); ++from)
 				for (symbol_type a = 0; a < alphabet_size(); ++a)
 					if (auto next = stepDeterministic(from, a))
 						action(from, a, *next);
 		} else
-			for (symbol_type from = 0; from < state_size(); ++from)
+			for (state_type from = 0; from < state_size(); ++from)
 				for (symbol_type a = 0; a < alphabet_size(); ++a)
 					for (state_type next : step(from, a))
 						action(from, a, next);
