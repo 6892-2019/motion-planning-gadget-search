@@ -10,10 +10,10 @@ globals.update({
   'builddir': 'build/$config/',
   'src_dir': 'src/',
   'test_dir': 'test/',
-  'ldflags': '../nauty/nauty.a -u malloc -ljemalloc_pic -lc -lpthread',
+  'ldflags': '-u malloc -ljemalloc_pic -lc -lpthread',
 })
 # must be inserted after its references
-globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem ../nauty/ -isystem ../vta/include/'
+globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem ../vta/include/'
 globals['testldflags'] = '$ldflags -lgtest -lgtest_main'
 
 debug_cfg = {'config': 'debug', 'optflags': '-g -O0 -march=native -gsplit-dwarf -fdebug-types-section -grecord-gcc-switches'}
