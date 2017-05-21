@@ -13,6 +13,7 @@
 #include <utility>
 #include "algoutils.hpp"
 #include "linear_set.hpp"
+#include "numutils.hpp"
 
 namespace automaton {
 
@@ -66,6 +67,12 @@ public:
 	 * @return the alphabet size of this automaton
 	 */
 	virtual symbol_type alphabet_size() const = 0;
+	/**
+	 * @return the number of symbols that appear in transitions in this automaton
+	 */
+	virtual symbol_type active_alphabet_size() const {
+		return numeric_cast<symbol_type>(activeAlphabet().size());
+	}
 	/**
 	 * Returns the number of edges in this automaton.  This is the number of
 	 * distinct (from, to) pairs in this automaton.
@@ -229,6 +236,20 @@ public:
 	}
 
 	range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> edges(state_type from) const;
+
+	/**
+	 * @return the symbols that appear in transitions in this automaton
+	 */
+	virtual SymbolSet activeAlphabet() const {
+		SymbolSet ret;
+		for (symbol_type a = 0; a < alphabet_size(); ++a)
+			for (symbol_type s = 0; s < state_size(); ++s)
+				if (!step(s, a).empty()) {
+					ret.insert_absent(a);
+					break;
+				}
+		return ret;
+	}
 
 	virtual void reserve(state_type state_capacity) = 0;
 	/**

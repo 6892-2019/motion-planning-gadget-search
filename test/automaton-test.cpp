@@ -554,3 +554,11 @@ TEST(AutomatonTest, DisconnectedTarjan) {
 	EXPECT_TRUE(unordered_equal(sccs.begin(0), sccs.end(0), {0, 1, 2, 3}));
 	EXPECT_TRUE(unordered_equal(sccs.begin(1), sccs.end(1), {4, 5, 6, 7, 8}));
 }
+
+TEST(AutomatonTest, ActiveAlphabet) {
+	auto a = lit<4>(2, 3, 2, 3, 2, 3);
+	auto active = a.activeAlphabet();
+	EXPECT_TRUE(unordered_equal(active.begin(), active.end(), {2, 3}));
+	EXPECT_EQ(a.active_alphabet_size(), 2);
+	EXPECT_EQ(active.size(), 2);
+}

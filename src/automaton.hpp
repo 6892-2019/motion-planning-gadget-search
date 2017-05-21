@@ -1170,7 +1170,7 @@ public:
 	 * @return a set containing the symbols that appear as labels on transitions
 	 * in this automaton.
 	 */
-	SymbolSet activeAlphabet() const {
+	SymbolSet activeAlphabet() const override {
 		symbol_mask_type mask;
 		for (state_type s = 0; s < state_size(); ++s)
 			mask |= outgoing_mask(s);

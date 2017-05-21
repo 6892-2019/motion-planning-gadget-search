@@ -19,6 +19,8 @@ void pack_impl_test(const AutomatonBase& a) {
 	EXPECT_EQ(packed->accept_size(), a.accept_size());
 	EXPECT_EQ(packed->edge_size(), a.edge_size());
 	EXPECT_EQ(packed->transition_size(), a.transition_size());
+	EXPECT_EQ(packed->active_alphabet_size(), a.active_alphabet_size());
+	EXPECT_EQ(packed->activeAlphabet(), a.activeAlphabet());
 	for (state_type s = 0; s < a.state_size(); ++s) {
 		EXPECT_EQ(packed->accept(s), a.accept(s)) << s;
 		EXPECT_EQ(packed->outgoing(s), a.outgoing(s)) << s;
