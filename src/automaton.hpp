@@ -188,6 +188,21 @@ public:
 	 * but we should add assertions to make it explicit
 	 */
 	Automaton() : deterministic_(true), minimal_(false), canonical_(false) {}
+	Automaton(const AutomatonBase& a) : deterministic_(false), minimal_(false), canonical_(false) {
+		reserve(a.state_size());
+		for (state_type s = 0; s < a.state_size(); ++s) {
+			addState();
+			setAccept(s, a.accept(s));
+		}
+		a.for_each_transition([&](state_type from, symbol_type on, state_type to) {
+			addTrans(from, on, to);
+		});
+		deterministic_ = a.deterministic();
+		minimal_ = a.minimal();
+		canonical_ = a.canonical();
+		if (canonical())
+			prepareForEquals();
+	}
 	Automaton(const Automaton& a) = default;
 	Automaton(Automaton&& a) = default;
 	Automaton& operator=(const Automaton& a) = default;

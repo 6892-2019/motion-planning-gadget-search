@@ -77,3 +77,14 @@ TEST(AutomatonTest, Pack1) {
 TEST(AutomatonTest, PackDistinguishesAlphabetSize) {
 	EXPECT_NE(*pack(canonicalize(lit<2>(0))), *pack(canonicalize(lit<8>(0))));
 }
+
+TEST(AutomatonTest, Roundtrip) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	shuf.canonicalize();
+	std::unique_ptr<const PackedAutomaton> packed = pack(shuf);
+	Automaton<4> inflated(*packed);
+	ASSERT_EQ(inflated, shuf);
+}
