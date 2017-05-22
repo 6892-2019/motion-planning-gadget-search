@@ -53,6 +53,11 @@ void test_pack(Automaton<N> a) {
 	pack_impl_test<detail::Small8OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Medium8OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Large8OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Diminutive8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Tiny8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Small8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Medium8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Large8BitmaskPackedAutomaton>(a);
 }
 } //anonymous namespace
 
