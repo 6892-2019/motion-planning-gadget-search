@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
+#include "packedautomaton.hpp"
 
 using namespace automaton;
 
@@ -79,7 +80,9 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 	if (auto l = dynamic_cast<const detail::WorkingAutomaton*>(&left),
 			r = dynamic_cast<const detail::WorkingAutomaton*>(&right); l && r)
 		return compare_working(*l, *r);
-	//TODO: PackedAutomaton comparison
+	if (auto l = dynamic_cast<const PackedAutomaton*>(&left),
+			r = dynamic_cast<const PackedAutomaton*>(&right); l && r)
+		return *l == *r;
 
 	return compare_slowpath(left, right);
 }
