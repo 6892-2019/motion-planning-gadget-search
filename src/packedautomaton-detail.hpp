@@ -26,7 +26,7 @@ struct ReinterpretWriter {
  * Stores the accept bit in the high bit of the offset.
  */
 template<typename OutgoingMaskType, typename StateSizeType, typename OffsetType>
-class OffsetAcceptAutomaton : public PackedAutomaton {
+class OffsetAcceptAutomaton final : public PackedAutomaton {
 public:
 	static bool can_represent(const AutomatonBase& a) {
 		return a.alphabet_size() <= limits<OutgoingMaskType>::digits &&
@@ -75,6 +75,25 @@ public:
 	symbol_type alphabet_size() const override {
 		return *(storage_begin() + sizeof(StateSizeType));
 	}
+	AutomatonBase::symbol_type active_alphabet_size() const override {
+		OutgoingMaskType mask = 0;
+		for (OutgoingMaskType m : make_range_for_pair(outgoing_begin(), outgoing_end()))
+			mask |= m; //in theory, we could short-circuit if all bits are set
+		return __builtin_popcount(mask);
+	}
+	AutomatonBase::state_type accept_size() const override {
+		state_type count = 0;
+		for (OffsetType o : make_range_for_pair(offsets_begin(), offsets_end()))
+			count += (o >> (limits<OffsetType>::digits - 1)); //1 if the top bit is set, else 0
+		return count;
+	}
+	std::size_t transition_size() const override {
+		std::size_t count = 0;
+		//TODO: make this vectorizable/unrollable, not byte-at-a-time
+		for (OutgoingMaskType m : make_range_for_pair(outgoing_begin(), outgoing_end()))
+			count += __builtin_popcount(m);
+		return count;
+	}
 	bool deterministic() const override {return true;}
 	bool minimal() const override {return true;}
 	bool canonical() const override {return true;}
@@ -95,6 +114,20 @@ public:
 		//how many symbols came before
 		auto suboffset = count_set_left(outgoing, symbol);
 		return *(destinations_begin(state) + suboffset);
+	}
+	AutomatonBase::SymbolSet outgoing(state_type state) const override {
+		SymbolSet ret;
+		OutgoingMaskType mask = outgoing_mask(state);
+		for (unsigned int i = 0; i < alphabet_size(); ++i)
+			if (mask & (1 << i))
+				ret.insert_absent(i);
+		return ret;
+	}
+	AutomatonBase::StateSet destinations(state_type state) const override {
+		StateSet ret;
+		for (StateSizeType s : make_range_for_pair(destinations_begin(state), destinations_end(state)))
+			ret.insert_absent(s);
+		return ret;
 	}
 
 private:
