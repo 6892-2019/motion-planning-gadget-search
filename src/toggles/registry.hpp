@@ -67,10 +67,11 @@ public:
 		if (a->edge_size() == 0) return false;
 		//TODO: we could compute the hash in the worker thread instead if there
 		//were a way to provide it to the hash table
-		if (closed_.count(a)) return false;
+		if (closed_.count(a.get())) return false;
 
 		const PackedAutomaton* nonowning = a.get();
-		MAYBE_UNUSED auto insertres = closed_.insert(std::move(a));
+		//release(): see comment on closed_ declaration
+		MAYBE_UNUSED auto insertres = closed_.insert(a.release());
 		assert(insertres.second);
 		queue_.emplace_back(nonowning, p);
 		std::push_heap(queue_.begin(), queue_.end(), queue_order);
@@ -96,10 +97,9 @@ private:
 	std::vector<Provenance> provenance_;
 	//non-owning pointer to the automata held by the closed set's unique_ptr
 	std::vector<std::pair<const PackedAutomaton*, Provenance>> queue_;
-	std::unordered_set<unique_ptr<const PackedAutomaton>, indirect_hash, indirect_equal> closed_;
-	//TODO: sparse_hash_set can't handle move-only types, bleh
-	//because we never delete, maybe just .release, store a raw pointer and let it leak?
-//	google::sparse_hash_set<unique_ptr<const PackedAutomaton>, indirect_hash, indirect_equal> closed_;
+	//If sparse_hash_set supported non-PODs, we'd use unique_ptr<const PackedAutomaton>
+	//here.  But as we never erase anyway, we might as well let things leak.
+	google::sparse_hash_set<const PackedAutomaton*, indirect_hash, indirect_equal> closed_;
 };
 
 using Result = std::vector<std::tuple<std::unique_ptr<const PackedAutomaton>, Provenance, std::size_t>>;
