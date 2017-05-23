@@ -63,8 +63,8 @@ public:
 	bool offer(unique_ptr<const PackedAutomaton> a, Provenance p, std::size_t automatonHash = 0) {
 		//Empty automata can't be usefully combined, so no reason to store them.
 		//TODO: isEmpty() isn't const, so we can't call it here.
-		//TODO: we know/assume the automata are minimal here, no reason to iterate
-		if (a->edge_size() == 0) return false;
+		//We know the automata are minimal here; check states, not edges.
+		if (a->state_size() <= 1) return false;
 		//TODO: we could compute the hash in the worker thread instead if there
 		//were a way to provide it to the hash table
 		if (closed_.count(a.get())) return false;
