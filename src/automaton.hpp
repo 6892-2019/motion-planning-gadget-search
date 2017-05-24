@@ -678,52 +678,112 @@ public:
 
 	void determinize() {
 		if (deterministic()) return;
-		//We manually sort before inserting in newstate.
-		//Unfortunately there's no small_flat_set...
-		//TODO: use StateSet!
-		using state_set = small_vector<state_type, 4>;
-		auto hasher = [](const state_set& set) {
-			//could be std::accumulate, I guess
-			std::size_t accum = 0;
-			for (state_type t : set)
-				accum = accum * 17 + t;
-			return accum;
+		const int DETERMINIZE_PAGE_SIZE = 4096, DETERMINIZE_PAGE_UNITS = DETERMINIZE_PAGE_SIZE/sizeof(state_type);
+		//manages page lifetime: free them all at the end
+		small_vector<std::unique_ptr<state_type, free_deleter>, 8> page_handles;
+		page_handles.emplace_back(static_cast<state_type*>(std::malloc(DETERMINIZE_PAGE_SIZE)));
+		//points to the start of the current set
+		state_type* alloc_next = page_handles.front().get();
+		//points past the end of the current set (next append slot)
+		state_type* alloc_cur = alloc_next;
+		//points to the end of the current page
+		state_type* alloc_page_end = page_handles.front().get()+DETERMINIZE_PAGE_UNITS;
+		auto set_append = [&](state_type state) {
+			if (alloc_cur == alloc_page_end) {
+				if (alloc_next == page_handles.back().get()) {
+					//TODO: realloc this set into a double-sized page (then skip the below new-page alloc)
+					std::cout << "set size of full page\n";
+					std::terminate();
+				}
+				//TODO: if we're allocating lots of pages, may want to start doubling size
+				page_handles.emplace_back(static_cast<state_type*>(std::malloc(DETERMINIZE_PAGE_SIZE)));
+				//copy the current partial set into the new page
+				state_type* next_next = page_handles.back().get();
+				state_type* next_cur = std::copy(alloc_next, alloc_cur, next_next);
+				alloc_next = next_next;
+				alloc_cur = next_cur;
+				alloc_page_end = alloc_next + DETERMINIZE_PAGE_UNITS;
+			}
+			++(*alloc_next); //increment size first
+			//If we're appending the 0 size of a new set, this write clobbers
+			//the previous increment (on purpose).
+			*alloc_cur++ = state;
+		};
+		set_append(0); //each set begins with a size
+		auto commit_set = [&]() -> state_type* {
+			state_type* set_start = alloc_next;
+			alloc_next = alloc_cur;
+			set_append(0); //size of the next set
+			return set_start;
+		};
+		auto clear_set = [&]() {
+			*alloc_next = 0; //reset the size
+			alloc_cur = alloc_next+1;
 		};
 
-		//0 bucket count is fine: http://stackoverflow.com/q/14179441/3614835
-		std::unordered_map<state_set, state_type, decltype(hasher)> newstate(0, hasher);
-		//pointers to keys in newstate
-		std::stack<const typename decltype(newstate)::value_type*> worklist;
+		auto set_begin = [](state_type* set) {
+			return set+1;
+		};
+		auto set_end = [&](state_type* set) {
+			return set_begin(set) + *set;
+		};
+		auto set_size = [&](state_type* set) {
+			assert(*set == numeric_cast<state_type>(set_end(set) - set_begin(set)));
+			return *set;
+		};
+
+		auto set_equal = [&](state_type* left, state_type* right) {
+			//TODO: this could be *left == *right && !memcmp(left, right, *left + 1);
+			//^we have to check the size first so we don't read off the end of a page
+			return std::equal(set_begin(left), set_end(left), set_begin(right), set_end(right));
+		};
+		auto set_hash = [](state_type* set) {
+			//this includes the size of the set as the first element of the hash
+			return farmhash::Hash(reinterpret_cast<char*>(set), (*set + 1) * sizeof(*set));
+		};
+		state_type empty_set = 0; //a "set" with just a size 0; empty sets represent crashes, so we'll never insert one
+		google::dense_hash_map<state_type*, state_type,
+				decltype(std::ref(set_hash)), decltype(std::ref(set_equal))> newstate(state_size(),
+				std::ref(set_hash), std::ref(set_equal));
+		newstate.set_empty_key(&empty_set);
+		std::stack<std::pair<state_type*, state_type>> worklist; //TODO: maybe based on small_vector<16ish>?
+
+		//TODO: I can't see any way to do this in-place, but it might be better
+		//to store an edge list instead, clear, and commit back into *this.
+		//If we're going to minimize, we might be able to pass that edge list
+		//directly to HopcroftMinimizer, too.
 		Automaton a;
 		a.addState();
-		auto iterSucc = newstate.insert(std::make_pair(state_set({0}), 0));
-		assert(iterSucc.second);
-		worklist.push(&*(iterSucc.first));
+		set_append(0);
+		state_type* first_set = commit_set();
+		newstate.insert({first_set, 0});
+		worklist.push({first_set, 0});
 
 		while (!worklist.empty()) {
-			auto current = worklist.top();
+			auto [current_set, current_state] = worklist.top();
 			worklist.pop();
+			a.setAccept(current_state, std::any_of(set_begin(current_set), set_end(current_set),
+					[this](state_type s) {return this->accept(s);}));
 
-			a.accept_[current->second] = std::any_of(current->first.begin(), current->first.end(),
-					[this](state_type state) {return this->accept_[state];});
-
-			state_set next;
-			for (symbol_type s = 0; s < AlphabetSize; ++s) {
-				next.clear();
-				for (state_type f : current->first)
+			//TODO: it may be better to build one set per symbol in parallel here,
+			//so we can use for_each_transition, avoiding repeated scans over the edges
+			for (symbol_type s = 0; s < alphabet_size(); ++s) {
+				for (state_type f : make_range_for_pair(set_begin(current_set), set_end(current_set)))
 					for (state_type t : step(f, s))
-						if (std::find(next.begin(), next.end(), t) == next.end())
-							next.push_back(t);
-				if (next.empty())
+						set_append(t);
+				std::sort(set_begin(alloc_next), set_end(alloc_next));
+				state_type* new_set_end = std::unique(set_begin(alloc_next), set_end(alloc_next));
+				*alloc_next = numeric_cast<state_type>(new_set_end - set_begin(alloc_next));
+				alloc_cur = new_set_end;
+				if (!set_size(alloc_next))
 					continue; //all NFA states crashed
-				std::sort(next.begin(), next.end());
-				//TODO: is there a computeIfAbsent equivalent?
-				auto it = newstate.find(next);
+				auto it = newstate.find(alloc_next);
 				if (it == newstate.end()) {
-					it = newstate.insert(std::make_pair(std::move(next), a.addState())).first;
-					worklist.push(&*it);
-				}
-				a.addTrans(current->second, s, it->second);
+					it = newstate.insert({commit_set(), a.addState()}).first;
+					worklist.push(*it);
+				} else
+					clear_set();
+				a.addTrans(current_state, s, it->second);
 				assert(a.deterministic());
 			}
 		}

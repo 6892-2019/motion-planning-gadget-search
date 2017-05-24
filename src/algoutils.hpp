@@ -180,5 +180,14 @@ struct indirect_hash {
 		return std::hash<T>()(*p);
 	}
 };
+
+
+struct free_deleter {
+	constexpr free_deleter() noexcept = default;
+	template<typename T>
+	void operator()(T* ptr) noexcept {
+		std::free(ptr);
+	}
+};
 #endif /* ALGOUTILS_HPP */
 
