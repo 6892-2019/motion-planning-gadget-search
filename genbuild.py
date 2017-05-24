@@ -10,10 +10,11 @@ globals.update({
   'builddir': 'build/$config/',
   'src_dir': 'src/',
   'test_dir': 'test/',
+  'vendor_dir': 'vendor/',
   'ldflags': '-u malloc -ljemalloc_pic -lc -lpthread',
 })
 # must be inserted after its references
-globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem ../vta/include/'
+globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem vendor/'
 globals['testldflags'] = '$ldflags -lgtest -lgtest_main'
 
 debug_cfg = {'config': 'debug', 'optflags': '-g -O0 -march=native -gsplit-dwarf -fdebug-types-section -grecord-gcc-switches'}
@@ -58,6 +59,18 @@ for config in configs:
             src_objects[rel].append(object)
     buildfile.write('\n')
 
+    vendor_objects = []
+    for subdir, dirs, files in os.walk('vendor/'):
+      for f in files:
+        if f.endswith('.cpp'):
+          source = os.path.join(subdir, f)
+          rel = os.path.relpath(source, 'test/')
+          object = "$builddir/$vendor_dir/" + rel[:-4] + '.o'
+          buildfile.write('build {} : cxx {} | $pch_target\n'.format(object, source))
+          vendor_objects.append(object)
+    buildfile.write('\n')
+
+    src_objects['.'].extend(vendor_objects)
     src_objects['.'].append(pch_inst_target)
     src_objects_str = ' '.join(src_objects['.'])
     del src_objects['.']

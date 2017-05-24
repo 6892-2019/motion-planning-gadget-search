@@ -17,6 +17,10 @@ bool operator==(const PackedAutomaton& left, const PackedAutomaton& right) {
 	auto lb = left.storage_begin(), le = left.storage_end(), rb = right.storage_begin(), re = right.storage_end();
 	return (le - lb) == (re - rb) && std::memcmp(lb, rb, le - lb) == 0;
 }
+std::size_t PackedAutomaton::packed_hash() const {
+	auto begin = storage_begin(), end = storage_end();
+	return farmhash::Hash(reinterpret_cast<const char*>(begin), std::distance(begin, end));
+}
 
 namespace detail {
 //TODO: I'd love to make this a variadic template (over the impl types), but I don't know how

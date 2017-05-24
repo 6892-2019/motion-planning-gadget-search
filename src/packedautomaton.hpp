@@ -60,13 +60,7 @@ class PackedAutomaton : public ImmutableAutomaton {
 	friend struct std::hash<PackedAutomaton>;
 	friend bool operator==(const PackedAutomaton& left, const PackedAutomaton& right);
 public:
-	std::size_t packed_hash() const {
-		//TODO: better hash function
-		std::size_t h = 13;
-		for (unsigned char b : make_range_for_pair(storage_begin(), storage_end()))
-			h = 31*h + b;
-		return h;
-	}
+	std::size_t packed_hash() const;
 };
 inline bool operator!=(const PackedAutomaton& left, const PackedAutomaton& right) {
 	return !(left == right);
