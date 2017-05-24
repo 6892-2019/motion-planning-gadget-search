@@ -562,3 +562,8 @@ TEST(AutomatonTest, ActiveAlphabet) {
 	EXPECT_EQ(a.active_alphabet_size(), 2);
 	EXPECT_EQ(active.size(), 2);
 }
+
+TEST(AutomatonTest, WorkingHash) {
+	auto a = alt(lit<4>(0, 1, 2, 3), lit<4>(3, 1, 2, 0));
+	EXPECT_EQ(a.working_hash(), std::hash<decltype(a)>()(a));
+}

@@ -2134,7 +2134,7 @@ namespace std {
 template<unsigned int N>
 struct hash<automaton::Automaton<N>> {
 	size_t operator()(const automaton::Automaton<N>& a) const {
-		return a.hash();
+		return a.working_hash();
 	}
 };
 } //namespace std
