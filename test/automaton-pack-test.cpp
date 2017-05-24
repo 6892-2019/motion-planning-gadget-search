@@ -53,6 +53,11 @@ void test_pack(Automaton<N> a) {
 	pack_impl_test<detail::Small8OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Medium8OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Large8OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Diminutive8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Tiny8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Small8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Medium8BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Large8BitmaskPackedAutomaton>(a);
 }
 } //anonymous namespace
 
@@ -76,4 +81,15 @@ TEST(AutomatonTest, Pack1) {
 }
 TEST(AutomatonTest, PackDistinguishesAlphabetSize) {
 	EXPECT_NE(*pack(canonicalize(lit<2>(0))), *pack(canonicalize(lit<8>(0))));
+}
+
+TEST(AutomatonTest, Roundtrip) {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	shuf.canonicalize();
+	std::unique_ptr<const PackedAutomaton> packed = pack(shuf);
+	Automaton<4> inflated(*packed);
+	ASSERT_EQ(inflated, shuf);
 }

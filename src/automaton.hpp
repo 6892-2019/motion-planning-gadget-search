@@ -29,6 +29,7 @@ class WorkingAutomaton : public AutomatonBase {
 };
 
 using state_type = AutomatonBase::state_type;
+using symbol_type = AutomatonBase::symbol_type;
 using state_pair = std::pair<state_type, state_type>;
 //We can't templatize this together with the other maps because dense_hash_map
 //needs set_empty_key.
@@ -164,6 +165,69 @@ SymbolSet set_of_indices(automaton::bitset<N> mask) {
 			set.insert_absent(s);
 	return set;
 }
+
+template<typename Iter>
+struct LazyEdgeEnumerator {
+	dynarray<state_type> renumbering; //TODO: make this a view into a big array preinitialized to max()
+	std::queue<symbol_type> queue; //TODO: queue's not great
+	state_type idx = 0; //the order in which things are visited
+	state_type cur; //the state currently being visited
+	symbol_type a = 0; //the next symbol to be (after permutation) stepped with
+	Iter alphabetPerm;
+	bool shouldResume = false;
+	const AutomatonBase* b;
+	LazyEdgeEnumerator(Iter perm, const AutomatonBase* automaton) : renumbering(automaton->state_size()), alphabetPerm(perm), b(automaton) {
+		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
+		renumbering[0] = idx++;
+		queue.push(0);
+	}
+	std::tuple<state_type, state_type, symbol_type> operator()() {
+		if (shouldResume)
+			goto resume;
+		while (!queue.empty()) {
+			cur = queue.front();
+			queue.pop();
+			for (a = 0; a < b->alphabet_size(); ++a) {
+				if (auto dest = b->stepDeterministic(cur, alphabetPerm[a])) {
+					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
+						renumbering[*dest] = idx++;
+						queue.push(*dest);
+					}
+					shouldResume = true;
+					return {renumbering[cur], renumbering[*dest], a};
+					//logically resume: goes here, but that would be an
+					//error because dest is in scope, even if unused
+				}
+				resume: ;
+			}
+		}
+		shouldResume = false;
+		return {std::numeric_limits<state_type>::max(), std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max()};
+	}
+	void runToCompletion() {
+		if (shouldResume)
+			goto resume;
+		while (!queue.empty()) {
+			cur = queue.front();
+			queue.pop();
+			for (a = 0; a < b->alphabet_size(); ++a) {
+				if (auto dest = b->stepDeterministic(cur, alphabetPerm[a])) {
+					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
+						renumbering[*dest] = idx++;
+						queue.push(*dest);
+					}
+				}
+				resume: ;
+			}
+		}
+		assert(idx == b->state_size());
+		assert(!std::count(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max()));
+	}
+	bool finished() const {
+		//finished the outer loop and the inner loop
+		return queue.empty() && a >= b->alphabet_size();
+	}
+};
 } //namespace detail
 
 
@@ -188,6 +252,21 @@ public:
 	 * but we should add assertions to make it explicit
 	 */
 	Automaton() : deterministic_(true), minimal_(false), canonical_(false) {}
+	Automaton(const AutomatonBase& a) : deterministic_(false), minimal_(false), canonical_(false) {
+		reserve(a.state_size());
+		for (state_type s = 0; s < a.state_size(); ++s) {
+			addState();
+			setAccept(s, a.accept(s));
+		}
+		a.for_each_transition([&](state_type from, symbol_type on, state_type to) {
+			addTrans(from, on, to);
+		});
+		deterministic_ = a.deterministic();
+		minimal_ = a.minimal();
+		canonical_ = a.canonical();
+		if (canonical())
+			prepareForEquals();
+	}
 	Automaton(const Automaton& a) = default;
 	Automaton(Automaton&& a) = default;
 	Automaton& operator=(const Automaton& a) = default;
@@ -750,37 +829,6 @@ public:
 		minimal_ = true;
 	}
 
-private:
-	template<typename Iter>
-	void findCanonicalStateNumbering(Iter alphabetPerm, dynarray<state_type>& renumbering,
-			dynarray<std::tuple<state_type, state_type, symbol_type>>& renumberedTransitionList) {
-		//The numbering, chosen as the vistation order of the states.  Because
-		//we're using a FIFO queue, we can assign a visit number as we put the
-		//state in the queue, so the numbering also doubles as the closed set.
-		//(Once we queue something, any later queuing won't be the first visit
-		//of that vertex.)
-		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
-		std::queue<symbol_type> queue;
-		state_type idx = 0, transIdx = 0;
-		renumbering[0] = idx++;
-		queue.push(0);
-		while (!queue.empty()) {
-			state_type cur = queue.front();
-			queue.pop();
-			for (symbol_type a = 0; a < alphabet_size(); ++a) {
-				if (auto dest = stepDeterministic(cur, alphabetPerm[a])) {
-					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
-						renumbering[*dest] = idx++;
-						queue.push(*dest);
-					}
-					renumberedTransitionList[transIdx++] = {renumbering[cur], renumbering[*dest], a};
-				}
-			}
-		}
-		assert(idx == state_size());
-		assert(transIdx == transition_size());
-		assert(!std::count(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max()));
-	}
 public:
 	/**
 	 * Renumbers states to bring this automaton into a canonical form. Canonical
@@ -794,13 +842,9 @@ public:
 		}
 		minimize();
 
-		dynarray<state_type> renumbering(state_size());
-		//In theory, the compiler is allowed to eliminate all writes to this
-		//allocation because it's never read, and then the allocation itself can
-		//be elided.
-		dynarray<std::tuple<state_type, state_type, symbol_type>> transitions(transition_size());
-		findCanonicalStateNumbering(identity_permutation(), renumbering, transitions);
-		renumberStates(renumbering.begin());
+		detail::LazyEdgeEnumerator<identity_permutation> enumerator{identity_permutation(), this};
+		enumerator.runToCompletion();
+		renumberStates(enumerator.renumbering.begin());
 		prepareForEquals();
 		canonical_ = true;
 	}
@@ -818,23 +862,28 @@ public:
 		//language.
 		minimize();
 
-		dynarray<state_type> leastStates(state_size()), workingStates(state_size());
-		dynarray<std::tuple<state_type, state_type, symbol_type>> leastTrans(transition_size()), workingTrans(transition_size());
-		auto i = alphabetPermsBegin, best = i;
 		using automaton::detail::begin;
-		using std::swap;
-		findCanonicalStateNumbering(begin(*i++), leastStates, leastTrans);
-		while (i != alphabetPermsEnd) {
-			auto cur = i++;
-			findCanonicalStateNumbering(begin(*cur), workingStates, workingTrans);
-			if (std::lexicographical_compare(workingTrans.begin(), workingTrans.end(),
-					leastTrans.begin(), leastTrans.end())) {
-				swap(workingTrans, leastTrans);
-				swap(workingStates, leastStates);
-				best = cur;
+		std::vector<detail::LazyEdgeEnumerator<decltype(begin(*alphabetPermsBegin))>> enumerators;
+		enumerators.reserve(std::distance(alphabetPermsBegin, alphabetPermsEnd));
+		for (auto perm : make_range_for_pair(alphabetPermsBegin, alphabetPermsEnd))
+			enumerators.emplace_back(begin(perm), this);
+
+		while (enumerators.size() > 1 && !enumerators[0].finished()) {
+			decltype(enumerators[0]()) leastEdge{std::numeric_limits<state_type>::max(),
+					std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max()};
+			for (auto i = enumerators.size(); i-- > 0;) {
+				auto edge = enumerators[i]();
+				if (edge > leastEdge)
+					enumerators.erase(enumerators.begin()+i);
+				else if (edge < leastEdge) {
+					leastEdge = edge;
+					enumerators.erase(enumerators.begin()+i+1, enumerators.end());
+				}
 			}
 		}
-		renumber(leastStates.begin(), begin(*best));
+		//there may be multiple enumerators remaining, but they are equivalent
+		enumerators[0].runToCompletion();
+		renumber(enumerators[0].renumbering.begin(), begin(enumerators[0].alphabetPerm));
 		prepareForEquals();
 		canonical_ = true;
 	}
