@@ -126,7 +126,7 @@ public:
 	AutomatonBase::StateSet destinations(state_type state) const override {
 		StateSet ret;
 		for (StateSizeType s : make_range_for_pair(destinations_begin(state), destinations_end(state)))
-			ret.insert_absent(s);
+			ret.insert(s);
 		return ret;
 	}
 
@@ -310,7 +310,7 @@ public:
 	AutomatonBase::StateSet destinations(state_type state) const override {
 		StateSet ret;
 		for (StateSizeType s : make_range_for_pair(destinations_begin(state), destinations_end(state)))
-			ret.insert_absent(s);
+			ret.insert(s);
 		return ret;
 	}
 

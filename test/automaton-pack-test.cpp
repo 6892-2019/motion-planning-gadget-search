@@ -93,3 +93,15 @@ TEST(AutomatonTest, Roundtrip) {
 	Automaton<4> inflated(*packed);
 	ASSERT_EQ(inflated, shuf);
 }
+
+TEST(AutomatonTest, PackDestinations) {
+	Automaton<4> a;
+	a.addState();
+	a.addState();
+	a.setAccept(1);
+	a.addTrans(0, 0, 1);
+	a.addTrans(0, 1, 1);
+	a.addTrans(0, 3, 1);
+	a.canonicalize();
+	test_pack(a);
+}
