@@ -343,6 +343,10 @@ void registrar_thread(int core_number) {
 }
 
 int main(int argc, char* argv[]) {
+	char hostname[64];
+	gethostname(hostname, sizeof(hostname));
+	std::cout << "running on " << hostname << "\n";
+
 	std::vector<std::string> tokens;
 	boost::algorithm::split(tokens, argv[1], boost::algorithm::is_any_of(","));
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
