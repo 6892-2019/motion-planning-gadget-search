@@ -41,7 +41,13 @@ static std::vector<Target> targets;
 static bounded_queue<std::function<void()>> issue(4*std::thread::hardware_concurrency());
 static bounded_queue<Result> retire(4*std::thread::hardware_concurrency());
 
+constexpr static unsigned int prepare_size = 10000, max_state_cutoff = 100;
 void finish(automaton_type thing, Provenance provenance, Result& finishArg) {
+	thing.minimize();
+	if (registry.registered_size() >= prepare_size && thing.state_size() > max_state_cutoff)
+		return;
+
+	thing.canonicalize();
 	std::unique_ptr<const PackedAutomaton> packed = pack(thing);
 	std::size_t hash = packed->packed_hash();
 
@@ -102,9 +108,6 @@ private:
 				automaton_type rm = ra;
 				rm.renumberAlphabet(sliderotate);
 				automaton_type combined = automaton::shuffleAccept(lm, rm);
-				combined.minimize();
-				canonicalize(combined, leftLocations + rightLocations);
-				//TODO: only do this immediately before offer (make Gadget::a_ non-const, or something)
 				finish(std::move(combined), Provenance(l, ll, leftMirror, r, rl, rightMirror,
 						//TODO: make a reasoned choice for this function
 						std::max(registry.provenance(l).generation, registry.provenance(r).generation)+1),
@@ -215,7 +218,6 @@ private:
 					//minimize again; any two equivalent states would differ only in
 					//the symbols we deleted, but those symbols were inactive.
 				}
-				canonicalize(op, static_cast<std::uint32_t>(active.size()));
 				finish(std::move(op), Provenance(gadgetIndex, l, c, mirrored, registry.provenance(gadgetIndex).generation+1), finishArg);
 			}
 		}
