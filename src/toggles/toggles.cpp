@@ -240,8 +240,11 @@ void registrar_thread(int core_number) {
 	auto is_connectible = [](unsigned int locations) {
 		return locations > 3;
 	};
+	automaton_type::state_type maxregisteredstates = 0;
 	auto try_issue_combine = [&]() {
 		auto [pack, index] = registry.register_next();
+		if (index >= 10000)
+			maxregisteredstates = std::max(maxregisteredstates, pack->state_size());
 		unsigned int locations = pack->active_alphabet_size();
 		if (is_connectible(locations))
 			connectibles.emplace_back(pack, index);
@@ -259,18 +262,23 @@ void registrar_thread(int core_number) {
 		++inflight;
 	};
 	automaton_type::state_type maxstates = 0;
-	std::size_t maxedges = 0, maxtransitions = 0, totaledges = 0, totaltransitions = 0;
+	std::size_t totalstates = 0, maxedges = 0, maxtransitions = 0, totaledges = 0, totaltransitions = 0;
 	auto do_retire = [&]() {
 		Result res = retire.take();
 		--inflight;
 		for (auto& [pack, provenance, unused] : res) { //can't use [[maybe_unused]] in decomposition declarations
 			//TODO: collecting these stats from packed form may be slow
-			maxstates = std::max(maxstates, pack->state_size());
-			totaledges += pack->edge_size();
-			maxedges = std::max(maxedges, pack->edge_size());
-			totaltransitions += pack->transition_size();
-			maxtransitions = std::max(maxtransitions, pack->transition_size());
-			registry.offer(std::move(pack), provenance);
+			auto thesestates = pack->state_size();
+			auto theseedges = pack->edge_size();
+			auto thesetransitions = pack->transition_size();
+			if (registry.offer(std::move(pack), provenance)) {
+				totalstates += thesestates;
+				maxstates = std::max(maxstates, thesestates);
+				totaledges += theseedges;
+				maxedges = std::max(maxedges, theseedges);
+				totaltransitions += thesetransitions;
+				maxtransitions = std::max(maxtransitions, thesetransitions);
+			}
 		}
 	};
 
@@ -321,7 +329,8 @@ void registrar_thread(int core_number) {
 					<< hms(elapsed) << " elapsed, " << hms(userSeconds) << " user (" << efficiency << "), "
 					<< gb << " GiB"
 					<< ", " << maxstates << " maxstates, " << maxedges << " maxedges, " << maxtransitions << " maxtransitions, "
-					<< totaledges << " totaledges, " << totaltransitions << " totaltransitions"
+					<< totalstates << " totalstates, " << totaledges << " totaledges, " << totaltransitions << " totaltransitions"
+					<< ", " << maxregisteredstates << " maxregisteredstates"
 					<< std::endl;
 			lastReport = now;
 		}
