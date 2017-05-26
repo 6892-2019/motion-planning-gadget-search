@@ -44,6 +44,17 @@ std::unique_ptr<const PackedAutomaton> make_best_pack(const AutomatonBase& a) {
 	MAKE_BEST_PACK_ATTEMPT(Small8BitmaskPackedAutomaton)
 	MAKE_BEST_PACK_ATTEMPT(Medium8BitmaskPackedAutomaton)
 	MAKE_BEST_PACK_ATTEMPT(Large8BitmaskPackedAutomaton)
+
+	MAKE_BEST_PACK_ATTEMPT(Diminutive16OffsetPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Tiny16OffsetPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Small16OffsetPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Medium16OffsetPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Large16OffsetPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Diminutive16BitmaskPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Tiny16BitmaskPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Small16BitmaskPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Medium16BitmaskPackedAutomaton)
+	MAKE_BEST_PACK_ATTEMPT(Large16BitmaskPackedAutomaton)
 	return make_fn(a);
 }
 }

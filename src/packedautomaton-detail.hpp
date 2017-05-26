@@ -22,6 +22,14 @@ struct ReinterpretWriter {
 	}
 };
 
+template<typename T>
+T load(const T* ptr) {
+	//dance around alignment restrictions
+	T thing;
+	memcpy(&thing, ptr, sizeof(T));
+	return thing;
+}
+
 /**
  * Stores the accept bit in the high bit of the offset.
  */
@@ -70,28 +78,28 @@ public:
 	}
 
 	state_type state_size() const override {
-		return *reinterpret_cast<const StateSizeType*>(storage_begin());
+		return load(reinterpret_cast<const StateSizeType*>(storage_begin()));
 	}
 	symbol_type alphabet_size() const override {
-		return *(storage_begin() + sizeof(StateSizeType));
+		return load(storage_begin() + sizeof(StateSizeType));
 	}
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
-		for (OutgoingMaskType m : make_range_for_pair(outgoing_begin(), outgoing_end()))
-			mask |= m; //in theory, we could short-circuit if all bits are set
+		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+			mask |= load(p); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask);
 	}
 	AutomatonBase::state_type accept_size() const override {
 		state_type count = 0;
-		for (OffsetType o : make_range_for_pair(offsets_begin(), offsets_end()))
-			count += (o >> (limits<OffsetType>::digits - 1)); //1 if the top bit is set, else 0
+		for (auto p = offsets_begin(); p != offsets_end(); ++p)
+			count += (load(p) >> (limits<OffsetType>::digits - 1)); //1 if the top bit is set, else 0
 		return count;
 	}
 	std::size_t transition_size() const override {
 		std::size_t count = 0;
 		//TODO: make this vectorizable/unrollable, not byte-at-a-time
-		for (OutgoingMaskType m : make_range_for_pair(outgoing_begin(), outgoing_end()))
-			count += __builtin_popcount(m);
+		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+			count += __builtin_popcount(load(p));
 		return count;
 	}
 	bool deterministic() const override {return true;}
@@ -113,7 +121,7 @@ public:
 		if (!(outgoing & (1u << symbol))) return std::nullopt;
 		//how many symbols came before
 		auto suboffset = count_set_left(outgoing, symbol);
-		return *(destinations_begin(state) + suboffset);
+		return load(destinations_begin(state) + suboffset);
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
 		SymbolSet ret;
@@ -125,8 +133,8 @@ public:
 	}
 	AutomatonBase::StateSet destinations(state_type state) const override {
 		StateSet ret;
-		for (StateSizeType s : make_range_for_pair(destinations_begin(state), destinations_end(state)))
-			ret.insert(s);
+		for (auto p = destinations_begin(state), q = destinations_end(state); p != q; ++p)
+			ret.insert(load(p));
 		return ret;
 	}
 
@@ -147,7 +155,7 @@ private:
 		return outgoing_begin() + state_size();
 	}
 	OutgoingMaskType outgoing_mask(state_type state) const {
-		return outgoing_begin()[state];
+		return load(outgoing_begin() + state);
 	}
 
 	const OffsetType* offsets_begin() const {
@@ -157,7 +165,7 @@ private:
 		return offsets_begin() + state_size();
 	}
 	OffsetType offset(state_type state) const {
-		return offsets_begin()[state];
+		return load(offsets_begin() + state);
 	}
 
 	const StateSizeType* destinations_begin(state_type state) const {
@@ -195,6 +203,11 @@ using Tiny8OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned char, unsigned
 using Small8OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
 using Medium8OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
 using Large8OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+using Diminutive16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+using Tiny16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+using Small16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+using Medium16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+using Large16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
 
 /**
  * Stores the accept bit in a bitmask between the outgoing masks and the offset.
@@ -254,28 +267,27 @@ public:
 	}
 
 	state_type state_size() const override {
-		return *reinterpret_cast<const StateSizeType*>(storage_begin());
+		return load(reinterpret_cast<const StateSizeType*>(storage_begin()));
 	}
 	symbol_type alphabet_size() const override {
-		return *(storage_begin() + sizeof(StateSizeType));
+		return load(storage_begin() + sizeof(StateSizeType));
 	}
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
-		for (OutgoingMaskType m : make_range_for_pair(outgoing_begin(), outgoing_end()))
-			mask |= m; //in theory, we could short-circuit if all bits are set
+		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+			mask |= load(p); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask);
 	}
 	AutomatonBase::state_type accept_size() const override {
 		state_type count = 0;
-		for (unsigned char o : make_range_for_pair(accepts_begin(), accepts_end()))
-			count += __builtin_popcount(o);
+		for (auto p = accepts_begin(); p != accepts_end(); ++p)
+			count += __builtin_popcount(load(p));
 		return count;
 	}
 	std::size_t transition_size() const override {
 		std::size_t count = 0;
-		//TODO: make this vectorizable/unrollable, not byte-at-a-time
-		for (OutgoingMaskType m : make_range_for_pair(outgoing_begin(), outgoing_end()))
-			count += __builtin_popcount(m);
+		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+			count += __builtin_popcount(load(p));
 		return count;
 	}
 	bool deterministic() const override {return true;}
@@ -297,7 +309,7 @@ public:
 		if (!(outgoing & (1u << symbol))) return std::nullopt;
 		//how many symbols came before
 		auto suboffset = count_set_left(outgoing, symbol);
-		return *(destinations_begin(state) + suboffset);
+		return load(destinations_begin(state) + suboffset);
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
 		SymbolSet ret;
@@ -309,8 +321,8 @@ public:
 	}
 	AutomatonBase::StateSet destinations(state_type state) const override {
 		StateSet ret;
-		for (StateSizeType s : make_range_for_pair(destinations_begin(state), destinations_end(state)))
-			ret.insert(s);
+		for (auto p = destinations_begin(state), q = destinations_end(state); p != q; ++p)
+			ret.insert(load(p));
 		return ret;
 	}
 
@@ -331,7 +343,7 @@ private:
 		return outgoing_begin() + state_size();
 	}
 	OutgoingMaskType outgoing_mask(state_type state) const {
-		return outgoing_begin()[state];
+		return load(outgoing_begin() + state);
 	}
 
 	const unsigned char* accepts_begin() const {
@@ -348,7 +360,7 @@ private:
 		return offsets_begin() + state_size();
 	}
 	OffsetType offset(state_type state) const {
-		return offsets_begin()[state];
+		return load(offsets_begin() + state);
 	}
 
 	const StateSizeType* destinations_begin(state_type state) const {
@@ -390,11 +402,18 @@ using Tiny8BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned char, unsign
 using Small8BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
 using Medium8BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
 using Large8BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+using Diminutive16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+using Tiny16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+using Small16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+using Medium16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+using Large16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
 
 template<class A>
 std::unique_ptr<const PackedAutomaton> make_pack(const AutomatonBase& a) {
 	void* storage = operator new(sizeof(A) + A::extra_storage(a));
 	auto* p = new (storage) A(a);
+	//TODO: in debugging builds, allocate a few extra words, pre-fill at the end,
+	//and assert that exactly the right number of bytes were modified
 	return std::unique_ptr<const PackedAutomaton>(p);
 }
 

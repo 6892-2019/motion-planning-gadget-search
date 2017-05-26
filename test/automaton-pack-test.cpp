@@ -58,6 +58,46 @@ void test_pack(Automaton<N> a) {
 	pack_impl_test<detail::Small8BitmaskPackedAutomaton>(a);
 	pack_impl_test<detail::Medium8BitmaskPackedAutomaton>(a);
 	pack_impl_test<detail::Large8BitmaskPackedAutomaton>(a);
+
+	pack_impl_test<detail::Diminutive16OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Tiny16OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Small16OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Medium16OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Large16OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Diminutive16BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Tiny16BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Small16BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Medium16BitmaskPackedAutomaton>(a);
+	pack_impl_test<detail::Large16BitmaskPackedAutomaton>(a);
+}
+
+template<unsigned int N>
+void test_pack_if_representable(Automaton<N> a) {
+	a.canonicalize();
+#define TEST_PACK_IF_REPRESENTABLE(IMPL) if (IMPL::can_represent(a)) \
+											pack_impl_test<IMPL>(a);
+	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive8OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Tiny8OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Small8OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Medium8OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Large8OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive8BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Tiny8BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Small8BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Medium8BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Large8BitmaskPackedAutomaton)
+
+	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive16OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Tiny16OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Small16OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Medium16OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Large16OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive16BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Tiny16BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Small16BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Medium16BitmaskPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Large16BitmaskPackedAutomaton)
+#undef TEST_PACK_IF_REPRESENTABLE
 }
 } //anonymous namespace
 
