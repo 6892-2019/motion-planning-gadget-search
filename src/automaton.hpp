@@ -753,6 +753,7 @@ public:
 		//If we're going to minimize, we might be able to pass that edge list
 		//directly to HopcroftMinimizer, too.
 		Automaton a;
+		a.reserve(state_size()); //a reasonable lower bound for connected automata
 		a.addState();
 		set_append(0);
 		state_type* first_set = commit_set();
