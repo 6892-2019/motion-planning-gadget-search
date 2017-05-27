@@ -1768,17 +1768,6 @@ private:
 		}
 	}
 
-	friend std::ostream& operator<<(std::ostream& o, const Automaton& a) {
-		o << a.state_size() << " states, " << a.edge_size() << " transitions, "
-				<< (a.deterministic() ? "" : "non") << "deterministic\n";
-		for (state_type i = 0; i < a.state_size(); ++i) {
-			o << "state " << i << (a.accept_[i] ? " [accept]:\n" : ":\n");
-			for (const Transition& t : a.transitions_[i])
-				o << "  to " << t.next_ << " on " << t.symbols_ << '\n';
-		}
-		return o;
-	}
-
 	//Friend these to let them set minimal_ and canonical_.
 	template<unsigned int N>
 	friend Automaton<N> empty();

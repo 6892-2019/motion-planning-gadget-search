@@ -5,6 +5,14 @@
 using namespace automaton;
 
 namespace {
+std::string stringize(SymbolSet set) {
+	std::vector<std::string> strings;
+	set.sort();
+	for (auto s : set)
+		strings.push_back(boost::lexical_cast<std::string>(s));
+	return boost::algorithm::join(strings, ", ");
+}
+
 bool compare_working(const WorkingAutomaton& left, const WorkingAutomaton& right) {
 	assert(left.alphabet_size() == right.alphabet_size()); //should already have been checked in the caller
 	switch (left.alphabet_size()) {
@@ -85,6 +93,38 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 		return *l == *r;
 
 	return compare_slowpath(left, right);
+}
+
+std::ostream& operator<<(std::ostream& o, const AutomatonBase& a) {
+	o << a.state_size() << " states (" << a.accept_size() << " accepting), "
+			<< a.edge_size() << " edges, " << a.transition_size() << " transitions";
+	if (a.deterministic())
+		o << ", deterministic";
+	if (a.minimal())
+		o << ", minimal";
+	if (a.canonical())
+		o << ", canonical";
+	o << "\n";
+	o << a.alphabet_size() << " symbols, " << a.active_alphabet_size() << " active: "
+			//this is a bit wasteful: join a string only to print it
+			<< stringize(a.activeAlphabet()) << "\n";
+
+	auto length = boost::lexical_cast<std::string>(a.state_size() - 1).size();
+	auto leftpad = [length](auto thing) {
+		auto s = boost::lexical_cast<std::string>(thing);
+		while (s.size() < length)
+			s = " " + s; //waste
+		return s;
+	};
+
+	for (AutomatonBase::state_type i = 0; i < a.state_size(); ++i) {
+		o << "state " << leftpad(i) << (a.accept(i) ? " [accept]:\n" : ":\n");
+		for (auto p : a.edges(i)) {
+			p.first.sort();
+			o << "  to " << leftpad(p.second) << " on " << stringize(p.first) << "\n";
+		}
+	}
+	return o;
 }
 
 namespace detail {

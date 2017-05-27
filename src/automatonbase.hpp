@@ -290,26 +290,6 @@ public:
 	 */
 	std::size_t hash() const;
 
-	//TODO: we should have a sufficiently rich set of observer methods to
-	//implement printing just once for this interface
-//	friend std::ostream& operator<<(std::ostream& o, const AutomatonBase& a) {
-//		o << a.state_size() << " states, " << a.transition_size() << " transitions\n";
-//		//TODO: not sure if we're still tracking determinism or not
-////				<< (a.deterministic() ? "" : "non") << "deterministic\n";
-//		for (state_type i = 0; i < a.state_size(); ++i) {
-//			o << "state " << i << (a.accept(i) ? " [accept]:\n" : ":\n");
-//			//This is edge iteration: (next, symbol-set) pairs
-//			for (
-//		}
-//
-//		for (state_type i = 0; i < a.size(); ++i) {
-//			o << "state " << i << (a.accept_[i] ? " [accept]:\n" : ":\n");
-//			for (const Transition& t : a.transitions_[i])
-//				o << "  to " << t.next_ << " on " << t.symbols_ << '\n';
-//		}
-//		return o;
-//	}
-
 	/**
 	 * Returns an object of unspecified type that, when streamed to a
 	 * std::ostream, outputs a C++ expression that constructs an Automaton equal
@@ -325,6 +305,8 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right);
 inline bool operator!=(const AutomatonBase& left, const AutomatonBase& right) {
 	return !(left == right);
 }
+
+std::ostream& operator<<(std::ostream& o, const AutomatonBase& a);
 
 using SymbolSet = AutomatonBase::SymbolSet;
 using StateSet = AutomatonBase::StateSet;
