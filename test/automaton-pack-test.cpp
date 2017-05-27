@@ -2,6 +2,7 @@
 #include "automaton.hpp"
 #include "packedautomaton.hpp"
 #include "packedautomaton-detail.hpp"
+#include "automaton-io.hpp"
 #include "util.hpp"
 #include <gtest/gtest.h>
 
@@ -144,4 +145,8 @@ TEST(AutomatonTest, PackDestinations) {
 	a.addTrans(0, 3, 1);
 	a.canonicalize();
 	test_pack(a);
+}
+
+TEST(AutomatonTest, Pack2719215598098816079) {
+	test_pack_if_representable(*deserialize<16>("data/test/16-351-864-972-det-2719215598098816079.auto"));
 }
