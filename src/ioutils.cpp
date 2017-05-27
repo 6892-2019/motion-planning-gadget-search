@@ -9,6 +9,12 @@ std::vector<std::string> readAllLines(std::string filename) {
 	return ret;
 }
 
+void writeAllLines(std::string filename, const std::vector<std::string>& lines) {
+	std::ofstream file(filename);
+	for (const std::string& l : lines)
+		file << l << "\n";
+}
+
 bool removePrefix(std::string& str, std::experimental::string_view prefix) {
 	if (str.size() < prefix.size() ||
 			!std::equal(str.begin(), str.begin()+prefix.size(), prefix.begin(), prefix.end()))

@@ -19,6 +19,11 @@
 std::vector<std::string> readAllLines(std::string filename);
 
 /**
+ * Writes all lines in the given vector into a file at the given filename.
+ */
+void writeAllLines(std::string filename, const std::vector<std::string>& lines);
+
+/**
  * If the given string starts with the given prefix, erases that prefix.
  * @return true iff the prefix was present (and erased)
  */

@@ -189,5 +189,15 @@ struct free_deleter {
 		std::free(ptr);
 	}
 };
+
+
+template<class Target, class Source>
+[[nodiscard]] std::unique_ptr<Target> unique_cast(std::unique_ptr<Source>& p) {
+	return std::unique_ptr<Target>(static_cast<Target*>(p.release()));
+}
+template<class Target, class Source>
+[[nodiscard]] std::unique_ptr<Target> unique_cast(std::unique_ptr<Source>&& p) {
+	return std::unique_ptr<Target>(static_cast<Target*>(p.release()));
+}
 #endif /* ALGOUTILS_HPP */
 
