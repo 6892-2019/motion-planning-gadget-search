@@ -280,8 +280,6 @@ public:
 	//TODO: we can't use symbol_mask_type, but maybe we'll want an opaque token
 	//type to allow e.g. copying a set of transitions
 
-	//TODO: equality, somehow (false if alphabet sizes disagree)
-
 	/**
 	 * Computes a hash of this object suitable for comparison against other
 	 * hashes computed by this method, across all AutomatonBase implementations.
@@ -322,6 +320,11 @@ public:
 		return detail::AutomatonReprStreamer{*this};
 	}
 };
+
+bool operator==(const AutomatonBase& left, const AutomatonBase& right);
+inline bool operator!=(const AutomatonBase& left, const AutomatonBase& right) {
+	return !(left == right);
+}
 
 using SymbolSet = AutomatonBase::SymbolSet;
 using StateSet = AutomatonBase::StateSet;
@@ -375,11 +378,6 @@ inline bool operator!=(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 
 inline range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> AutomatonBase::edges(state_type from) const {
 	return make_range_for_pair(detail::EdgeRangeFront(this, from), detail::EdgeRangeSentinel(this, from));
-}
-
-bool operator==(const AutomatonBase& left, const AutomatonBase& right);
-inline bool operator!=(const AutomatonBase& left, const AutomatonBase& right) {
-	return !(left == right);
 }
 
 } //namespace automaton
