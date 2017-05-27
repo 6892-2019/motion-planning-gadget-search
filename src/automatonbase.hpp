@@ -360,6 +360,13 @@ inline range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> Automat
 	return make_range_for_pair(detail::EdgeRangeFront(this, from), detail::EdgeRangeSentinel(this, from));
 }
 
+
+class WorkingAutomaton : public AutomatonBase {
+	virtual std::size_t working_hash() const = 0;
+};
+
+std::unique_ptr<WorkingAutomaton> make_working(unsigned int size);
+
 } //namespace automaton
 
 #endif /* AUTOMATONBASE_HPP */

@@ -22,10 +22,6 @@ namespace automaton {
 template<unsigned int AlphabetSize>
 class Automaton;
 
-class WorkingAutomaton : public AutomatonBase {
-	virtual std::size_t working_hash() const = 0;
-};
-
 namespace detail {
 using state_type = AutomatonBase::state_type;
 using symbol_type = AutomatonBase::symbol_type;
@@ -2176,8 +2172,6 @@ private:
 };
 
 SCCs find_components(const AutomatonBase& a);
-
-std::unique_ptr<WorkingAutomaton> make_working(unsigned int size);
 
 } //namespace automaton
 
