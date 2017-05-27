@@ -339,27 +339,25 @@ class EdgeRangeSentinel {
 };
 
 class EdgeRangeFront {
-	EdgeRangeFront(const AutomatonBase* parent, AutomatonBase::state_type from) : parent_(parent), from_(from), cur_(findNextStartingAt(0)) {}
+	EdgeRangeFront(const AutomatonBase* parent, AutomatonBase::state_type from) :
+			parent_(parent), from_(from), dests_(parent_->destinations(from_)), idx_(0), cur_(update()) {}
 	const AutomatonBase* parent_;
 	AutomatonBase::state_type from_;
+	StateSet dests_;
+	StateSet::size_type idx_;
 	std::pair<SymbolSet, AutomatonBase::state_type> cur_;
-	std::pair<SymbolSet, AutomatonBase::state_type> findNextStartingAt(AutomatonBase::state_type start) {
-		AutomatonBase::state_type end = parent_->state_size();
-		//TODO: if this gets too expensive, we'll promote destinations()
-		//to AutomatonBase and cache it in this iterator
-		for (AutomatonBase::state_type s = start; s < end; ++s) {
-			SymbolSet symbols = parent_->labels(from_, s);
-			if (!symbols.empty())
-				return {std::move(symbols), s};
-		}
-		return {{}, end};
+	std::pair<SymbolSet, AutomatonBase::state_type> update() {
+		if (idx_ < dests_.size())
+			return {parent_->labels(from_, dests_[idx_]), dests_[idx_]};
+		return {{}, std::numeric_limits<AutomatonBase::state_type>::max()}; //not dereferenceable
 	}
 public:
 	const auto& operator*() const {
 		return cur_;
 	}
 	auto& operator++() {
-		cur_ = findNextStartingAt(cur_.second+1);
+		++idx_;
+		cur_ = update();
 		return *this;
 	}
 	friend AutomatonBase;
@@ -369,7 +367,7 @@ public:
 inline bool operator==(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 		assert(left.parent_ == right.parent_ && "edge ranges from different parents");
 		assert(left.from_ == right.from_ && "edge ranges from different states");
-		return left.cur_.second == left.parent_->state_size();
+		return left.idx_ == left.dests_.size();
 }
 inline bool operator!=(const EdgeRangeFront& left, EdgeRangeSentinel right) {
 	return !(left == right);
