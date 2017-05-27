@@ -22,12 +22,11 @@ namespace automaton {
 template<unsigned int AlphabetSize>
 class Automaton;
 
-namespace detail {
-
 class WorkingAutomaton : public AutomatonBase {
 	virtual std::size_t working_hash() const = 0;
 };
 
+namespace detail {
 using state_type = AutomatonBase::state_type;
 using symbol_type = AutomatonBase::symbol_type;
 using state_pair = std::pair<state_type, state_type>;
@@ -237,7 +236,7 @@ template<unsigned int N> Automaton<N> all();
 template<unsigned int N> Automaton<N> determinize(Automaton<N>);
 
 template<unsigned int AlphabetSize>
-class Automaton final : public detail::WorkingAutomaton {
+class Automaton final : public WorkingAutomaton {
 public:
 	//awkward name to avoid clash with member function name
 	//(virtual functions can't also be static constexpr)
@@ -2188,6 +2187,8 @@ private:
 };
 
 SCCs find_components(const AutomatonBase& a);
+
+std::unique_ptr<WorkingAutomaton> make_working(unsigned int size);
 
 } //namespace automaton
 

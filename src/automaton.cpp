@@ -5,7 +5,7 @@
 using namespace automaton;
 
 namespace {
-bool compare_working(const detail::WorkingAutomaton& left, const detail::WorkingAutomaton& right) {
+bool compare_working(const WorkingAutomaton& left, const WorkingAutomaton& right) {
 	assert(left.alphabet_size() == right.alphabet_size()); //should already have been checked in the caller
 	switch (left.alphabet_size()) {
 #define COMPARE_WORKING_CASE(N) case N: return static_cast<const Automaton<N>&>(left) == static_cast<const Automaton<N>&>(right);
@@ -77,8 +77,8 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 	if (left.alphabet_size() != right.alphabet_size()) return false;
 	if (left.state_size() != right.state_size()) return false;
 
-	if (auto l = dynamic_cast<const detail::WorkingAutomaton*>(&left),
-			r = dynamic_cast<const detail::WorkingAutomaton*>(&right); l && r)
+	if (auto l = dynamic_cast<const WorkingAutomaton*>(&left),
+			r = dynamic_cast<const WorkingAutomaton*>(&right); l && r)
 		return compare_working(*l, *r);
 	if (auto l = dynamic_cast<const PackedAutomaton*>(&left),
 			r = dynamic_cast<const PackedAutomaton*>(&right); l && r)
@@ -159,6 +159,48 @@ struct Tarjan {
 
 SCCs find_components(const AutomatonBase& a) {
 	return detail::Tarjan(a).compute();
+}
+
+std::unique_ptr<WorkingAutomaton> make_working(unsigned int size) {
+	switch(size) {
+#define MAKE_WORKING_CASE(I) case I: return std::make_unique<Automaton<I>>();
+		MAKE_WORKING_CASE(1)
+		MAKE_WORKING_CASE(2)
+		MAKE_WORKING_CASE(3)
+		MAKE_WORKING_CASE(4)
+		MAKE_WORKING_CASE(5)
+		MAKE_WORKING_CASE(6)
+		MAKE_WORKING_CASE(7)
+		MAKE_WORKING_CASE(8)
+		MAKE_WORKING_CASE(9)
+		MAKE_WORKING_CASE(10)
+		MAKE_WORKING_CASE(11)
+		MAKE_WORKING_CASE(12)
+		MAKE_WORKING_CASE(13)
+		MAKE_WORKING_CASE(14)
+		MAKE_WORKING_CASE(15)
+		MAKE_WORKING_CASE(16)
+		MAKE_WORKING_CASE(17)
+		MAKE_WORKING_CASE(18)
+		MAKE_WORKING_CASE(19)
+		MAKE_WORKING_CASE(20)
+		MAKE_WORKING_CASE(21)
+		MAKE_WORKING_CASE(22)
+		MAKE_WORKING_CASE(23)
+		MAKE_WORKING_CASE(24)
+		MAKE_WORKING_CASE(25)
+		MAKE_WORKING_CASE(26)
+		MAKE_WORKING_CASE(27)
+		MAKE_WORKING_CASE(28)
+		MAKE_WORKING_CASE(29)
+		MAKE_WORKING_CASE(30)
+		MAKE_WORKING_CASE(31)
+		MAKE_WORKING_CASE(32)
+#undef MAKE_WORKING_CASE
+	default:
+		std::cout << "bad make_working size: " << size << "\n" << std::flush;
+		std::abort();
+	}
 }
 
 } //namespace automaton
