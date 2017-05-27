@@ -54,6 +54,11 @@ void test_pack(Automaton<N> a) {
 	pack_impl_test<detail::Small8OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Medium8OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Large8OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Diminutive8OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Tiny8OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Small8OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Medium8OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Large8OutgoingPackedAutomaton>(a);
 	pack_impl_test<detail::Diminutive8BitmaskPackedAutomaton>(a);
 	pack_impl_test<detail::Tiny8BitmaskPackedAutomaton>(a);
 	pack_impl_test<detail::Small8BitmaskPackedAutomaton>(a);
@@ -65,6 +70,11 @@ void test_pack(Automaton<N> a) {
 	pack_impl_test<detail::Small16OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Medium16OffsetPackedAutomaton>(a);
 	pack_impl_test<detail::Large16OffsetPackedAutomaton>(a);
+	pack_impl_test<detail::Diminutive16OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Tiny16OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Small16OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Medium16OutgoingPackedAutomaton>(a);
+	pack_impl_test<detail::Large16OutgoingPackedAutomaton>(a);
 	pack_impl_test<detail::Diminutive16BitmaskPackedAutomaton>(a);
 	pack_impl_test<detail::Tiny16BitmaskPackedAutomaton>(a);
 	pack_impl_test<detail::Small16BitmaskPackedAutomaton>(a);
@@ -82,6 +92,11 @@ void test_pack_if_representable(Automaton<N> a) {
 	TEST_PACK_IF_REPRESENTABLE(detail::Small8OffsetPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Medium8OffsetPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Large8OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive8OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Tiny8OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Small8OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Medium8OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Large8OutgoingPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive8BitmaskPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Tiny8BitmaskPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Small8BitmaskPackedAutomaton)
@@ -93,6 +108,11 @@ void test_pack_if_representable(Automaton<N> a) {
 	TEST_PACK_IF_REPRESENTABLE(detail::Small16OffsetPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Medium16OffsetPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Large16OffsetPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive16OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Tiny16OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Small16OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Medium16OutgoingPackedAutomaton)
+	TEST_PACK_IF_REPRESENTABLE(detail::Large16OutgoingPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive16BitmaskPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Tiny16BitmaskPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Small16BitmaskPackedAutomaton)
@@ -103,7 +123,7 @@ void test_pack_if_representable(Automaton<N> a) {
 } //anonymous namespace
 
 TEST(AutomatonTest, Pack0) {
-	test_pack(lit<8>(0, 1, 2, 3));
+	test_pack(lit<7>(0, 1, 2, 3));
 }
 TEST(AutomatonTest, Pack1) {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));

@@ -210,6 +210,184 @@ using Medium16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsi
 using Large16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
 
 /**
+ * Stores the accept bit in the high bit of the outgoing mask.
+ */
+template<typename OutgoingMaskType, typename StateSizeType, typename OffsetType>
+class OutgoingAcceptAutomaton final : public PackedAutomaton {
+public:
+	static bool can_represent(const AutomatonBase& a) {
+		return a.alphabet_size() <= (limits<OutgoingMaskType>::digits - 1) &&
+				a.state_size() <= limits<StateSizeType>::max() &&
+				a.transition_size() <= limits<OffsetType>::max();
+	}
+	static std::size_t extra_storage(const AutomatonBase& a) {
+		return 1 //alphabet size
+				+ sizeof(StateSizeType)
+				+ sizeof(OutgoingMaskType) * a.state_size()
+				+ sizeof(OffsetType) * a.state_size()
+				+ sizeof(StateSizeType) * a.transition_size();
+	}
+
+	OutgoingAcceptAutomaton(const AutomatonBase& a) {
+		assert(can_represent(a));
+		ReinterpretWriter p = {storage_begin()};
+		p.write<StateSizeType>(a.state_size());
+		p.write<unsigned char>(a.alphabet_size());
+
+		//TODO: if we know where offsets start, we can make this one big loop,
+		//so we only call a.outgoing(s) once
+		for (state_type s = 0; s < a.state_size(); ++s)
+			p.write<OutgoingMaskType>(set_to_mask(a.outgoing(s)) | (a.accept(s) ? 1 << (limits<OutgoingMaskType>::digits - 1) : 0));
+		OffsetType offset = 0;
+		for (state_type s = 0; s < a.state_size(); ++s) {
+			p.write<OffsetType>(offset);
+			//TODO: want an overflow-checked add here, I guess
+			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
+		}
+		for (state_type s = 0; s < a.state_size(); ++s) {
+			SymbolSet syms = a.outgoing(s);
+			syms.sort();
+			for (symbol_type c : syms) {
+				auto next = a.stepDeterministic(s, c);
+				assert(next);
+				p.write<StateSizeType>(*next);
+			}
+		}
+		assert(p.p == storage_end());
+	}
+
+	state_type state_size() const override {
+		return load(reinterpret_cast<const StateSizeType*>(storage_begin()));
+	}
+	symbol_type alphabet_size() const override {
+		return load(storage_begin() + sizeof(StateSizeType));
+	}
+	AutomatonBase::symbol_type active_alphabet_size() const override {
+		OutgoingMaskType mask = 0;
+		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+			mask |= load(p); //in theory, we could short-circuit if all bits are set
+		return __builtin_popcount(mask & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
+	}
+	AutomatonBase::state_type accept_size() const override {
+		state_type count = 0;
+		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+			count += (load(p) >> (limits<OutgoingMaskType>::digits - 1)); //1 if the top bit is set, else 0
+		return count;
+	}
+	std::size_t transition_size() const override {
+		std::size_t count = 0;
+		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+			count += __builtin_popcount(load(p) & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
+		return count;
+	}
+	bool deterministic() const override {return true;}
+	bool minimal() const override {return true;}
+	bool canonical() const override {return true;}
+	bool accept(state_type state) const override {
+		return load(outgoing_begin() + state) & (1 << (limits<OutgoingMaskType>::digits - 1));
+	}
+	StateSet step(state_type state, symbol_type symbol) const override {
+		if (auto next = stepDeterministic(state, symbol)) {
+			StateSet set;
+			set.insert_absent(*next);
+			return set;
+		}
+		return {};
+	}
+	std::optional<state_type> stepDeterministic(state_type state, symbol_type symbol) const override {
+		OutgoingMaskType outgoing = outgoing_mask(state);
+		if (!(outgoing & (1u << symbol))) return std::nullopt;
+		//how many symbols came before
+		auto suboffset = count_set_left(outgoing, symbol);
+		return load(destinations_begin(state) + suboffset);
+	}
+	AutomatonBase::SymbolSet outgoing(state_type state) const override {
+		SymbolSet ret;
+		OutgoingMaskType mask = outgoing_mask(state);
+		for (unsigned int i = 0; i < alphabet_size(); ++i)
+			if (mask & (1 << i))
+				ret.insert_absent(i);
+		return ret;
+	}
+	AutomatonBase::StateSet destinations(state_type state) const override {
+		StateSet ret;
+		for (auto p = destinations_begin(state), q = destinations_end(state); p != q; ++p)
+			ret.insert(load(p));
+		return ret;
+	}
+
+private:
+	unsigned char* storage_begin() {
+		return reinterpret_cast<unsigned char*>(this) + sizeof(*this);
+	}
+	const unsigned char* storage_begin() const override {
+		return reinterpret_cast<const unsigned char*>(this) + sizeof(*this);
+	}
+	const unsigned char* storage_end() const override {
+		return storage_begin() + extra_storage(*this); //TODO: slow computation
+	}
+	const OutgoingMaskType* outgoing_begin() const {
+		return reinterpret_cast<const OutgoingMaskType*>(storage_begin() + sizeof(StateSizeType) + 1);
+	}
+	const OutgoingMaskType* outgoing_end() const {
+		return outgoing_begin() + state_size();
+	}
+	OutgoingMaskType outgoing_mask(state_type state) const {
+		return load(outgoing_begin() + state) & ~(1 << (limits<OutgoingMaskType>::digits - 1));
+	}
+
+	const OffsetType* offsets_begin() const {
+		return reinterpret_cast<const OffsetType*>(outgoing_end());
+	}
+	const OffsetType* offsets_end() const {
+		return offsets_begin() + state_size();
+	}
+	OffsetType offset(state_type state) const {
+		return load(offsets_begin() + state);
+	}
+
+	const StateSizeType* destinations_begin(state_type state) const {
+		return reinterpret_cast<const StateSizeType*>(offsets_end()) + offset(state);
+	}
+	const StateSizeType* destinations_end(state_type state) const {
+		return destinations_begin(state) + __builtin_popcount(outgoing_mask(state));
+	}
+
+	static OutgoingMaskType set_to_mask(SymbolSet set) {
+		std::size_t mask = 0;
+		for (symbol_type s : set)
+			mask |= 1u << s;
+		return numeric_cast<OutgoingMaskType>(mask);
+	}
+	static unsigned int high_zeroes(unsigned int x) {
+		//fxtbook 1.6.2, page 17
+		x |= x >> 1;
+		x |= x >> 2;
+		x |= x >> 4;
+		x |= x >> 8;
+		x |= x >> 16;
+		return ~x;
+	}
+	/**
+	 * @return the number of set bits in x to the left of and including position pos
+	 */
+	static unsigned int count_set_left(unsigned int x, unsigned int pos) {
+		return __builtin_popcount(x & ~(high_zeroes(1u << pos) | 1 << pos));
+	}
+};
+
+using Diminutive8OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
+using Tiny8OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned char, unsigned char, unsigned short>;
+using Small8OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
+using Medium8OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
+using Large8OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+using Diminutive16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+using Tiny16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+using Small16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+using Medium16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+using Large16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
+
+/**
  * Stores the accept bit in a bitmask between the outgoing masks and the offset.
  */
 template<typename OutgoingMaskType, typename StateSizeType, typename OffsetType>
