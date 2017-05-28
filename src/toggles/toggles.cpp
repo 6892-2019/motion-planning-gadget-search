@@ -306,11 +306,14 @@ void registrar_thread(int core_number) {
 	auto lastReport = std::chrono::steady_clock::now();
 	//Steady state: alternate issuance and retirement, periodically issuing a connect task
 	while (registry.waiting_size() || connect_pending() || inflight) {
-		if (connect_pending() && (connectibles.size() >= 100 || !registry.waiting_size()))
-			issue_connect();
-		else while (registry.waiting_size())
-			if (try_issue_combine())
-				break;
+		//while we have fewer inflight tasks than we'd like, and there are some to issue
+		while (in_init() && (registry.waiting_size() || connect_pending())) {
+			if (connect_pending() && (connectibles.size() >= 100 || !registry.waiting_size()))
+				issue_connect();
+			else while (registry.waiting_size())
+				if (try_issue_combine())
+					break;
+		}
 
 		if (inflight)
 			do_retire();
