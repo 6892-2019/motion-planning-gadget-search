@@ -2,6 +2,9 @@
 <configurationDescriptor version="100">
   <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
     <df root="src" name="0">
+      <df name="fuzz">
+        <in>fuzz-state-renumbering.cpp</in>
+      </df>
       <df name="nonogram">
         <in>nonogram.cpp</in>
         <in>puzzle.cpp</in>
@@ -10,20 +13,36 @@
         <in>pathpuzzles.cpp</in>
       </df>
       <df name="toggles">
+        <in>canonicalize.cpp</in>
+        <in>connect.cpp</in>
+        <in>gadgetdefs.cpp</in>
+        <in>registry.cpp</in>
         <in>toggles.cpp</in>
       </df>
       <in>alphabet.cpp</in>
+      <in>automaton.cpp</in>
       <in>expr.cpp</in>
       <in>ioutils.cpp</in>
       <in>main.cpp</in>
       <in>natural_map.cpp</in>
       <in>natural_set.cpp</in>
+      <in>packedautomaton.cpp</in>
+      <in>pinning.cpp</in>
+      <in>precompiled-instantiations.cpp</in>
+      <in>worker.cpp</in>
     </df>
     <df root="src" name="1">
     </df>
     <df root="test" name="2">
+      <in>algoutils-test.cpp</in>
+      <in>automaton-canonicalize-test.cpp</in>
+      <in>automaton-pack-test.cpp</in>
+      <in>automaton-regexesque-test.cpp</in>
       <in>automaton-test.cpp</in>
+      <in>bitset-test.cpp</in>
       <in>expr-test.cpp</in>
+      <in>util-test.cpp</in>
+      <in>util.cpp</in>
     </df>
     <df root="test" name="3">
     </df>
@@ -71,6 +90,7 @@
             <standard>11</standard>
             <incDir>
               <pElem>build/debug/include</pElem>
+              <pElem>vendor</pElem>
               <pElem>src</pElem>
             </incDir>
           </ccTool>
@@ -113,8 +133,6 @@
           </incDir>
         </ccTool>
       </folder>
-      <item path="src/algoutils.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/alphabet.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
           <incDir>
@@ -123,6 +141,14 @@
           </incDir>
         </ccTool>
       </item>
+      <item path="src/automaton-io.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/automaton-io.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/automaton.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/circular_deque.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
           <incDir>
@@ -130,6 +156,11 @@
             <pElem>.</pElem>
           </incDir>
         </ccTool>
+      </item>
+      <item path="src/fuzz/fuzz-state-renumbering.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
       </item>
       <item path="src/ioutils.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
@@ -170,21 +201,56 @@
         <ccTool flags="1">
         </ccTool>
       </item>
+      <item path="src/packedautomaton.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="src/pathpuzzles/pathpuzzles.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
         </ccTool>
+      </item>
+      <item path="src/pinning.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/precompiled-instantiations.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/canonicalize.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/connect.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/registry.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/toggles.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
         </ccTool>
       </item>
+      <item path="src/worker.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="test/algoutils-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="test/automaton-canonicalize-test.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="test/automaton-pack-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="test/automaton-regexesque-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="test/automaton-test.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
         </ccTool>
       </item>
+      <item path="test/bitset-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="test/bounded_queue-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="test/expr-test.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
         </ccTool>
+      </item>
+      <item path="test/util-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="test/util.cpp" ex="false" tool="1" flavor2="0">
       </item>
     </conf>
   </confs>
