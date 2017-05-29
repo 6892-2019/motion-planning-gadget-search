@@ -44,7 +44,7 @@ static std::pair<std::size_t, std::size_t> countSolutions(const std::vector<Puzz
 	return {ways, spaces};
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::unique_ptr<Puzzle> puzzle = Puzzle::fromNONFile(argv[1]);
 	std::cout << puzzle->name() << std::endl;
 

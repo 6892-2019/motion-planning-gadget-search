@@ -3,7 +3,7 @@
 
 using namespace automaton;
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::mt19937 rng(std::atoi(argv[1]));
 
 	for (int trials = 0; trials < 1000; ++trials) {

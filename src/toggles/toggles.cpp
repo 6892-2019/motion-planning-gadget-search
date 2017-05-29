@@ -347,7 +347,7 @@ void registrar_thread(int core_number) {
 	std::exit(0);
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) { //genbuild entrypoint
 	char hostname[64];
 	gethostname(hostname, sizeof(hostname));
 	std::cout << "running on " << hostname << "\n";

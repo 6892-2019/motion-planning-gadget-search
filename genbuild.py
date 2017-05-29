@@ -45,6 +45,7 @@ for config in configs:
     buildfile.write('\n')
 
     src_objects = defaultdict(list)
+    src_entrypoints = defaultdict(list)
     for subdir, dirs, files in os.walk('src/'):
       for f in files:
         if f.endswith('.cpp'):
@@ -57,6 +58,8 @@ for config in configs:
           else:
             buildfile.write('build {} : cxx {} | $pch_target\n'.format(object, source))
             src_objects[rel].append(object)
+          if 'genbuild entrypoint' in open(source).read():
+            src_entrypoints[rel].append(object)
     buildfile.write('\n')
 
     vendor_objects = []
@@ -75,8 +78,15 @@ for config in configs:
     src_objects_str = ' '.join(src_objects['.'])
     del src_objects['.']
     for k, v in src_objects.iteritems():
-      buildfile.write('build $builddir/bin/{}.exe : ld {} {}\n'.format(k, ' '.join(v), src_objects_str))
-      buildfile.write('\n')
+      entrypoints = src_entrypoints[k]
+      #TODO: when we support declaring links against other modules' objects,
+      #we'll build these first because they name the shared objects.
+      nonentrypoints = [o for o in v if o not in entrypoints]
+      nonentrypoints_str = ' '.join(nonentrypoints)
+      for entrypoint in entrypoints:
+        executable = os.path.basename(entrypoint)[:-2] + '.exe'
+        buildfile.write('build $builddir/bin/{} : ld {} {} {}\n'.format(executable, entrypoint, nonentrypoints_str, src_objects_str))
+        buildfile.write('\n')
 
     test_objects = []
     for subdir, dirs, files in os.walk('test/'):
