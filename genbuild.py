@@ -6,7 +6,7 @@ import os
 globals = OrderedDict()
 globals.update({
   'modeflags': '-std=c++1z',
-  'warnflags': '-pedantic -Wall -Wextra -Wuninitialized -Winit-self -Wconversion -Wuseless-cast -Wlogical-op -Waggressive-loop-optimizations -Winvalid-pch -Wno-unused-parameter -Wduplicated-cond -Wnull-dereference -Wno-dangling-else -fdiagnostics-color=always',
+  'warnflags': '-pedantic -Wall -Wextra -Wuninitialized -Winit-self -Wconversion -Wuseless-cast -Wlogical-op -Waggressive-loop-optimizations -Winvalid-pch -Wno-unused-parameter -Wduplicated-cond -Wnull-dereference -Wno-dangling-else -Wsuggest-override -fdiagnostics-color=always',
   'builddir': 'build/$config/',
   'src_dir': 'src/',
   'test_dir': 'test/',

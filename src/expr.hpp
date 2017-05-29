@@ -79,23 +79,23 @@ private:
 
 class EmptyLanguage final : public Expr {
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 };
 class AllStringsLanguage final : public Expr {
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 };
 class Epsilon final : public Expr {
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 };
 class Any final : public Expr {
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 };
 
 class Literal final : public Expr {
@@ -103,8 +103,8 @@ public:
 	Literal(unsigned int symbolIdx) : symbolIdx_(symbolIdx) {}
 	unsigned int symbol() const {return symbolIdx_;}
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 private:
 	unsigned int symbolIdx_;
 };
@@ -114,8 +114,8 @@ public:
 	Concatenation(container&& regexes) : regexes_(std::move(regexes)) {}
 	const container& children() const {return regexes_;}
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 private:
 	container regexes_;
 };
@@ -125,8 +125,8 @@ public:
 	Alternation(container&& regexes) : regexes_(std::move(regexes)) {}
 	const container& children() const {return regexes_;}
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 private:
 	container regexes_;
 };
@@ -136,8 +136,8 @@ public:
 	Intersection(container&& regexes) : regexes_(std::move(regexes)) {}
 	const container& children() const {return regexes_;}
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 private:
 	container regexes_;
 };
@@ -158,8 +158,8 @@ public:
 	bool isBounded() const {return max() != Expr::unlimited;}
 	bool isUnbounded() const {return max() == Expr::unlimited;}
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 private:
 	ptr regex_;
 	int min_, max_;
@@ -170,8 +170,8 @@ public:
 	Complement(ptr&& regex) : regex_(std::move(regex)) {}
 	ptr child() const {return regex_;}
 protected:
-	virtual void print(std::ostream& o) const;
-	virtual void repr(std::ostream& o) const;
+	void print(std::ostream& o) const override;
+	void repr(std::ostream& o) const override;
 private:
 	ptr regex_;
 };
