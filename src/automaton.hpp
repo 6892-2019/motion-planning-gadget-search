@@ -10,6 +10,7 @@
 
 #include "precompiled.hpp"
 #include "automatonbase.hpp"
+#include "hopcroft.hpp"
 
 //uncomment the line below to enable debugging logging expressions
 //#define AUTOMATON_DEBUG(expr) do {expr;} while(0);
@@ -23,8 +24,6 @@ template<unsigned int AlphabetSize>
 class Automaton;
 
 namespace detail {
-using state_type = AutomatonBase::state_type;
-using symbol_type = AutomatonBase::symbol_type;
 using state_pair = std::pair<state_type, state_type>;
 //We can't templatize this together with the other maps because dense_hash_map
 //needs set_empty_key.
@@ -880,9 +879,48 @@ public:
 		//otherwise equivalent.
 		removeDeadStates();
 		MAYBE_UNUSED std::size_t oldsize = state_size();
-		HopcroftMinimizer(*this).minimize();
+		detail::HopcroftResult res = detail::hopcroft(*this);
+		if (res.newSize != state_size())
+			compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
 		AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << state_size() << std::endl);
-		minimal_ = true;
+#ifndef NDEBUG
+		//make sure hopcroft and/or compress didn't screw up
+		for (state_type s = 0; s < state_size(); ++s)
+			assert(isStateDeterministic(s));
+#endif
+		deterministic_ = minimal_ = true;
+	}
+
+private:
+	/**
+	 * Compresses the states of this automaton.
+	 */
+	void compressRenumber(state_type newSize, const state_type* survivorFrom, const state_type* remapping) {
+		for (state_type s = 0; s < newSize; ++s) {
+			state_type victim = survivorFrom[s];
+			if (victim != s) {
+				transitions_[s] = std::move(transitions_[victim]);
+				setAccept(s, accept(victim));
+			}
+
+			//Renumber and compress redundant transitions.
+			auto& ts = transitions_[s];
+			for (Transition& t : ts)
+				t.next_ = remapping[t.next_];
+			//iterate backwards to gracefully erase
+			for (auto i = ts.size(); i-- > 0;) {
+				//TODO: this is n^2, we may have a problem here
+				for (decltype(i) j = 0; j < i; ++j)
+					if (ts[i].next_ == ts[j].next_) {
+						ts[j].symbols_ |= ts[i].symbols_;
+						ts.erase(ts.begin() + i);
+						break;
+					}
+			}
+		}
+		transitions_.resize(newSize);
+		accept_.resize(newSize);
+		deterministic_ = minimal_ = canonical_ = false;
 	}
 
 public:
@@ -1382,365 +1420,6 @@ public:
 	}
 
 private:
-	class HopcroftMinimizer final {
-	public:
-		HopcroftMinimizer(Automaton& a) : a_(a), partitions_(a.state_size()), partitionBounds_(),
-				//TODO: now that the automaton isn't total, inv_ should be
-				//allocated after building the inverse edge list, so that it can
-				//be sized just right.
-				stateToPartition_(a.state_size()), inv_(a.state_size() * AlphabetSize),
-				invStart_(a.state_size() * (AlphabetSize+1)), L_(), inL_(a.state_size()),
-				move_(a.state_size()), moveSize_(), suspects_() {}
-
-		void minimize() {
-			if (!buildInverseAndInitializePartitions()) return;
-			initializeWaitingSet();
-			while (!L_.empty()) {
-				auto pair = remove();
-				collect(pair.first, pair.second);
-				refine();
-				//When we get here, L_ is nearly empty and processing each pair
-				//is cheap (because partitions are singletons), so it may not be
-				//worth checking in this loop.  If not, we definitely want to
-				//check in finish() to avoid copying a bunch for no reason.
-				if (partitionBounds_.size() == a_.state_size())
-					return;
-			}
-			finish();
-		}
-	private:
-		Automaton& a_;
-		//Every partition contains at least one state, so there can only be as
-		//many states as partitions.
-		dynarray<state_type> partitions_;
-		std::vector<std::pair<state_type, state_type>> partitionBounds_;
-		//first is the partition, second is the index into partitions_
-		dynarray<std::pair<state_type, state_type>> stateToPartition_;
-		dynarray<state_type> inv_;
-		dynarray<std::size_t> invStart_;
-		std::queue<std::pair<state_type, symbol_type>> L_;
-		dynarray<symbol_mask_type> inL_;
-		dynarray<state_type> move_;
-		std::vector<state_type> moveSize_;
-		std::vector<state_type> suspects_;
-
-		/**
-		 * @return true if we should continue; flase if the automaton is the
-		 * trivial empty-language or all-strings automaton, in which case we're
-		 * already done
-		 */
-		bool buildInverseAndInitializePartitions() {
-			struct InverseEntry {
-				state_type source;
-				symbol_type symbol;
-				state_type target;
-				bool operator==(const InverseEntry& other) const {
-					return source == other.source &&
-							symbol == other.symbol &&
-							target == other.target;
-				}
-				bool operator!=(const InverseEntry& other) const {
-					return !(*this == other);
-				}
-				bool operator<(const InverseEntry& other) const {
-					return std::tie(target, symbol, source) < std::tie(other.target, other.symbol, other.source);
-				}
-			};
-
-			std::vector<InverseEntry> edgelist;
-			edgelist.reserve(a_.state_size() * AlphabetSize + 1);
-			bool crashed = false;
-			unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
-			for (state_type s = 0; s < a_.state_size(); ++s) {
-				for (symbol_type a = 0; a < AlphabetSize; ++a) {
-					if (auto target = a_.stepDeterministic(s, a))
-						edgelist.push_back(InverseEntry{s, a, *target});
-					else
-						crashed = true;
-				}
-
-				if (a_.accept_[s])
-					partitions_[finalIdx--] = s;
-				else
-					partitions_[nonfinalIdx++] = s;
-			}
-			edgelist.push_back(InverseEntry{std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max(), std::numeric_limits<state_type>::max()});
-
-			assert(nonfinalIdx == finalIdx+1 && "didn't partition all the states somehow");
-			if (nonfinalIdx == partitions_.size()) {
-				a_ = empty<AlphabetSize>();
-				return false;
-			} else if ((finalIdx+1) == 0U && !crashed) {
-				a_ = all<AlphabetSize>();
-				return false;
-			}
-
-			if (crashed) {
-				//Because we didn't totalize, we need to manually partition
-				//crashing vs. non-crashing on each symbol.
-				std::vector<typename decltype(partitions_)::iterator> bounds = {
-					partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
-				}, newbounds;
-				for (symbol_type s = 0; s < AlphabetSize; ++s) {
-					newbounds.clear();
-					for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
-						newbounds.push_back(bounds[i]);
-						newbounds.push_back(std::partition(bounds[i], bounds[i+1], [this, s](state_type state) {
-							//if we crash
-							return !a_.stepDeterministic(state, s).has_value();
-						}));
-						newbounds.push_back(bounds[i+1]);
-					}
-					newbounds.erase(std::unique(newbounds.begin(), newbounds.end()), newbounds.end());
-					bounds.swap(newbounds);
-				}
-				partitionBounds_.reserve(bounds.size()-1);
-				for (state_type p = 0; p < bounds.size()-1; ++p)
-					partitionBounds_.push_back({bounds[p] - partitions_.begin(), bounds[p+1] - partitions_.begin()});
-				moveSize_.resize(partitionBounds_.size(), 0);
-			} else {
-				partitionBounds_.push_back({0, nonfinalIdx});
-				partitionBounds_.push_back({nonfinalIdx, static_cast<state_type>(partitions_.size())});
-				moveSize_.push_back(0);
-				moveSize_.push_back(0);
-			}
-
-			for (state_type p = 0; p < partitionBounds_.size(); ++p) {
-				auto bounds = partitionBounds_[p];
-				//Sort for locality when accessing stateToPartition_.
-				std::sort(partitions_.begin() + bounds.first, partitions_.begin() + bounds.second);
-				for (state_type i = bounds.first; i != bounds.second; ++i)
-					stateToPartition_[partitions_[i]] = {p, i};
-			}
-
-			//TODO: use a parallel sort (beyond a size threshold)
-			std::sort(edgelist.begin(), edgelist.end());
-			std::size_t invEltsIdx = 0;
-			for (state_type stateIdx = 0; stateIdx < a_.state_size(); ++stateIdx) {
-				for (symbol_type symbolIdx = 0; symbolIdx < AlphabetSize; ++symbolIdx) {
-					invStart_[stateIdx * (AlphabetSize+1) + symbolIdx] = invEltsIdx;
-					while (edgelist[invEltsIdx].target == stateIdx &&
-							edgelist[invEltsIdx].symbol == symbolIdx) {
-						inv_[invEltsIdx] = edgelist[invEltsIdx].source;
-						++invEltsIdx;
-					}
-				}
-				invStart_[stateIdx * (AlphabetSize+1) + AlphabetSize] = invEltsIdx;
-			}
-			//TODO: we can reassert this when inv_ is lazily sized
-//			assert(invEltsIdx == inv_.size());
-			return true;
-		}
-
-		void initializeWaitingSet() {
-			//For each symbol, add all but the largest partition to the waiting set.
-			//TODO: factor this into max_element_transform algorithm
-			state_type maxPartition = 0, maxPartitionSize = partitionSize(0);
-			for (state_type p = 1; p < partitionBounds_.size(); ++p)
-				if (partitionSize(p) > maxPartitionSize) {
-					maxPartitionSize = partitionSize(p);
-					maxPartition = p;
-				}
-
-			for (symbol_type i = 0; i < AlphabetSize; ++i)
-				for (state_type p = 0; p < partitionBounds_.size(); ++p)
-					if (p != maxPartition)
-						add(p, i);
-		}
-
-		void collect(state_type part, symbol_type symbol) {
-			checkRep();
-			suspects_.clear();
-			for (state_type target : partition(part))
-				for (state_type source : inverseStep(target, symbol)) {
-					state_type invPart = stateToPartition_[source].first;
-					//TODO: if partitionSize(invPart) == 1, we shouldn't bother
-					//adding it to suspects (and checking it later).  This might
-					//be important for no-op re-minimization of large automata,
-					//to avoid unnecessarily growing suspects_.  (Test first.)
-					if (moveSize_[invPart] == 0) //only add to suspects if not already present
-						suspects_.push_back(invPart);
-					move_[partitionBounds_[invPart].first + (moveSize_[invPart]++)] = source;
-					assert(moveSize_[invPart] <= partitionSize(invPart));
-				}
-			checkRep();
-		}
-
-		void refine() {
-			checkRep();
-			for (state_type part : suspects_) {
-				if (moveSize_[part] < partitionSize(part)) {
-					state_type newPart = split(part);
-					//This is done unconditionally outside this if.
-//					moveSize_[part] = 0;
-					for (symbol_type symbol = 0; symbol < AlphabetSize; ++symbol)
-						if (contains(part, symbol))
-							add(newPart, symbol);
-						else
-							addBetter(part, newPart, symbol);
-				}
-				//In Knuutila's paper, cls_head[B].counter is only cleared when
-				//refinement actually happens.  I think that's wrong, because
-				//just because we couldn't refine with respect to one state-symbol
-				//pair doesn't mean we won't with another, but not clearing
-				//counter prevents this partition from entering suspects again.
-				moveSize_[part] = 0;
-			}
-			checkRep();
-		}
-
-		state_type split(state_type part) {
-			checkRep();
-			state_type newPart = static_cast<state_type>(partitionBounds_.size());
-			//swap states in move[part] into the front of partitions[part]
-			for (state_type i = 0; i < moveSize_[part]; ++i) {
-				state_type victimIdx = partitionBounds_[part].first + i;
-				state_type beneficiaryState = move_[victimIdx];
-				state_type beneficiaryIdx = stateToPartition_[beneficiaryState].second;
-				state_type victimState = partitions_[victimIdx];
-				assert(stateToPartition_[victimState].second == victimIdx);
-				std::swap(partitions_[victimIdx], partitions_[beneficiaryIdx]);
-				std::swap(stateToPartition_[victimState].second, stateToPartition_[beneficiaryState].second);
-				stateToPartition_[beneficiaryState].first = newPart;
-			}
-			state_type oldPartOldStart = partitionBounds_[part].first;
-			partitionBounds_[part].first += moveSize_[part];
-			partitionBounds_.push_back({oldPartOldStart, partitionBounds_[part].first});
-			//partitionBounds_[part].second stays where it is
-			moveSize_.push_back(0);
-			checkRep();
-			return newPart;
-		}
-
-		void finish() {
-			state_type initialStatePart = stateToPartition_[0].first;
-			//Free memory.
-			stateToPartition_.clear();
-			inv_.clear();
-			invStart_.clear();
-			decltype(L_)().swap(L_);
-			inL_.clear();
-			moveSize_.clear();
-			moveSize_.shrink_to_fit();
-			suspects_.clear();
-			suspects_.shrink_to_fit();
-
-			Automaton<AlphabetSize> newA;
-			newA.transitions_.resize(partitionBounds_.size());
-			newA.accept_.resize(partitionBounds_.size());
-			state_type newstate = 1; //0 handled specially
-			//Pick an exemplar from each partition and build a renumbering map.
-			//If the partition contains 0 (the initial state), we must renumber
-			//to 0, but otherwise we can assign an arbitrary new number.
-			for (decltype(partitionBounds_.size()) i = 0; i < partitionBounds_.size(); ++i) {
-				state_type beneficiary = i == initialStatePart ? 0 : newstate++;
-				for (state_type state : partition(static_cast<state_type>(i)))
-					//Reuse move_ as the renumbering map
-					move_[state] = beneficiary;
-				//TODO: choose exemplars with few transitions to speed up renumbering?
-				state_type victim = partitions_[partitionBounds_[i].first];
-				newA.transitions_[beneficiary] = std::move(a_.transitions_[victim]);
-				newA.accept_[beneficiary] = a_.accept_[victim];
-			}
-
-			//Free more memory.
-			partitions_.clear();
-			partitionBounds_.clear();
-			partitionBounds_.shrink_to_fit();
-			//We're going to move-assign over these; might as well free them now.
-			a_.transitions_.clear();
-			a_.transitions_.shrink_to_fit();
-			a_.accept_.clear();
-			a_.accept_.shrink_to_fit();
-
-			//Renumber and compress redundant transitions.
-			for (auto& ts : newA.transitions_) {
-				for (Transition& t : ts)
-					t.next_ = move_[t.next_];
-				//iterate backwards to gracefully erase
-				for (auto i = ts.size(); i-- > 0;) {
-					//TODO: this is n^2, we may have a problem here
-					for (decltype(i) j = 0; j < i; ++j)
-						if (ts[i].next_ == ts[j].next_) {
-							ts[j].symbols_ |= ts[i].symbols_;
-							ts.erase(ts.begin() + i);
-							break;
-						}
-				}
-			}
-			a_ = std::move(newA);
-		}
-
-		boost::iterator_range<const state_type*> partition(state_type partitionIdx) const {
-			assert(partitionIdx < partitionBounds_.size());
-			auto p = partitionBounds_[partitionIdx];
-			return boost::make_iterator_range(&partitions_[0] + p.first, &partitions_[0] + p.second);
-		}
-		boost::iterator_range<const state_type*> inverseStep(state_type target, symbol_type symbol) const {
-			assert(target <= a_.state_size());
-			assert(symbol <= AlphabetSize);
-			std::size_t start = target * (AlphabetSize+1) + symbol;
-			assert((start + 1) < invStart_.size());
-			return boost::make_iterator_range(&inv_[0] + invStart_[start], &inv_[0] + invStart_[start+1]);
-		}
-
-		state_type partitionSize(state_type partitionIdx) const {
-			assert(partitionIdx < partitionBounds_.size());
-			return partitionBounds_[partitionIdx].second - partitionBounds_[partitionIdx].first;
-		}
-
-		void addBetter(state_type partA, state_type partB, symbol_type symbol) {
-			//This is the |B| criterion.
-			int part = (partitionSize(partA) <= partitionSize(partB)) ? partA : partB;
-			add(part, symbol);
-		}
-		void add(state_type part, symbol_type symbol) {
-			checkRep();
-			assert(!contains(part, symbol));
-			L_.push({part, symbol});
-			inL_[part][symbol] = true;
-			checkRep();
-		}
-		bool contains(int part, int symbol) const {
-			checkRep();
-			return inL_[part][symbol];
-		}
-		std::pair<state_type, symbol_type> remove() {
-			checkRep();
-			auto pair = L_.front();
-			L_.pop();
-			inL_[pair.first][pair.second] = false;
-			checkRep();
-			return pair;
-		}
-
-		void checkRep() const {
-#ifndef NDEBUG
-			//We exit early in the trivial empty/all cases, so we always have at
-			//least accept/reject partitions.
-			assert(partitionBounds_.size() >= 2);
-			for (const auto& p : partitionBounds_)
-				assert(p.second - p.first > 0);
-			assert(moveSize_.size() == partitionBounds_.size());
-			assert(suspects_.size() <= partitionBounds_.size());
-
-			//All states in each partition should have the same accept status.
-			//(Established in the very first split.)
-			for (state_type i = 0; i < partitionBounds_.size(); ++i)
-				for (state_type j = partitionBounds_[i].first; j < partitionBounds_[i].second - 1; ++j)
-					assert(a_.accept_[partitions_[j]] == a_.accept_[partitions_[j+1]]);
-
-			//TODO: every element in partitions_ is within a parititionBounds_ element
-			//TODO: partitions_ is a permutation of [0..n) (is there a cheap way to check?)
-			//TODO: inL is true iff L contains the state-symbol pair (if is cheap, only-if is costly)
-
-			//It's a fixed invariant so maybe not worth checking constantly, but
-			//invStart_ should be nondecreasing and contain only valid indices
-			//into inv_.
-#endif //NDEBUG
-		}
-	};
-
 	template<class Alphabet, class Callable>
 	void enumerateRecurse(std::vector<state_type>& stateStack, std::vector<typename Alphabet::symbol_type>& symbolString, Callable callback) {
 		state_type cur = stateStack.back();

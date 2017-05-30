@@ -312,6 +312,9 @@ using SymbolSet = AutomatonBase::SymbolSet;
 using StateSet = AutomatonBase::StateSet;
 
 namespace detail {
+using state_type = AutomatonBase::state_type;
+using symbol_type = AutomatonBase::symbol_type;
+
 class EdgeRangeSentinel {
 	const AutomatonBase* parent_;
 	AutomatonBase::state_type from_;
