@@ -671,7 +671,7 @@ public:
 		return false;
 	}
 
-	void determinize() {
+	void determinize() override {
 		if (deterministic()) return;
 		const int DETERMINIZE_PAGE_SIZE = 4096, DETERMINIZE_PAGE_UNITS = DETERMINIZE_PAGE_SIZE/sizeof(state_type);
 		//manages page lifetime: free them all at the end
@@ -794,7 +794,7 @@ public:
 	 * Fills in any missing transitions with transitions to an explicit crash
 	 * state.
 	 */
-	void totalize() {
+	void totalize() override {
 		state_type crash;
 		bool madeCrashState = false;
 		for (state_type s = 0; s < state_size(); ++s) {
@@ -812,7 +812,7 @@ public:
 	/**
 	 * Removes dead states and transitions from this automaton.
 	 */
-	void removeDeadStates() {
+	void removeDeadStates() override {
 		auto live = liveStates();
 		if (live.size() == state_size())
 			return;
@@ -863,7 +863,7 @@ public:
 		AUTOMATON_DEBUG(std::cout << "removeDeadStates: " << oldsize << " -> " << state_size() << std::endl);
 	}
 
-	void minimize() {
+	void minimize() override {
 		if (minimal()) {
 			assert(deterministic());
 			return;
@@ -890,7 +890,7 @@ public:
 	 * Renumbers states to bring this automaton into a canonical form. Canonical
 	 * automata are structurally equal iff they accept the same language.
 	 */
-	void canonicalize() {
+	void canonicalize() override {
 		if (canonical()) {
 			assert(deterministic());
 			assert(minimal());

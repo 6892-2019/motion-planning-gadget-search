@@ -362,6 +362,12 @@ inline range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> Automat
 
 
 class WorkingAutomaton : public AutomatonBase {
+public:
+	virtual void removeDeadStates() = 0;
+	virtual void totalize() = 0;
+	virtual void determinize() = 0;
+	virtual void minimize() = 0;
+	virtual void canonicalize() = 0;
 	virtual std::size_t working_hash() const = 0;
 };
 
