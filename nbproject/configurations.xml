@@ -2,6 +2,9 @@
 <configurationDescriptor version="100">
   <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
     <df root="src" name="0">
+      <df name="benchmark">
+        <in>benchmark-minimize.cpp</in>
+      </df>
       <df name="fuzz">
         <in>fuzz-state-renumbering.cpp</in>
       </df>
@@ -20,8 +23,11 @@
         <in>toggles.cpp</in>
       </df>
       <in>alphabet.cpp</in>
+      <in>automaton-io.cpp</in>
       <in>automaton.cpp</in>
       <in>expr.cpp</in>
+      <in>hopcroft.cpp</in>
+      <in>hopcroft.hpp</in>
       <in>ioutils.cpp</in>
       <in>main.cpp</in>
       <in>natural_map.cpp</in>
@@ -40,6 +46,7 @@
       <in>automaton-regexesque-test.cpp</in>
       <in>automaton-test.cpp</in>
       <in>bitset-test.cpp</in>
+      <in>bounded_queue-test.cpp</in>
       <in>expr-test.cpp</in>
       <in>util-test.cpp</in>
       <in>util.cpp</in>
@@ -143,11 +150,12 @@
       </item>
       <item path="src/automaton-io.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/automaton-io.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/automaton.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/circular_deque.hpp" ex="false" tool="3" flavor2="0">
+      <item path="src/benchmark/benchmark-minimize.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
       </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
@@ -161,6 +169,10 @@
             ex="false"
             tool="1"
             flavor2="0">
+      </item>
+      <item path="src/hopcroft.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/hopcroft.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/ioutils.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
