@@ -30,6 +30,7 @@ public:
 	using size_type = std::size_t;
 	using difference_type = std::ptrdiff_t;
 
+	dynarray() : data_(nullptr), size_(0) {}
 	explicit dynarray(size_type size) : data_(new T[size]), size_(size) {}
 
 	size_type size() const {
