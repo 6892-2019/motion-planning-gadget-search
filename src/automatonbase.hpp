@@ -111,6 +111,11 @@ public:
 	virtual bool canonical() const = 0;
 
 	virtual bool accept(state_type state) const = 0;
+	virtual void for_each_accept(std::function<void(state_type)> action) const {
+		for (state_type s = 0; s < state_size(); ++s)
+			if (accept(s))
+				action(s);
+	}
 	/**
 	 * Returns the possible next states of the automaton when reading the given
 	 * symbol in the given current state.  The returned set is empty if the

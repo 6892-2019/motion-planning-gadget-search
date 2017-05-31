@@ -295,6 +295,11 @@ public:
 		return accept_[state];
 	}
 
+	void for_each_accept(std::function<void(state_type)> action) const override {
+		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s))
+			action(static_cast<state_type>(s));
+	}
+
 	StateSet step(state_type current, symbol_type symbol) const override {
 		assert(current < state_size());
 		assert(symbol < AlphabetSize);
