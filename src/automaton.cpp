@@ -151,6 +151,84 @@ std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs) {
 	return os;
 }
 
+google::dense_hash_set<state_type> live_states(const AutomatonBase& a) {
+	const state_type state_size = a.state_size();
+	//This set will be used as the visited set for the forward search, then
+	//reused as the live set for the backward search.
+	google::dense_hash_set<state_type> live(state_size);
+	live.set_empty_key(std::numeric_limits<state_type>::max());
+
+	//TODO: there's not yet a good way to use std::sort on separate vectors
+	//See http://stackoverflow.com/q/13840998/3614835.
+	std::vector<std::pair<state_type, state_type>> inverseEdgelist;
+	//Exact sizing (counting transitions) is probably not worth it, but we
+	//know there's at least this much.
+	inverseEdgelist.reserve(state_size);
+
+	std::stack<state_type> nexts;
+	nexts.push(0);
+	live.insert(0);
+	while (!nexts.empty()) {
+		state_type n = nexts.top();
+		nexts.pop();
+		a.for_each_destination(n, [&](state_type next) {
+			inverseEdgelist.push_back({next, n});
+			if (live.insert(next).second)
+				nexts.push(next);
+		});
+	}
+
+	//At this point, inverseEdgelist is complete for all reachable states.
+	std::sort(inverseEdgelist.begin(), inverseEdgelist.end());
+	std::vector<state_type> inverse;
+	inverse.reserve(inverseEdgelist.size());
+	std::transform(inverseEdgelist.begin(), inverseEdgelist.end(),
+		std::back_inserter(inverse), [](const auto& p){return p.second;});
+	std::vector<decltype(inverse)::iterator> inverseIdx;
+	inverseIdx.reserve(state_size + 1);
+	inverseIdx.push_back(inverse.begin());
+	decltype(inverseEdgelist)::iterator edgelistPos = inverseEdgelist.begin();
+	for (state_type s = 0; s < state_size; ++s) {
+		edgelistPos = std::find_if_not(edgelistPos, inverseEdgelist.end(), [s](auto& p){return p.first == s;});
+		inverseIdx.push_back(inverse.begin() + std::distance(inverseEdgelist.begin(), edgelistPos));
+	}
+	inverseEdgelist.clear();
+	inverseEdgelist.shrink_to_fit();
+
+	auto inverseDestinations = [&](state_type s) {
+		assert(s < inverseIdx.size());
+		return boost::make_iterator_range(inverseIdx[s], inverseIdx[s+1]);
+	};
+
+	//We want to initialize the live set to the reachable accept states, but
+	//we can't clear it until we've decided which accept states are reachable.
+	//We'll iterate once noting any unreachable accept states, then make
+	//another pass to initialize the live set.  (It's tempting to just clear
+	//the accept flag for those states, but we can't modify the automaton here.)
+	google::dense_hash_set<state_type> unreachableAccepts;
+	unreachableAccepts.set_empty_key(std::numeric_limits<state_type>::max());
+	a.for_each_accept([&](state_type state) {
+		if (!live.count(state))
+			unreachableAccepts.insert(state);
+	});
+	live.clear_no_resize();
+	assert(nexts.empty());
+	a.for_each_accept([&](state_type state) {
+		if (!unreachableAccepts.count(state)) {
+			live.insert(state);
+			nexts.push(state);
+		}
+	});
+	while (!nexts.empty()) {
+		state_type n = nexts.top();
+		nexts.pop();
+		for (state_type next : inverseDestinations(n))
+			if (live.insert(next).second)
+				nexts.push(next);
+	}
+	return live;
+}
+
 struct Tarjan {
 	Tarjan(const AutomatonBase& a_) : a(a_), lowlink(a.state_size()), number(a.state_size()) {
 		std::fill(number.begin(), number.end(), std::numeric_limits<state_type>::max());

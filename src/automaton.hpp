@@ -221,6 +221,15 @@ struct LazyEdgeEnumerator {
 		return queue.empty() && a >= b->alphabet_size();
 	}
 };
+
+//live_states is a reasonable public function, but we only use it when removing
+//dead states, so we'll put it in detail for now
+/**
+ * Returns a set of the live states of this automaton.  A state is live iff
+ * it is contained in a path from the initial state to an accept state.
+ * @return the set of live states
+ */
+google::dense_hash_set<state_type> live_states(const AutomatonBase& a);
 } //namespace detail
 
 
@@ -773,7 +782,7 @@ public:
 	 * Removes dead states and transitions from this automaton.
 	 */
 	void removeDeadStates() override {
-		auto live = liveStates();
+		auto live = detail::live_states(*this);
 		if (live.size() == state_size())
 			return;
 		if (live.empty()) {
@@ -1294,92 +1303,6 @@ public:
 		}
 		return overall.count() == sum;
 	}
-
-	/**
-	 * Returns a set of the live states of this automaton.  A state is live iff
-	 * it is contained in a path from the initial state to an accept state.
-	 * @return the set of live states
-	 */
-	google::dense_hash_set<state_type> liveStates() const {
-		//This set will be used as the visited set for the forward search, then
-		//reused as the live set for the backward search.
-		google::dense_hash_set<state_type> live(state_size());
-		live.set_empty_key(state_size());
-
-		//TODO: there's not yet a good way to use std::sort on separate vectors
-		//See http://stackoverflow.com/q/13840998/3614835.
-		std::vector<std::pair<state_type, state_type>> inverseEdgelist;
-		//Exact sizing (counting transitions) is probably not worth it, but we
-		//know there's at least this much.
-		inverseEdgelist.reserve(state_size());
-
-		std::stack<state_type> nexts;
-		nexts.push(0);
-		live.insert(0);
-		while (!nexts.empty()) {
-			state_type n = nexts.top();
-			nexts.pop();
-			for (const Transition& t : transitions_[n])
-				inverseEdgelist.push_back({t.next_, n});
-			for (state_type next : destinations(n))
-				if (live.insert(next).second)
-					nexts.push(next);
-		}
-
-		//At this point, inverseEdgelist is complete for all reachable states.
-		std::sort(inverseEdgelist.begin(), inverseEdgelist.end());
-		std::vector<state_type> inverse;
-		inverse.reserve(inverseEdgelist.size());
-		std::transform(inverseEdgelist.begin(), inverseEdgelist.end(),
-			std::back_inserter(inverse), [](const auto& p){return p.second;});
-		std::vector<decltype(inverse)::iterator> inverseIdx;
-		inverseIdx.reserve(state_size() + 1);
-		inverseIdx.push_back(inverse.begin());
-		decltype(inverseEdgelist)::iterator edgelistPos = inverseEdgelist.begin();
-		for (state_type s = 0; s < state_size(); ++s) {
-			edgelistPos = std::find_if_not(edgelistPos, inverseEdgelist.end(), [s](auto& p){return p.first == s;});
-			inverseIdx.push_back(inverse.begin() + std::distance(inverseEdgelist.begin(), edgelistPos));
-		}
-		inverseEdgelist.clear();
-		inverseEdgelist.shrink_to_fit();
-
-		auto inverseDestinations = [&](state_type s) {
-			assert(s < inverseIdx.size());
-			return boost::make_iterator_range(inverseIdx[s], inverseIdx[s+1]);
-		};
-
-		//We want to initialize the live set to the reachable accept states, but
-		//we can't clear it until we've decided which accept states are reachable.
-		//We'll iterate once noting any unreachable accept states, then make
-		//another pass to initialize the live set.  (It's tempting to just clear
-		//the accept flag for those states, but liveStates() is const.)
-		google::dense_hash_set<state_type> unreachableAccepts;
-		unreachableAccepts.set_empty_key(state_size());
-		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s)) {
-			state_type state = static_cast<state_type>(s);
-			if (!live.count(state))
-				unreachableAccepts.insert(state);
-		}
-		live.clear_no_resize();
-		assert(nexts.empty());
-		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s)) {
-			assert(s < state_size());
-			state_type state = static_cast<state_type>(s);
-			if (!unreachableAccepts.count(state)) {
-				live.insert(state);
-				nexts.push(state);
-			}
-		}
-		while (!nexts.empty()) {
-			state_type n = nexts.top();
-			nexts.pop();
-			for (state_type next : inverseDestinations(n))
-				if (live.insert(next).second)
-					nexts.push(next);
-		}
-		return live;
-	}
-
 private:
 	template<class Alphabet, class Callable>
 	void enumerateRecurse(std::vector<state_type>& stateStack, std::vector<typename Alphabet::symbol_type>& symbolString, Callable callback) {
