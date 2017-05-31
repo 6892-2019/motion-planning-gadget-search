@@ -230,6 +230,9 @@ struct LazyEdgeEnumerator {
  * @return the set of live states
  */
 google::dense_hash_set<state_type> live_states(const AutomatonBase& a);
+
+std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumbering(const AutomatonBase& a,
+		const decltype(live_states(a))& live);
 } //namespace detail
 
 
@@ -789,46 +792,14 @@ public:
 			*this = empty<AlphabetSize>();
 			return;
 		}
-		//If any states are live, the initial state must be one of them.
-		assert(live.count(0) == 1);
 		MAYBE_UNUSED std::size_t oldsize = state_size();
-		//maps old state numbers to new state numbers
-		natural_map<state_type, state_type> renumber(state_size());
-		boost::dynamic_bitset<std::size_t> newnumbers(live.size());
-		newnumbers.set();
-		for (state_type s : live)
-			//live states keep their numbers if possible
-			if (s < live.size()) {
-				renumber.insert({s, s});
-				newnumbers.reset(s);
-			}
-		unsigned long freestart = 0;
-		for (state_type s : live)
-			if (s >= live.size()) {
-				freestart = newnumbers.find_next(freestart);
-				renumber.insert({s, static_cast<state_type>(freestart)});
-				newnumbers.reset(freestart);
-			}
-
-		for (const std::pair<state_type, state_type> p : renumber) {
-			auto& nt = transitions_[p.second];
-			if (p.first != p.second) {
-				transitions_[p.second] = std::move(transitions_[p.first]);
-				accept_[p.second] = accept_[p.first];
-			}
-			//iterate backwards to gracefully remove
-			for (auto i = nt.size(); i-- > 0;) {
-				auto it = renumber.find(nt[i].next_);
-				if (it != renumber.end())
-					nt[i].next_ = (*it).second;
-				else
-					nt.erase(nt.begin()+i);
-			}
-		}
-
-		transitions_.resize(live.size());
-		accept_.resize(live.size());
-		//TODO: shrink_to_fit?
+		//We will be minimal or canonical here, but we might be deterministic.
+		//compressRenumber conservatively kills determinism, so we need to
+		//preserve it ourselves.
+		bool det = deterministic_;
+		auto res = detail::find_dead_state_renumbering(*this, live);
+		compressRenumber(static_cast<state_type>(res.first.size()), res.first.begin(), res.second.begin());
+		deterministic_ = det;
 		AUTOMATON_DEBUG(std::cout << "removeDeadStates: " << oldsize << " -> " << state_size() << std::endl);
 	}
 
@@ -875,17 +846,19 @@ private:
 
 			//Renumber and compress redundant transitions.
 			auto& ts = transitions_[s];
-			for (Transition& t : ts)
-				t.next_ = remapping[t.next_];
-			//iterate backwards to gracefully erase
 			for (auto i = ts.size(); i-- > 0;) {
-				//TODO: this is n^2, we may have a problem here
-				for (decltype(i) j = 0; j < i; ++j)
-					if (ts[i].next_ == ts[j].next_) {
-						ts[j].symbols_ |= ts[i].symbols_;
-						ts.erase(ts.begin() + i);
-						break;
-					}
+				if (remapping[ts[i].next_] == std::numeric_limits<state_type>::max())
+					ts.erase(ts.begin() + i);
+				else {
+					ts[i].next_ = remapping[ts[i].next_];
+					//compare against previously remapped transitions, iterating backwards
+					for (auto j = ts.size(); j-- > (i+1);)
+						if (ts[i].next_ == ts[j].next_) {
+							ts[i].symbols_ |= ts[j].symbols_;
+							ts.erase(ts.begin() + j);
+							break; //can only be one other with same next_
+						}
+				}
 			}
 		}
 		transitions_.resize(newSize);

@@ -229,6 +229,33 @@ google::dense_hash_set<state_type> live_states(const AutomatonBase& a) {
 	return live;
 }
 
+std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumbering(const AutomatonBase& a, const decltype(live_states(a))& live) {
+	//If any states are live, the initial state must be one of them.
+	assert(live.count(0) == 1);
+	dynarray<state_type> survivorFrom(live.size()), remap(a.state_size());
+	//some states don't get mapped anywhere; allow distinguishing this
+	std::fill(remap.begin(), remap.end(), std::numeric_limits<state_type>::max());
+	boost::dynamic_bitset<std::size_t> newnumbers(live.size());
+	newnumbers.set();
+	for (state_type s : live)
+		//live states keep their numbers if possible
+		if (s < live.size()) {
+			survivorFrom[s] = s;
+			remap[s] = s;
+			newnumbers.reset(s);
+		}
+	unsigned long freestart = 0;
+	for (state_type s : live)
+		if (s >= live.size()) {
+			freestart = newnumbers.find_next(freestart);
+			state_type dest = static_cast<state_type>(freestart);
+			survivorFrom[dest] = s;
+			remap[s] = dest;
+			newnumbers.reset(freestart);
+		}
+	return {std::move(survivorFrom), std::move(remap)};
+}
+
 struct Tarjan {
 	Tarjan(const AutomatonBase& a_) : a(a_), lowlink(a.state_size()), number(a.state_size()) {
 		std::fill(number.begin(), number.end(), std::numeric_limits<state_type>::max());
