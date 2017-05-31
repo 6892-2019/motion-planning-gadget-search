@@ -154,9 +154,8 @@ template<unsigned int N>
 SymbolSet set_of_indices(automaton::bitset<N> mask) {
 	SymbolSet set;
 	set.reserve(mask.count());
-	for (typename automaton::bitset<N>::size_type s = 0; s < mask.size(); ++s)
-		if (mask[s])
-			set.insert_absent(s);
+	for (auto s = mask.find_first(); s < mask.size(); s = mask.find_next(s))
+		set.insert_absent(s);
 	return set;
 }
 
