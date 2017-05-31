@@ -217,6 +217,30 @@ public:
 //		return *this;
 //	}
 
+	/**
+	 * @return the index of the first set bit in this bitset, or > size() if
+	 * this set is empty
+	 */
+	size_type find_first() const {
+		if (!bits_)
+			//this is what x86-64 tzcnt returns, so should help GCC fold it
+			return std::numeric_limits<decltype(__builtin_ctz(bits_))>::digits;
+		return __builtin_ctz(bits_);
+	}
+
+	/**
+	 * @return the index of the next set bit following the bit at index prev,
+	 * or > size() if this set is empty
+	 */
+	size_type find_next(size_type prev) const {
+		assert(prev < size());
+		unsigned int q = bits_ & ~(prev == 32 ? ~0u : (1u << (prev+1)) - 1);
+		if (!q)
+			//this is what x86-64 tzcnt returns, so should help GCC fold it
+			return std::numeric_limits<decltype(__builtin_ctz(q))>::digits;
+		return __builtin_ctz(q);
+	}
+
 	bitset& operator&=(const bitset& other) {
 //		bits_ &= other.bits_;
 		do_and(other.bits_);
