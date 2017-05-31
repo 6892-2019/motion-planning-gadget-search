@@ -353,6 +353,19 @@ public:
 		return {};
 	}
 
+	void for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const override {
+		for (const Transition& t : transitions_[state])
+			for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
+				action(a, t.next_);
+	}
+
+	void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const override {
+		for (state_type s = 0; s < state_size(); ++s)
+			for (const Transition& t : transitions_[s])
+				for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
+					action(s, a, t.next_);
+	}
+
 	void reserve(state_type state_capacity) override {
 		transitions_.reserve(state_capacity);
 		accept_.reserve(state_capacity);

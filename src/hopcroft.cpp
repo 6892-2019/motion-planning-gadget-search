@@ -87,33 +87,34 @@ private:
 			}
 		};
 
-		std::vector<InverseEntry> edgelist;
-		edgelist.reserve(a_.state_size() * a_.alphabet_size() + 1);
-		bool crashed = false;
 		unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
 		for (state_type s = 0; s < a_.state_size(); ++s) {
-			for (symbol_type a = 0; a < a_.alphabet_size(); ++a) {
-				if (auto target = a_.stepDeterministic(s, a))
-					edgelist.push_back(InverseEntry{s, a, *target});
-				else
-					crashed = true;
-			}
-
 			if (a_.accept(s))
 				partitions_[finalIdx--] = s;
 			else
 				partitions_[nonfinalIdx++] = s;
 		}
-		edgelist.push_back(InverseEntry{std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max(), std::numeric_limits<state_type>::max()});
-
 		assert(nonfinalIdx == finalIdx+1 && "didn't partition all the states somehow");
 		if (nonfinalIdx == partitions_.size()) {
 			make_empty(a_);
 			return false;
-		} else if ((finalIdx+1) == 0U && !crashed) {
+		}
+
+		std::vector<InverseEntry> edgelist;
+		edgelist.reserve(a_.state_size() * a_.alphabet_size() + 1);
+		a_.for_each_transition([&edgelist](state_type from, symbol_type on, state_type to) {
+			edgelist.push_back(InverseEntry{from, on, to});
+		});
+		bool crashed = edgelist.size() != a_.state_size() * a_.alphabet_size();
+		//We need to know if we crashed (equivalently, if we're not total), and
+		//testing whether we're total requires iterating all the states anyway,
+		//so we'll wait until after building the edgelist on the assumption that
+		//trivial automata are uncommon.
+		if ((finalIdx+1) == 0U && !crashed) {
 			make_all(a_);
 			return false;
 		}
+		edgelist.push_back(InverseEntry{std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max(), std::numeric_limits<state_type>::max()});
 
 		if (crashed) {
 			//Because we didn't totalize, we need to manually partition
