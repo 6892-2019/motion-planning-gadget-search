@@ -286,6 +286,12 @@ public:
 	symbol_type alphabet_size() const override {
 		return alphabet_size_v;
 	}
+	symbol_type active_alphabet_size() const override {
+		symbol_mask_type mask;
+		for (state_type s = 0; s < state_size(); ++s)
+			mask |= outgoing_mask(s);
+		return mask.count();
+	}
 	std::size_t edge_size() const override {
 		return std::accumulate(transitions_.begin(), transitions_.end(), static_cast<std::size_t>(0),
 				[](std::size_t l, const auto& r) {return l + r.size();});
