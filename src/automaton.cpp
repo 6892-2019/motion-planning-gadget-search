@@ -256,6 +256,119 @@ std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumberin
 	return {std::move(survivorFrom), std::move(remap)};
 }
 
+void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
+	assert(source.alphabet_size() == target.alphabet_size());
+	assert(target.state_size() == 0);
+	const state_type state_size = source.state_size();
+	const symbol_type alphabet_size = source.alphabet_size();
+
+	const int DETERMINIZE_PAGE_SIZE = 4096, DETERMINIZE_PAGE_UNITS = DETERMINIZE_PAGE_SIZE/sizeof(state_type);
+	//manages page lifetime: free them all at the end
+	boost::container::small_vector<std::unique_ptr<state_type, free_deleter>, 8> page_handles;
+	page_handles.emplace_back(static_cast<state_type*>(std::malloc(DETERMINIZE_PAGE_SIZE)));
+	//points to the start of the current set
+	state_type* alloc_next = page_handles.front().get();
+	//points past the end of the current set (next append slot)
+	state_type* alloc_cur = alloc_next;
+	//points to the end of the current page
+	state_type* alloc_page_end = page_handles.front().get()+DETERMINIZE_PAGE_UNITS;
+	auto set_append = [&](state_type state) {
+		if (alloc_cur == alloc_page_end) {
+			if (alloc_next == page_handles.back().get()) {
+				//TODO: realloc this set into a double-sized page (then skip the below new-page alloc)
+				std::cout << "set size of full page\n";
+				std::terminate();
+			}
+			//TODO: if we're allocating lots of pages, may want to start doubling size
+			page_handles.emplace_back(static_cast<state_type*>(std::malloc(DETERMINIZE_PAGE_SIZE)));
+			//copy the current partial set into the new page
+			state_type* next_next = page_handles.back().get();
+			state_type* next_cur = std::copy(alloc_next, alloc_cur, next_next);
+			alloc_next = next_next;
+			alloc_cur = next_cur;
+			alloc_page_end = alloc_next + DETERMINIZE_PAGE_UNITS;
+		}
+		++(*alloc_next); //increment size first
+		//If we're appending the 0 size of a new set, this write clobbers
+		//the previous increment (on purpose).
+		*alloc_cur++ = state;
+	};
+	set_append(0); //each set begins with a size
+	auto commit_set = [&]() -> state_type* {
+		state_type* set_start = alloc_next;
+		alloc_next = alloc_cur;
+		set_append(0); //size of the next set
+		return set_start;
+	};
+	auto clear_set = [&]() {
+		*alloc_next = 0; //reset the size
+		alloc_cur = alloc_next+1;
+	};
+
+	auto set_begin = [](state_type* set) {
+		return set+1;
+	};
+	auto set_end = [&](state_type* set) {
+		return set_begin(set) + *set;
+	};
+	auto set_size = [&](state_type* set) {
+		assert(*set == numeric_cast<state_type>(set_end(set) - set_begin(set)));
+		return *set;
+	};
+
+	auto set_equal = [&](state_type* left, state_type* right) {
+		//TODO: this could be *left == *right && !memcmp(left, right, *left + 1);
+		//^we have to check the size first so we don't read off the end of a page
+		return std::equal(set_begin(left), set_end(left), set_begin(right), set_end(right));
+	};
+	auto set_hash = [](state_type* set) {
+		//this includes the size of the set as the first element of the hash
+		return farmhash::Hash(reinterpret_cast<char*>(set), (*set + 1) * sizeof(*set));
+	};
+	state_type empty_set = 0; //a "set" with just a size 0; empty sets represent crashes, so we'll never insert one
+	google::dense_hash_map<state_type*, state_type,
+			decltype(std::ref(set_hash)), decltype(std::ref(set_equal))> newstate(state_size,
+			std::ref(set_hash), std::ref(set_equal));
+	newstate.set_empty_key(&empty_set);
+	std::stack<std::pair<state_type*, state_type>> worklist; //TODO: maybe based on small_vector<16ish>?
+
+	target.reserve(state_size); //a reasonable lower bound for connected automata
+	target.addState();
+	set_append(0);
+	state_type* first_set = commit_set();
+	newstate.insert({first_set, 0});
+	worklist.push({first_set, 0});
+
+	while (!worklist.empty()) {
+		auto [current_set, current_state] = worklist.top();
+		worklist.pop();
+		target.setAccept(current_state, std::any_of(set_begin(current_set), set_end(current_set),
+				[&source](state_type s) {return source.accept(s);}));
+
+		//TODO: it may be better to build one set per symbol in parallel here,
+		//so we can use for_each_transition, avoiding repeated scans over the edges
+		for (symbol_type s = 0; s < alphabet_size; ++s) {
+			for (state_type f : make_range_for_pair(set_begin(current_set), set_end(current_set)))
+				for (state_type t : source.step(f, s))
+					set_append(t);
+			std::sort(set_begin(alloc_next), set_end(alloc_next));
+			state_type* new_set_end = std::unique(set_begin(alloc_next), set_end(alloc_next));
+			*alloc_next = numeric_cast<state_type>(new_set_end - set_begin(alloc_next));
+			alloc_cur = new_set_end;
+			if (!set_size(alloc_next))
+				continue; //all NFA states crashed
+			auto it = newstate.find(alloc_next);
+			if (it == newstate.end()) {
+				it = newstate.insert({commit_set(), target.addState()}).first;
+				worklist.push(*it);
+			} else
+				clear_set();
+			target.addTrans(current_state, s, it->second);
+			assert(target.deterministic());
+		}
+	}
+}
+
 struct Tarjan {
 	Tarjan(const AutomatonBase& a_) : a(a_), lowlink(a.state_size()), number(a.state_size()) {
 		std::fill(number.begin(), number.end(), std::numeric_limits<state_type>::max());
