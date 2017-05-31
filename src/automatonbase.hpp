@@ -251,6 +251,62 @@ public:
 		return ret;
 	}
 
+	/**
+	 * Runs this automaton on the given string.
+	 * @returns true iff the machine accepts the given string of symbol indices
+	 */
+	bool run(std::initializer_list<unsigned int> string) const {
+		//This overload exists because the compiler won't deduce initializer_list
+		//for the IteratorRange overload below.
+		return run(string.begin(), string.end());
+	}
+	/**
+	 * Runs this automaton on the given string.
+	 * @returns true iff the machine accepts the given string of symbol indices
+	 */
+	template<class InputIterator, class = std::void_t<typename std::iterator_traits<InputIterator>::iterator_category>>
+	bool run(InputIterator begin, InputIterator end) const {
+		return run(boost::make_iterator_range(begin, end));
+	}
+	/**
+	 * Runs this automaton on the given string.
+	 * @returns true iff the machine accepts the given string of symbol indices
+	 */
+	template<class IteratorRange>
+	bool run(const IteratorRange& string) const {
+		//Breadth-first search.
+		std::unordered_set<state_type> current, next;
+		current.insert(0); //TODO: assuming 0 is the initial state
+		for (unsigned int symbol : string) {
+			for (state_type c : current)
+				for (state_type n : step(c, symbol))
+					next.insert(n);
+			std::swap(current, next);
+			next.clear();
+		}
+		return std::any_of(current.begin(), current.end(), [this](state_type s){return accept(s);});
+	}
+	/**
+	 * Runs this automaton on the given string.
+	 * @returns true iff the machine accepts the given string of symbol indices
+	 */
+	template<typename... Symbols, std::enable_if_t<
+		vta::are_same<symbol_type, Symbols...>::value || vta::are_same<std::make_signed_t<symbol_type>, Symbols...>::value,
+		int> = 0>
+	bool run(Symbols... string) const {
+		//Breadth-first search.
+		std::unordered_set<state_type> current, next;
+		current.insert(0); //TODO: assuming 0 is the initial state
+		vta::map([&](auto symbol) {
+			for (state_type c : current)
+				for (state_type n : this->step(c, numeric_cast<symbol_type>(symbol)))
+					next.insert(n);
+			std::swap(current, next);
+			next.clear();
+		})(string...);
+		return std::any_of(current.begin(), current.end(), [this](state_type s){return accept(s);});
+	}
+
 	virtual void reserve(state_type state_capacity) = 0;
 	/**
 	 * Adds a new state to this automaton.  The state is rejecting and has no
