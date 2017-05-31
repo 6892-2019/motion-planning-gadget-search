@@ -127,6 +127,20 @@ std::ostream& operator<<(std::ostream& o, const AutomatonBase& a) {
 	return o;
 }
 
+auto WorkingAutomaton::append(const AutomatonBase& b) -> state_type {
+	reserve(state_size() + b.state_size());
+	state_type base = state_size();
+	for (state_type i = 0; i < b.state_size(); ++i) {
+		addState();
+		setAccept(base + i, b.accept(i));
+	}
+	b.for_each_transition([&](state_type from, symbol_type on, state_type to) {
+		addTrans(from + base, on, to + base);
+	});
+	assert(b.state_size() == 0 || (!minimal() && !canonical()));
+	return base;
+}
+
 namespace detail {
 std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs) {
 	const AutomatonBase& a = rs.a;

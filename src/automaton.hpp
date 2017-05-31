@@ -1105,20 +1105,6 @@ public:
 		return base;
 	}
 
-	state_type append(const AutomatonBase& b) {
-		reserve(state_size() + b.state_size());
-		state_type base = state_size();
-		for (state_type i = 0; i < b.state_size(); ++i) {
-			addState();
-			setAccept(base + i, b.accept(i));
-		}
-		b.for_each_transition([&](state_type from, symbol_type on, state_type to) {
-			addTrans(from + base, on, to + base);
-		});
-		minimal_ = canonical_ = false;
-		return base;
-	}
-
 	/**
 	 * Adds the given transitions to this automaton.
 	 * @return true if the automaton changed, false if all transitions were

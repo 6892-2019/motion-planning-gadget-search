@@ -433,6 +433,7 @@ public:
 	virtual void minimize() = 0;
 	virtual void canonicalize() = 0;
 	virtual std::size_t working_hash() const = 0;
+	state_type append(const AutomatonBase& b);
 };
 
 std::unique_ptr<WorkingAutomaton> make_working(unsigned int size);
