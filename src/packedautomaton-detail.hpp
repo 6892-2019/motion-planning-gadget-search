@@ -8,6 +8,13 @@
 namespace automaton {
 namespace detail {
 
+/**
+ * @return the number of set bits in x below and including position pos
+ */
+inline unsigned int count_set_lowbits(unsigned int x, unsigned int pos) {
+	return __builtin_popcount(x & ((1 << pos) - 1));
+}
+
 template<typename T>
 using limits = std::numeric_limits<T>;
 
@@ -120,7 +127,7 @@ public:
 		OutgoingMaskType outgoing = outgoing_mask(state);
 		if (!(outgoing & (1u << symbol))) return std::nullopt;
 		//how many symbols came before
-		auto suboffset = count_set_left(outgoing, symbol);
+		auto suboffset = count_set_lowbits(outgoing, symbol);
 		return load(destinations_begin(state) + suboffset);
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
@@ -180,21 +187,6 @@ private:
 		for (symbol_type s : set)
 			mask |= 1u << s;
 		return numeric_cast<OutgoingMaskType>(mask);
-	}
-	static unsigned int high_zeroes(unsigned int x) {
-		//fxtbook 1.6.2, page 17
-		x |= x >> 1;
-		x |= x >> 2;
-		x |= x >> 4;
-		x |= x >> 8;
-		x |= x >> 16;
-		return ~x;
-	}
-	/**
-	 * @return the number of set bits in x to the left of and including position pos
-	 */
-	static unsigned int count_set_left(unsigned int x, unsigned int pos) {
-		return __builtin_popcount(x & ~(high_zeroes(1u << pos) | 1 << pos));
 	}
 };
 
@@ -298,7 +290,7 @@ public:
 		OutgoingMaskType outgoing = outgoing_mask(state);
 		if (!(outgoing & (1u << symbol))) return std::nullopt;
 		//how many symbols came before
-		auto suboffset = count_set_left(outgoing, symbol);
+		auto suboffset = count_set_lowbits(outgoing, symbol);
 		return load(destinations_begin(state) + suboffset);
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
@@ -358,21 +350,6 @@ private:
 		for (symbol_type s : set)
 			mask |= 1u << s;
 		return numeric_cast<OutgoingMaskType>(mask);
-	}
-	static unsigned int high_zeroes(unsigned int x) {
-		//fxtbook 1.6.2, page 17
-		x |= x >> 1;
-		x |= x >> 2;
-		x |= x >> 4;
-		x |= x >> 8;
-		x |= x >> 16;
-		return ~x;
-	}
-	/**
-	 * @return the number of set bits in x to the left of and including position pos
-	 */
-	static unsigned int count_set_left(unsigned int x, unsigned int pos) {
-		return __builtin_popcount(x & ~(high_zeroes(1u << pos) | 1 << pos));
 	}
 };
 
@@ -486,7 +463,7 @@ public:
 		OutgoingMaskType outgoing = outgoing_mask(state);
 		if (!(outgoing & (1u << symbol))) return std::nullopt;
 		//how many symbols came before
-		auto suboffset = count_set_left(outgoing, symbol);
+		auto suboffset = count_set_lowbits(outgoing, symbol);
 		return load(destinations_begin(state) + suboffset);
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
@@ -553,21 +530,6 @@ private:
 		for (symbol_type s : set)
 			mask |= 1u << s;
 		return numeric_cast<OutgoingMaskType>(mask);
-	}
-	static unsigned int high_zeroes(unsigned int x) {
-		//fxtbook 1.6.2, page 17
-		x |= x >> 1;
-		x |= x >> 2;
-		x |= x >> 4;
-		x |= x >> 8;
-		x |= x >> 16;
-		return ~x;
-	}
-	/**
-	 * @return the number of set bits in x to the left of and including position pos
-	 */
-	static unsigned int count_set_left(unsigned int x, unsigned int pos) {
-		return __builtin_popcount(x & ~(high_zeroes(1u << pos) | 1 << pos));
 	}
 	static unsigned int div8roundup(unsigned int x) {
 		//udiv by 8 is rshift by 3; remainder if any of the shifted-out bits are set
