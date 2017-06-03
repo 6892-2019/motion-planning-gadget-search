@@ -15,6 +15,14 @@ inline unsigned int count_set_lowbits(unsigned int x, unsigned int pos) {
 	return __builtin_popcount(x & ((1 << pos) - 1));
 }
 
+template<typename OutgoingMaskType>
+OutgoingMaskType set_to_mask(SymbolSet set) {
+	std::size_t mask = 0;
+	for (symbol_type s : set)
+		mask |= 1u << s;
+	return numeric_cast<OutgoingMaskType>(mask);
+}
+
 template<typename T>
 using limits = std::numeric_limits<T>;
 
@@ -65,7 +73,7 @@ public:
 		//TODO: if we know where offsets start, we can make this one big loop,
 		//so we only call a.outgoing(s) once
 		for (state_type s = 0; s < a.state_size(); ++s)
-			p.write<OutgoingMaskType>(set_to_mask(a.outgoing(s)));
+			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)));
 		OffsetType offset = 0;
 		for (state_type s = 0; s < a.state_size(); ++s) {
 			p.write<OffsetType>(offset | (a.accept(s) ? 1 << (limits<OffsetType>::digits - 1) : 0));
@@ -181,13 +189,6 @@ private:
 	const StateSizeType* destinations_end(state_type state) const {
 		return destinations_begin(state) + __builtin_popcount(outgoing_mask(state));
 	}
-
-	static OutgoingMaskType set_to_mask(SymbolSet set) {
-		std::size_t mask = 0;
-		for (symbol_type s : set)
-			mask |= 1u << s;
-		return numeric_cast<OutgoingMaskType>(mask);
-	}
 };
 
 using Diminutive8OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
@@ -229,7 +230,7 @@ public:
 		//TODO: if we know where offsets start, we can make this one big loop,
 		//so we only call a.outgoing(s) once
 		for (state_type s = 0; s < a.state_size(); ++s)
-			p.write<OutgoingMaskType>(set_to_mask(a.outgoing(s)) | (a.accept(s) ? 1 << (limits<OutgoingMaskType>::digits - 1) : 0));
+			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)) | (a.accept(s) ? 1 << (limits<OutgoingMaskType>::digits - 1) : 0));
 		OffsetType offset = 0;
 		for (state_type s = 0; s < a.state_size(); ++s) {
 			p.write<OffsetType>(offset);
@@ -344,13 +345,6 @@ private:
 	const StateSizeType* destinations_end(state_type state) const {
 		return destinations_begin(state) + __builtin_popcount(outgoing_mask(state));
 	}
-
-	static OutgoingMaskType set_to_mask(SymbolSet set) {
-		std::size_t mask = 0;
-		for (symbol_type s : set)
-			mask |= 1u << s;
-		return numeric_cast<OutgoingMaskType>(mask);
-	}
 };
 
 using Diminutive8OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
@@ -393,7 +387,7 @@ public:
 		//TODO: if we know where offsets start, we can make this one big loop,
 		//so we only call a.outgoing(s) once
 		for (state_type s = 0; s < a.state_size(); ++s)
-			p.write<OutgoingMaskType>(set_to_mask(a.outgoing(s)));
+			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)));
 		unsigned int acceptmask = 0;
 		for (state_type s = 0; s < a.state_size();) {
 			for (unsigned int i = 0; i < 8 && s < a.state_size(); ++i, ++s) {
@@ -525,12 +519,6 @@ private:
 		return destinations_begin(state) + __builtin_popcount(outgoing_mask(state));
 	}
 
-	static OutgoingMaskType set_to_mask(SymbolSet set) {
-		std::size_t mask = 0;
-		for (symbol_type s : set)
-			mask |= 1u << s;
-		return numeric_cast<OutgoingMaskType>(mask);
-	}
 	static unsigned int div8roundup(unsigned int x) {
 		//udiv by 8 is rshift by 3; remainder if any of the shifted-out bits are set
 		return (x >> 3) + ((x & 0b111) > 0);
