@@ -101,7 +101,7 @@ public:
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
 		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
-			mask |= load(p); //in theory, we could short-circuit if all bits are set
+			mask = numeric_cast<OutgoingMaskType>(mask | load(p)); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask);
 	}
 	AutomatonBase::state_type accept_size() const override {
@@ -268,7 +268,7 @@ public:
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
 		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
-			mask |= load(p); //in theory, we could short-circuit if all bits are set
+			mask = numeric_cast<OutgoingMaskType>(mask | load(p)); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
 	}
 	AutomatonBase::state_type accept_size() const override {
@@ -336,7 +336,7 @@ private:
 		return outgoing_begin() + state_size();
 	}
 	OutgoingMaskType outgoing_mask(state_type state) const {
-		return load(outgoing_begin() + state) & ~(1 << (limits<OutgoingMaskType>::digits - 1));
+		return numeric_cast<OutgoingMaskType>(load(outgoing_begin() + state) & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
 	}
 
 	const OffsetType* offsets_begin() const {
@@ -444,7 +444,7 @@ public:
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
 		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
-			mask |= load(p); //in theory, we could short-circuit if all bits are set
+			mask = numeric_cast<OutgoingMaskType>(mask | load(p)); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask);
 	}
 	AutomatonBase::state_type accept_size() const override {
