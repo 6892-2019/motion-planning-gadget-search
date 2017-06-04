@@ -497,26 +497,6 @@ private:
 		}
 		return a;
 	}
-	static Automaton conj(const Automaton& left, const Automaton& right) {
-		Automaton a;
-		try {
-			a = conj_impl<detail::DenseConjMap>(left, right);
-		} catch (std::bad_alloc&) {
-			AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<DenseConjMap>" << std::endl);
-		}
-		if (!a.isEmpty())
-			try {
-				a = conj_impl<detail::UnorderedConjMap>(left, right);
-			} catch (std::bad_alloc&) {
-				AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<UnorderedConjMap>" << std::endl);
-			}
-		if (!a.isEmpty())
-			//No try-catch here because there's no further recovery
-			a = conj_impl<detail::SparseConjMap>(left, right);
-		AUTOMATON_DEBUG(std::cout << "intersection: " << left.state_size() << ", " << right.state_size() << " -> " << a.state_size() << std::endl);
-		a.removeDeadStates();
-		return a;
-	}
 
 	static Automaton shuffleAccept(const Automaton& left, const Automaton& right) {
 		return shuffleAcceptDeterministic(left.deterministic() ? left : automaton::determinize(left),
@@ -1407,7 +1387,24 @@ Automaton<N> alt(Automata&&... rest) {
 
 template<unsigned int N>
 Automaton<N> conj(const Automaton<N>& left, const Automaton<N>& right) {
-	return Automaton<N>::conj(left, right);
+	Automaton<N> a;
+	try {
+		a = Automaton<N>::template conj_impl<detail::DenseConjMap>(left, right);
+	} catch (std::bad_alloc&) {
+		AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<DenseConjMap>" << std::endl);
+	}
+	if (!a.isEmpty())
+		try {
+			a = Automaton<N>::template conj_impl<detail::UnorderedConjMap>(left, right);
+		} catch (std::bad_alloc&) {
+			AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<UnorderedConjMap>" << std::endl);
+		}
+	if (!a.isEmpty())
+		//No try-catch here because there's no further recovery
+		a = Automaton<N>::template conj_impl<detail::SparseConjMap>(left, right);
+	AUTOMATON_DEBUG(std::cout << "intersection: " << left.state_size() << ", " << right.state_size() << " -> " << a.state_size() << std::endl);
+	a.removeDeadStates();
+	return a;
 }
 //TODO: we could add vararg/iterator-range overloads of conj for convenience,
 //but we know from experience actually doing a multi-way conj is worse
