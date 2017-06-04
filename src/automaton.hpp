@@ -498,12 +498,9 @@ private:
 		return a;
 	}
 
-	static Automaton shuffleAccept(const Automaton& left, const Automaton& right) {
-		return shuffleAcceptDeterministic(left.deterministic() ? left : automaton::determinize(left),
-				right.deterministic() ? right : automaton::determinize(right));
-	}
-
 	static Automaton shuffleAcceptDeterministic(const Automaton& left, const Automaton& right) {
+		assert(left.deterministic());
+		assert(right.deterministic());
 		//(left state, right state, new state, left automation active)
 		using state_quad = std::tuple<state_type, state_type, state_type, bool>;
 		std::stack<state_quad> worklist;
@@ -1482,7 +1479,9 @@ Automaton<N> comp(Automaton<N> a) {
  */
 template<unsigned int N>
 Automaton<N> shuffleAccept(const Automaton<N>& left, const Automaton<N>& right) {
-	return Automaton<N>::shuffleAccept(left, right);
+	return Automaton<N>::shuffleAcceptDeterministic(
+			left.deterministic() ? left : automaton::determinize(left),
+			right.deterministic() ? right : automaton::determinize(right));
 }
 
 /**
