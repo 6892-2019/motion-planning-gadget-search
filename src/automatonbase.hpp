@@ -47,7 +47,12 @@ public:
 	using SymbolSet = linear_set<AutomatonBase::symbol_type>;
 	using StateSet = linear_set<AutomatonBase::state_type>;
 
+	AutomatonBase();
 	virtual ~AutomatonBase();
+	AutomatonBase(const AutomatonBase&);
+	AutomatonBase(AutomatonBase&&);
+	AutomatonBase& operator=(const AutomatonBase&);
+	AutomatonBase& operator=(AutomatonBase&&);
 
 	/**
 	 * @return the number of states in this automaton
@@ -319,6 +324,12 @@ inline range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> Automat
 
 class WorkingAutomaton : public AutomatonBase {
 public:
+	WorkingAutomaton();
+	~WorkingAutomaton();
+	WorkingAutomaton(const WorkingAutomaton&);
+	WorkingAutomaton(WorkingAutomaton&&);
+	WorkingAutomaton& operator=(const WorkingAutomaton&);
+	WorkingAutomaton& operator=(WorkingAutomaton&&);
 	virtual void removeDeadStates() = 0;
 	virtual void totalize() = 0;
 	virtual void determinize() = 0;

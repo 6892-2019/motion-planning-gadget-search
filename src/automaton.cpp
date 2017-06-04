@@ -70,6 +70,13 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 	return compare_slowpath(left, right);
 }
 
+WorkingAutomaton::WorkingAutomaton() = default;
+WorkingAutomaton::~WorkingAutomaton() = default;
+WorkingAutomaton::WorkingAutomaton(const WorkingAutomaton&) = default;
+WorkingAutomaton::WorkingAutomaton(WorkingAutomaton&&) = default;
+WorkingAutomaton& WorkingAutomaton::operator=(const WorkingAutomaton&) = default;
+WorkingAutomaton& WorkingAutomaton::operator=(WorkingAutomaton&&) = default;
+
 auto WorkingAutomaton::append(const AutomatonBase& b) -> state_type {
 	reserve(state_size() + b.state_size());
 	state_type base = state_size();

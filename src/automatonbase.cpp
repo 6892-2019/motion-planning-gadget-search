@@ -3,7 +3,12 @@
 
 using namespace automaton;
 
+AutomatonBase::AutomatonBase() = default;
 AutomatonBase::~AutomatonBase() = default;
+AutomatonBase::AutomatonBase(const AutomatonBase&) = default;
+AutomatonBase::AutomatonBase(AutomatonBase&&) = default;
+AutomatonBase& AutomatonBase::operator=(const AutomatonBase&) = default;
+AutomatonBase& AutomatonBase::operator=(AutomatonBase&&) = default;
 
 AutomatonBase::state_type AutomatonBase::accept_size() const {
 	state_type count = 0;

@@ -38,6 +38,11 @@ public:
 	using iterator = const_iterator;
 
 	linear_set() = default;
+	~linear_set() = default;
+	linear_set(const linear_set&) = default;
+	linear_set(linear_set&&) = default;
+	linear_set& operator=(const linear_set&) = default;
+	linear_set& operator=(linear_set&&) = default;
 
 	bool empty() const {
 		return data_.empty();

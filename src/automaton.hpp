@@ -274,6 +274,7 @@ public:
 		if (canonical())
 			prepareForEquals();
 	}
+	~Automaton() = default;
 	Automaton(const Automaton& a) = default;
 	Automaton(Automaton&& a) = default;
 	Automaton& operator=(const Automaton& a) = default;
