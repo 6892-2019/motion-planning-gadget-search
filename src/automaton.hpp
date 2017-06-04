@@ -1162,6 +1162,23 @@ private:
 	friend Automaton<N> lit(Symbols... symbols);
 };
 
+extern template class automaton::Automaton<1u>;
+extern template class automaton::Automaton<2u>;
+extern template class automaton::Automaton<3u>;
+extern template class automaton::Automaton<4u>;
+extern template class automaton::Automaton<5u>;
+extern template class automaton::Automaton<6u>;
+extern template class automaton::Automaton<7u>;
+extern template class automaton::Automaton<8u>;
+extern template class automaton::Automaton<9u>;
+extern template class automaton::Automaton<10u>;
+extern template class automaton::Automaton<11u>;
+extern template class automaton::Automaton<12u>;
+extern template class automaton::Automaton<13u>;
+extern template class automaton::Automaton<14u>;
+extern template class automaton::Automaton<15u>;
+extern template class automaton::Automaton<16u>;
+
 /**
  * Returns an Automaton that accepts the empty language.
  */

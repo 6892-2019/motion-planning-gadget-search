@@ -23,6 +23,7 @@
         <in>toggles.cpp</in>
       </df>
       <in>alphabet.cpp</in>
+      <in>automaton-instantiations.cpp</in>
       <in>automaton-io.cpp</in>
       <in>automaton.cpp</in>
       <in>expr.cpp</in>
@@ -147,6 +148,8 @@
             <pElem>.</pElem>
           </incDir>
         </ccTool>
+      </item>
+      <item path="src/automaton-instantiations.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/automaton-io.cpp" ex="false" tool="1" flavor2="0">
       </item>
