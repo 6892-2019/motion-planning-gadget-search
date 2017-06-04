@@ -58,10 +58,10 @@ public:
 		nonfull_.notify_one();
 		return ret;
 	}
-	boost::optional<T> poll() {
+	std::optional<T> poll() {
 		lock_guard lock(mutex_);
-		if (queue_.empty()) return boost::none;
-		boost::optional<T> ret = std::move(queue_.front());
+		if (queue_.empty()) return std::nullopt;
+		std::optional<T> ret = std::move(queue_.front());
 		queue_.pop_front();
 		nonfull_.notify_one();
 		return ret;

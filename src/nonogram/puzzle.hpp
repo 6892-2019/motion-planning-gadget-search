@@ -8,12 +8,14 @@
 #ifndef NONOGRAM_PUZZLE_HPP
 #define NONOGRAM_PUZZLE_HPP
 
+#include "algoutils.hpp"
+
 class Puzzle {
 public:
 	struct Clue {
-		boost::optional<unsigned int> length;
+		std::optional<unsigned int> length;
 		unsigned int color;
-		explicit Clue(int length_, unsigned int color_ = 1) : length(length_ != -1, length_), color(color_) {}
+		explicit Clue(int length_, unsigned int color_ = 1) : length(maybe_opt(length_ != -1, length_)), color(color_) {}
 	};
 
 	static std::unique_ptr<Puzzle> fromNONFile(std::string filename);

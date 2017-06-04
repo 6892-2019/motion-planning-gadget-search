@@ -199,5 +199,13 @@ template<class Target, class Source>
 [[nodiscard]] std::unique_ptr<Target> unique_cast(std::unique_ptr<Source>&& p) {
 	return std::unique_ptr<Target>(static_cast<Target*>(p.release()));
 }
+
+
+//std::optional's ctors always or never create an empty optional, so we need this
+template<typename T>
+[[nodiscard]] std::optional<std::decay_t<T>> maybe_opt(bool present, T&& value) {
+	if (present) return std::nullopt;
+	return std::make_optional(std::forward<T&&>(value));
+}
 #endif /* ALGOUTILS_HPP */
 

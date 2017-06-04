@@ -92,22 +92,22 @@ bool WorkingAutomaton::infinite() {
 	google::dense_hash_set<state_type> visited(state_size());
 	visited.set_empty_key(state_size());
 	std::vector<state_type> path;
-	std::stack<boost::optional<state_type>> nexts;
+	std::stack<std::optional<state_type>> nexts;
 
-	nexts.push(boost::make_optional(0U));
+	nexts.push(0U);
 	while (!nexts.empty()) {
-		boost::optional<state_type> n = nexts.top();
+		std::optional<state_type> n = nexts.top();
 		nexts.pop();
 		if (n) {
 			path.push_back(*n);
-			nexts.push(boost::optional<state_type>(boost::none));
+			nexts.push(std::nullopt);
 			for (state_type next : destinations(path.back())) {
 				//We might prefer a set; we could avoid storing path itself
 				//if we store the to-be-popped element in place of the empty optional.
 				if (std::find(path.begin(), path.end(), next) != path.end())
 					return true;
 				if (visited.find(next) == visited.end())
-					nexts.push(boost::make_optional(next));
+					nexts.push(next);
 			}
 		} else {
 			visited.insert(path.back());

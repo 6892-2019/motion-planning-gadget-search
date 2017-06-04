@@ -7,8 +7,8 @@ using std::unique_ptr;
 using std::vector;
 using std::pair;
 using std::string;
-using boost::optional;
-using boost::make_optional;
+using std::optional;
+using std::make_optional;
 
 using Coord = std::pair<unsigned int, unsigned int>;
 
@@ -19,7 +19,7 @@ struct Puzzle {
 		boost::algorithm::split(tokens, rowcol, boost::algorithm::is_any_of(" "));
 		for (string s : tokens)
 			if (s == "-")
-				ret.push_back(optional<unsigned int>(boost::none));
+				ret.push_back(optional<unsigned int>(std::nullopt));
 			else
 				ret.push_back(optional<unsigned int>(std::stoi(s)));
 		return ret;

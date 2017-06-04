@@ -21,7 +21,7 @@ static std::pair<std::size_t, std::size_t> countSolutions(const std::vector<Puzz
 	for (decltype(row.size()) i = 0; i < row.size(); ++i) {
 		const Puzzle::Clue& clue = row[i];
 		if (clue.length)
-			spaces -= clue.length.get();
+			spaces -= *clue.length;
 		else {
 			//must consume at least one space
 			--spaces;
@@ -77,7 +77,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 		for (decltype(row.size()) i = 0; i < row.size(); ++i) {
 			const Puzzle::Clue& clue = row[i];
 			if (clue.length)
-				clueConstraints.push_back(R::repeat(R::lit(clue.color ? true : false), clue.length.get()));
+				clueConstraints.push_back(R::repeat(R::lit(clue.color ? true : false), *clue.length));
 			else
 				clueConstraints.push_back(R::plus(R::lit(clue.color ? true : false)));
 			if ((i+1) < row.size())
@@ -111,7 +111,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 		for (decltype(col.size()) i = 0; i < col.size(); ++i) {
 			const Puzzle::Clue& clue = col[i];
 			if (clue.length)
-				clueConstraints.push_back(R::repeat(R::cat({prefix, R::lit(clue.color ? true : false), suffix}), clue.length.get()));
+				clueConstraints.push_back(R::repeat(R::cat({prefix, R::lit(clue.color ? true : false), suffix}), *clue.length));
 			else
 				clueConstraints.push_back(R::plus(R::cat({prefix, R::lit(clue.color ? true : false), suffix})));
 			if ((i+1) < col.size())

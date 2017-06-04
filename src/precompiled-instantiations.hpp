@@ -15,7 +15,7 @@ AUTOMATA_EXTERN_TEMPLATE template class std::vector<std::pair<unsigned int, unsi
 AUTOMATA_EXTERN_TEMPLATE template class std::queue<std::pair<unsigned int, unsigned int>>;
 
 AUTOMATA_EXTERN_TEMPLATE template class std::stack<unsigned int>;
-AUTOMATA_EXTERN_TEMPLATE template class std::stack<boost::optional<unsigned int>>;
+AUTOMATA_EXTERN_TEMPLATE template class std::stack<std::optional<unsigned int>>;
 AUTOMATA_EXTERN_TEMPLATE template class std::stack<std::tuple<unsigned int, unsigned int, unsigned int>>;
 AUTOMATA_EXTERN_TEMPLATE template class std::stack<std::tuple<unsigned int, unsigned int, unsigned int, bool>>;
 
