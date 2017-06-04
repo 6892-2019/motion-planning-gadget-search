@@ -201,6 +201,16 @@ using Tiny16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsign
 using Small16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
 using Medium16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
 using Large16OffsetPackedAutomaton = OffsetAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
+extern template class OffsetAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
+extern template class OffsetAcceptAutomaton<unsigned char, unsigned char, unsigned short>;
+extern template class OffsetAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
+extern template class OffsetAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
+extern template class OffsetAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+extern template class OffsetAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+extern template class OffsetAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+extern template class OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+extern template class OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+extern template class OffsetAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
 
 /**
  * Stores the accept bit in the high bit of the outgoing mask.
@@ -357,6 +367,16 @@ using Tiny16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, un
 using Small16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
 using Medium16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
 using Large16OutgoingPackedAutomaton = OutgoingAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
+extern template class OutgoingAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
+extern template class OutgoingAcceptAutomaton<unsigned char, unsigned char, unsigned short>;
+extern template class OutgoingAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
+extern template class OutgoingAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
+extern template class OutgoingAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+extern template class OutgoingAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+extern template class OutgoingAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+extern template class OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+extern template class OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+extern template class OutgoingAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
 
 /**
  * Stores the accept bit in a bitmask between the outgoing masks and the offset.
@@ -535,6 +555,16 @@ using Tiny16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsi
 using Small16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
 using Medium16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
 using Large16BitmaskPackedAutomaton = BitmaskAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
+extern template class BitmaskAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
+extern template class BitmaskAcceptAutomaton<unsigned char, unsigned char, unsigned short>;
+extern template class BitmaskAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
+extern template class BitmaskAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
+extern template class BitmaskAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+extern template class BitmaskAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+extern template class BitmaskAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+extern template class BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+extern template class BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+extern template class BitmaskAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
 
 template<class A>
 std::unique_ptr<const PackedAutomaton> make_pack(const AutomatonBase& a) {

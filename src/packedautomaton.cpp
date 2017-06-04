@@ -23,6 +23,38 @@ std::size_t PackedAutomaton::packed_hash() const {
 }
 
 namespace detail {
+
+template class OffsetAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
+template class OffsetAcceptAutomaton<unsigned char, unsigned char, unsigned short>;
+template class OffsetAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
+template class OffsetAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
+template class OffsetAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+template class OffsetAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+template class OffsetAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+template class OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+template class OffsetAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+template class OffsetAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
+template class OutgoingAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
+template class OutgoingAcceptAutomaton<unsigned char, unsigned char, unsigned short>;
+template class OutgoingAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
+template class OutgoingAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
+template class OutgoingAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+template class OutgoingAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+template class OutgoingAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+template class OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+template class OutgoingAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+template class OutgoingAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
+template class BitmaskAcceptAutomaton<unsigned char, unsigned char, unsigned char>;
+template class BitmaskAcceptAutomaton<unsigned char, unsigned char, unsigned short>;
+template class BitmaskAcceptAutomaton<unsigned char, unsigned short, unsigned short>;
+template class BitmaskAcceptAutomaton<unsigned char, unsigned short, unsigned int>;
+template class BitmaskAcceptAutomaton<unsigned char, unsigned int, unsigned int>;
+template class BitmaskAcceptAutomaton<unsigned short, unsigned char, unsigned char>;
+template class BitmaskAcceptAutomaton<unsigned short, unsigned char, unsigned short>;
+template class BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned short>;
+template class BitmaskAcceptAutomaton<unsigned short, unsigned short, unsigned int>;
+template class BitmaskAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
+
 //TODO: I'd love to make this a variadic template (over the impl types), but I don't know how
 std::unique_ptr<const PackedAutomaton> make_best_pack(const AutomatonBase& a) {
 	std::size_t best_extra = std::numeric_limits<std::size_t>::max();
