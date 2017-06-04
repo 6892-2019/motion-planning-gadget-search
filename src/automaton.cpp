@@ -5,14 +5,6 @@
 using namespace automaton;
 
 namespace {
-std::string stringize(SymbolSet set) {
-	std::vector<std::string> strings;
-	set.sort();
-	for (auto s : set)
-		strings.push_back(boost::lexical_cast<std::string>(s));
-	return boost::algorithm::join(strings, ", ");
-}
-
 bool compare_working(const WorkingAutomaton& left, const WorkingAutomaton& right) {
 	assert(left.alphabet_size() == right.alphabet_size()); //should already have been checked in the caller
 	switch (left.alphabet_size()) {
@@ -64,23 +56,6 @@ bool compare_slowpath(const AutomatonBase& left, const AutomatonBase& right) {
 
 namespace automaton {
 
-AutomatonBase::~AutomatonBase() = default;
-std::size_t AutomatonBase::hash() const {
-	std::size_t h = 13;
-	h = 31*h + state_size();
-	h = 31*h + alphabet_size();
-	for (state_type s = 0; s < state_size(); ++s) {
-		for (symbol_type a = 0; a < alphabet_size(); ++a) {
-			StateSet dests = step(s, a);
-			dests.sort();
-			for (state_type d : dests)
-				h = 31*h + d;
-		}
-		//If we ever want to mix in accept, find a way to do it more than one bit at a time.
-	}
-	return h;
-}
-
 bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 	if (left.alphabet_size() != right.alphabet_size()) return false;
 	if (left.state_size() != right.state_size()) return false;
@@ -93,38 +68,6 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 		return *l == *r;
 
 	return compare_slowpath(left, right);
-}
-
-std::ostream& operator<<(std::ostream& o, const AutomatonBase& a) {
-	o << a.state_size() << " states (" << a.accept_size() << " accepting), "
-			<< a.edge_size() << " edges, " << a.transition_size() << " transitions";
-	if (a.deterministic())
-		o << ", deterministic";
-	if (a.minimal())
-		o << ", minimal";
-	if (a.canonical())
-		o << ", canonical";
-	o << "\n";
-	o << a.alphabet_size() << " symbols, " << a.active_alphabet_size() << " active: "
-			//this is a bit wasteful: join a string only to print it
-			<< stringize(a.activeAlphabet()) << "\n";
-
-	auto length = boost::lexical_cast<std::string>(a.state_size() - 1).size();
-	auto leftpad = [length](auto thing) {
-		auto s = boost::lexical_cast<std::string>(thing);
-		while (s.size() < length)
-			s = " " + s; //waste
-		return s;
-	};
-
-	for (AutomatonBase::state_type i = 0; i < a.state_size(); ++i) {
-		o << "state " << leftpad(i) << (a.accept(i) ? " [accept]:\n" : ":\n");
-		for (auto p : a.edges(i)) {
-			p.first.sort();
-			o << "  to " << leftpad(p.second) << " on " << stringize(p.first) << "\n";
-		}
-	}
-	return o;
 }
 
 auto WorkingAutomaton::append(const AutomatonBase& b) -> state_type {
@@ -175,29 +118,6 @@ bool WorkingAutomaton::infinite() {
 }
 
 namespace detail {
-std::ostream& operator<<(std::ostream& os, const AutomatonReprStreamer& rs) {
-	const AutomatonBase& a = rs.a;
-	os << "Automaton<" << a.alphabet_size() << "> make" << a.hash()<< "() {\n";
-	os << "\tAutomaton<" << a.alphabet_size() << "> a;\n";
-	os << "\ta.reserve(" << a.state_size() << ");\n";
-	os << "\tfor (AutomatonBase::state_type s = 0; s < " << a.state_size() << "; ++s)\n";
-	os << "\t\ta.addState();\n";
-	os << "\tfor (AutomatonBase::state_type s : {";
-	for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
-		if (a.accept(s))
-			os << s << ", ";
-	os << "})\n";
-	os << "\t\ta.setAccept(s);\n";
-	//TODO: add a (non-virtual) addTrans overload taking an initializer_list<symbol_type>
-	for (AutomatonBase::state_type from = 0; from < a.state_size(); ++from)
-		for (auto edge : a.edges(from))
-			for (auto on : edge.first)
-				os << "\ta.addTrans(" << from << ", " << on << ", " << edge.second << ");\n";
-	os << "\treturn a;\n";
-	os << "}";
-	return os;
-}
-
 google::dense_hash_set<state_type> live_states(const AutomatonBase& a) {
 	const state_type state_size = a.state_size();
 	//This set will be used as the visited set for the forward search, then

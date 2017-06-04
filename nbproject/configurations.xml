@@ -26,6 +26,7 @@
       <in>automaton-instantiations.cpp</in>
       <in>automaton-io.cpp</in>
       <in>automaton.cpp</in>
+      <in>automatonbase.cpp</in>
       <in>expr.cpp</in>
       <in>hopcroft.cpp</in>
       <in>hopcroft.hpp</in>
@@ -154,6 +155,8 @@
       <item path="src/automaton-io.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/automaton.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/automatonbase.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/benchmark/benchmark-minimize.cpp"
             ex="false"

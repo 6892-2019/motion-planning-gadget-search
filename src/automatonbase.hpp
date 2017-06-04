@@ -56,13 +56,7 @@ public:
 	/**
 	 * @return the number of accepting states in this automaton
 	 */
-	virtual state_type accept_size() const {
-		state_type count = 0;
-		for (state_type s = 0; s < state_size(); ++s)
-			if (accept(s))
-				++count;
-		return count;
-	}
+	virtual state_type accept_size() const;
 	/**
 	 * @return the alphabet size of this automaton
 	 */
@@ -70,32 +64,19 @@ public:
 	/**
 	 * @return the number of symbols that appear in transitions in this automaton
 	 */
-	virtual symbol_type active_alphabet_size() const {
-		return numeric_cast<symbol_type>(activeAlphabet().size());
-	}
+	virtual symbol_type active_alphabet_size() const;
 	/**
 	 * Returns the number of edges in this automaton.  This is the number of
 	 * distinct (from, to) pairs in this automaton.
 	 * @return the number of edges in this automaton
 	 */
-	virtual std::size_t edge_size() const {
-		std::size_t count = 0;
-		for (state_type s = 0; s < state_size(); ++s)
-			count += destinations(s).size();
-		return count;
-	}
+	virtual std::size_t edge_size() const;
 	/**
 	 * Returns the number of transitions in this automaton.  This is the number
 	 * of (from, on, to) triples in this automaton.
 	 * @return the number of transitions in this automaton
 	 */
-	virtual std::size_t transition_size() const {
-		std::size_t count = 0;
-		for (state_type s = 0; s < state_size(); ++s)
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				count += step(s, a).size();
-		return count;
-	}
+	virtual std::size_t transition_size() const;
 
 	/**
 	 * @return true iff this automaton is known to be deterministic
@@ -111,11 +92,7 @@ public:
 	virtual bool canonical() const = 0;
 
 	virtual bool accept(state_type state) const = 0;
-	virtual void for_each_accept(std::function<void(state_type)> action) const {
-		for (state_type s = 0; s < state_size(); ++s)
-			if (accept(s))
-				action(s);
-	}
+	virtual void for_each_accept(std::function<void(state_type)> action) const;
 	/**
 	 * Returns the possible next states of the automaton when reading the given
 	 * symbol in the given current state.  The returned set is empty if the
@@ -127,75 +104,30 @@ public:
 	 * the given current state, or nullopt if the automaton crashed.  If the
 	 * automaton is nondeterministic, the behavior is undefined.
 	 */
-	virtual std::optional<state_type> stepDeterministic(state_type state, symbol_type symbol) const {
-		assert(deterministic());
-		assert(state < state_size());
-		assert(symbol < alphabet_size());
-		StateSet nexts = step(state, symbol);
-		assert(nexts.size() <= 1);
-		return nexts.size() ? std::make_optional(nexts.front()) : std::nullopt;
-	}
+	virtual std::optional<state_type> stepDeterministic(state_type state, symbol_type symbol) const;
 
 	/**
 	 * @return a set containing the symbols appearing on transitions from the
 	 * given state (possibly empty)
 	 */
-	virtual SymbolSet outgoing(state_type state) const {
-		assert(state < state_size());
-		SymbolSet ret;
-		if (deterministic()) {
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				if (stepDeterministic(state, a))
-					ret.insert_absent(a);
-		} else
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				for (MAYBE_UNUSED state_type next : step(state, a))
-					ret.insert(a);
-		return ret;
-	}
+	virtual SymbolSet outgoing(state_type state) const;
 	/**
 	 * @return a set containing the states directly reachable from the given
 	 * state (possibly empty)
 	 */
-	virtual StateSet destinations(state_type state) const {
-		assert(state < state_size());
-		StateSet ret;
-		if (deterministic()) {
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				if (auto next = stepDeterministic(state, a))
-					ret.insert(*next);
-		} else
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				for (state_type next : step(state, a))
-					ret.insert(next);
-		return ret;
-	}
+	virtual StateSet destinations(state_type state) const;
 
 	/**
 	 * Calls the given function once for each state directly reachable from the
 	 * given state, in an arbitrary order.
 	 */
-	virtual void for_each_destination(state_type state, std::function<void(state_type)> action) const {
-		assert(state < state_size());
-		for (state_type dest : destinations(state))
-			action(dest);
-	}
+	virtual void for_each_destination(state_type state, std::function<void(state_type)> action) const;
 
 	/**
 	 * Calls the given function once for each transition out of the given state,
 	 * in an arbitrary order.
 	 */
-	virtual void for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const {
-		assert(state < state_size());
-		if (deterministic()) {
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				if (auto next = stepDeterministic(state, a))
-					action(a, *next);
-		} else
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				for (state_type next : step(state, a))
-					action(a, next);
-	}
+	virtual void for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const;
 
 	/**
 	 * Returns a set of the labels on the edge between from and to.  This set is
@@ -205,66 +137,26 @@ public:
 	 * where a symbol leads to, while label tells what symbols lead to a
 	 * particular place.
 	 */
-	virtual SymbolSet labels(state_type from, state_type to) const {
-		assert(from < state_size());
-		assert(to < state_size());
-		SymbolSet ret;
-		if (deterministic()) {
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				if (auto next = stepDeterministic(from, a); next && *next == to)
-					ret.insert_absent(a);
-		} else
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
-				for (MAYBE_UNUSED state_type next : step(from, a))
-					if (next == to) {
-						ret.insert_absent(a);
-						break;
-					}
-		return ret;
-	}
+	virtual SymbolSet labels(state_type from, state_type to) const;
 
 	/**
 	 * Calls the given function once for each transition in this automaton, in
 	 * an arbitrary order.
 	 */
-	virtual void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const {
-		if (deterministic()) {
-			for (state_type from = 0; from < state_size(); ++from)
-				for (symbol_type a = 0; a < alphabet_size(); ++a)
-					if (auto next = stepDeterministic(from, a))
-						action(from, a, *next);
-		} else
-			for (state_type from = 0; from < state_size(); ++from)
-				for (symbol_type a = 0; a < alphabet_size(); ++a)
-					for (state_type next : step(from, a))
-						action(from, a, next);
-	}
+	virtual void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const;
 
 	range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> edges(state_type from) const;
 
 	/**
 	 * @return the symbols that appear in transitions in this automaton
 	 */
-	virtual SymbolSet activeAlphabet() const {
-		SymbolSet ret;
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
-			for (symbol_type s = 0; s < state_size(); ++s)
-				if (!step(s, a).empty()) {
-					ret.insert_absent(a);
-					break;
-				}
-		return ret;
-	}
+	virtual SymbolSet activeAlphabet() const;
 
 	/**
 	 * Runs this automaton on the given string.
 	 * @returns true iff the machine accepts the given string of symbol indices
 	 */
-	bool run(std::initializer_list<unsigned int> string) const {
-		//This overload exists because the compiler won't deduce initializer_list
-		//for the IteratorRange overload below.
-		return run(string.begin(), string.end());
-	}
+	bool run(std::initializer_list<unsigned int> string) const;
 	/**
 	 * Runs this automaton on the given string.
 	 * @returns true iff the machine accepts the given string of symbol indices
