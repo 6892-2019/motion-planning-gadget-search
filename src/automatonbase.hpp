@@ -434,6 +434,15 @@ public:
 	virtual void canonicalize() = 0;
 	virtual std::size_t working_hash() const = 0;
 	state_type append(const AutomatonBase& b);
+
+	/**
+	 * Returns true iff this automaton's language is infinite.  (Not to be
+	 * confused with universality, accepting the language of all strings.)
+	 *
+	 * This function is not const because it needs to call removeDeadStates().
+	 * @return true iff this automaton's language is infinite
+	 */
+	bool infinite();
 };
 
 std::unique_ptr<WorkingAutomaton> make_working(unsigned int size);
