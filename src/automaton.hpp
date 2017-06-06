@@ -1287,7 +1287,7 @@ AutomatonBase::state_type total_states(const AutomatonBase& first, const Automat
 
 template<unsigned int N, class Source, class = std::enable_if_t<std::is_base_of<AutomatonBase, std::decay_t<Source>>::value>>
 void cat_once(Automaton<N>& target, Source&& source) {
-	auto base = target.append(std::forward<Source&&>(source));
+	auto base = target.append(std::forward<Source>(source));
 	//Wire the previous automaton's accept states to the current initial
 	//state (base), modifying them to not accept.
 	//TODO: addEpsilon may cause p to become accepting again, so we have
@@ -1303,7 +1303,7 @@ void cat_once(Automaton<N>& target, Source&& source) {
 
 template<unsigned int N, class Source, class = std::enable_if_t<std::is_base_of<AutomatonBase, std::decay_t<Source>>::value>>
 void alt_once(Automaton<N>& target, Source&& source) {
-	auto base = target.append(std::forward<Source&&>(source));
+	auto base = target.append(std::forward<Source>(source));
 	target.addEpsilon(0, base);
 }
 } //namespace detail
@@ -1332,7 +1332,7 @@ Automaton<N> cat() {
 template<typename... Automata>
 auto cat(Automata&&... rest) {
 	constexpr unsigned int N = detail::deduce_size<Automata...>();
-	return cat<N, Automata...>(std::forward<Automata&&>(rest)...);
+	return cat<N, Automata...>(std::forward<Automata>(rest)...);
 }
 template<unsigned int N, typename... Automata>
 Automaton<N> cat(Automata&&... rest) {
@@ -1341,7 +1341,7 @@ Automaton<N> cat(Automata&&... rest) {
 	vta::map([&a](auto&& v){
 		assert(v.alphabet_size() == N);
 		detail::cat_once(a, std::forward<decltype(v)>(v));
-	})(std::forward<Automata&&>(rest)...);
+	})(std::forward<Automata>(rest)...);
 	return a;
 }
 
@@ -1370,7 +1370,7 @@ Automaton<N> alt() {
 template<typename... Automata>
 auto alt(Automata&&... rest) {
 	constexpr unsigned int N = detail::deduce_size<Automata...>();
-	return alt<N, Automata...>(std::forward<Automata&&>(rest)...);
+	return alt<N, Automata...>(std::forward<Automata>(rest)...);
 }
 template<unsigned int N, typename... Automata>
 Automaton<N> alt(Automata&&... rest) {
@@ -1379,7 +1379,7 @@ Automaton<N> alt(Automata&&... rest) {
 	vta::map([&a](auto&& v){
 		assert(v.alphabet_size() == N);
 		detail::alt_once(a, std::forward<decltype(v)>(v));
-	})(std::forward<Automata&&>(rest)...);
+	})(std::forward<Automata>(rest)...);
 	return a;
 }
 

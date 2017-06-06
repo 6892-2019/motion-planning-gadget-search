@@ -205,7 +205,7 @@ template<class Target, class Source>
 template<typename T>
 [[nodiscard]] std::optional<std::decay_t<T>> maybe_opt(bool present, T&& value) {
 	if (present) return std::nullopt;
-	return std::make_optional(std::forward<T&&>(value));
+	return std::make_optional(std::forward<T>(value));
 }
 #endif /* ALGOUTILS_HPP */
 
