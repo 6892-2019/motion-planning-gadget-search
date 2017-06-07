@@ -85,7 +85,8 @@ void test_pack(Automaton<N> a) {
 template<unsigned int N>
 void test_pack_if_representable(Automaton<N> a) {
 	a.canonicalize();
-#define TEST_PACK_IF_REPRESENTABLE(IMPL) if (IMPL::can_represent(a)) \
+	detail::PackStats stats{a};
+#define TEST_PACK_IF_REPRESENTABLE(IMPL) if (IMPL::can_represent(a, stats)) \
 											pack_impl_test<IMPL>(a);
 	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive8OffsetPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Tiny8OffsetPackedAutomaton)

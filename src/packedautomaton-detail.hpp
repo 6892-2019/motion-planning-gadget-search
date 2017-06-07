@@ -8,6 +8,14 @@
 namespace automaton {
 namespace detail {
 
+struct PackStats {
+	PackStats(const AutomatonBase& a) : alphabet_size(a.alphabet_size()),
+			state_size(a.state_size()), transition_size(a.transition_size()) {}
+	symbol_type alphabet_size;
+	state_type state_size;
+	std::size_t transition_size;
+};
+
 /**
  * @return the number of set bits in x below and including position pos
  */
@@ -51,11 +59,12 @@ T load(const T* ptr) {
 template<typename OutgoingMaskType, typename StateSizeType, typename OffsetType>
 class OffsetAcceptAutomaton final : public PackedAutomaton {
 public:
-	static bool can_represent(const AutomatonBase& a) {
-		return a.alphabet_size() <= limits<OutgoingMaskType>::digits &&
-				a.state_size() <= limits<StateSizeType>::max() &&
-				a.transition_size() <= (limits<OffsetType>::max() >> 1);
+	static bool can_represent(const AutomatonBase& a, PackStats s) {
+		return s.alphabet_size <= limits<OutgoingMaskType>::digits &&
+				s.state_size <= limits<StateSizeType>::max() &&
+				s.transition_size <= (limits<OffsetType>::max() >> 1);
 	}
+private:
 	static std::size_t extra_storage(const AutomatonBase& a) {
 		return 1 //alphabet size
 				+ sizeof(StateSizeType)
@@ -63,24 +72,32 @@ public:
 				+ sizeof(OffsetType) * a.state_size()
 				+ sizeof(StateSizeType) * a.transition_size();
 	}
+public:
+	static std::size_t extra_storage(const AutomatonBase& a, PackStats s) {
+		return 1 //alphabet size
+				+ sizeof(StateSizeType)
+				+ sizeof(OutgoingMaskType) * s.state_size
+				+ sizeof(OffsetType) * s.state_size
+				+ sizeof(StateSizeType) * s.transition_size;
+	}
 
-	OffsetAcceptAutomaton(const AutomatonBase& a) {
-		assert(can_represent(a));
+	OffsetAcceptAutomaton(const AutomatonBase& a, PackStats stats) {
+		assert(can_represent(a, stats));
 		ReinterpretWriter p = {storage_begin()};
-		p.write<StateSizeType>(a.state_size());
-		p.write<unsigned char>(a.alphabet_size());
+		p.write<StateSizeType>(stats.state_size);
+		p.write<unsigned char>(stats.alphabet_size);
 
 		//TODO: if we know where offsets start, we can make this one big loop,
 		//so we only call a.outgoing(s) once
-		for (state_type s = 0; s < a.state_size(); ++s)
+		for (state_type s = 0; s < stats.state_size; ++s)
 			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)));
 		OffsetType offset = 0;
-		for (state_type s = 0; s < a.state_size(); ++s) {
+		for (state_type s = 0; s < stats.state_size; ++s) {
 			p.write<OffsetType>(offset | (a.accept(s) ? 1 << (limits<OffsetType>::digits - 1) : 0));
 			//TODO: want an overflow-checked add here, I guess
 			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
 		}
-		for (state_type s = 0; s < a.state_size(); ++s) {
+		for (state_type s = 0; s < stats.state_size; ++s) {
 			SymbolSet syms = a.outgoing(s);
 			syms.sort();
 			for (symbol_type c : syms) {
@@ -218,11 +235,12 @@ extern template class OffsetAcceptAutomaton<unsigned short, unsigned int, unsign
 template<typename OutgoingMaskType, typename StateSizeType, typename OffsetType>
 class OutgoingAcceptAutomaton final : public PackedAutomaton {
 public:
-	static bool can_represent(const AutomatonBase& a) {
-		return a.alphabet_size() <= (limits<OutgoingMaskType>::digits - 1) &&
-				a.state_size() <= limits<StateSizeType>::max() &&
-				a.transition_size() <= limits<OffsetType>::max();
+	static bool can_represent(const AutomatonBase& a, PackStats s) {
+		return s.alphabet_size <= (limits<OutgoingMaskType>::digits - 1) &&
+				s.state_size <= limits<StateSizeType>::max() &&
+				s.transition_size <= limits<OffsetType>::max();
 	}
+private:
 	static std::size_t extra_storage(const AutomatonBase& a) {
 		return 1 //alphabet size
 				+ sizeof(StateSizeType)
@@ -230,24 +248,32 @@ public:
 				+ sizeof(OffsetType) * a.state_size()
 				+ sizeof(StateSizeType) * a.transition_size();
 	}
+public:
+	static std::size_t extra_storage(const AutomatonBase& a, PackStats s) {
+		return 1 //alphabet size
+				+ sizeof(StateSizeType)
+				+ sizeof(OutgoingMaskType) * s.state_size
+				+ sizeof(OffsetType) * s.state_size
+				+ sizeof(StateSizeType) * s.transition_size;
+	}
 
-	OutgoingAcceptAutomaton(const AutomatonBase& a) {
-		assert(can_represent(a));
+	OutgoingAcceptAutomaton(const AutomatonBase& a, PackStats stats) {
+		assert(can_represent(a, stats));
 		ReinterpretWriter p = {storage_begin()};
-		p.write<StateSizeType>(a.state_size());
-		p.write<unsigned char>(a.alphabet_size());
+		p.write<StateSizeType>(stats.state_size);
+		p.write<unsigned char>(stats.alphabet_size);
 
 		//TODO: if we know where offsets start, we can make this one big loop,
 		//so we only call a.outgoing(s) once
-		for (state_type s = 0; s < a.state_size(); ++s)
+		for (state_type s = 0; s < stats.state_size; ++s)
 			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)) | (a.accept(s) ? 1 << (limits<OutgoingMaskType>::digits - 1) : 0));
 		OffsetType offset = 0;
-		for (state_type s = 0; s < a.state_size(); ++s) {
+		for (state_type s = 0; s < stats.state_size; ++s) {
 			p.write<OffsetType>(offset);
 			//TODO: want an overflow-checked add here, I guess
 			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
 		}
-		for (state_type s = 0; s < a.state_size(); ++s) {
+		for (state_type s = 0; s < stats.state_size; ++s) {
 			SymbolSet syms = a.outgoing(s);
 			syms.sort();
 			for (symbol_type c : syms) {
@@ -384,11 +410,12 @@ extern template class OutgoingAcceptAutomaton<unsigned short, unsigned int, unsi
 template<typename OutgoingMaskType, typename StateSizeType, typename OffsetType>
 class BitmaskAcceptAutomaton final : public PackedAutomaton {
 public:
-	static bool can_represent(const AutomatonBase& a) {
-		return a.alphabet_size() <= limits<OutgoingMaskType>::digits &&
-				a.state_size() <= limits<StateSizeType>::max() &&
-				a.transition_size() <= limits<OffsetType>::max();
+	static bool can_represent(const AutomatonBase& a, PackStats s) {
+		return s.alphabet_size <= limits<OutgoingMaskType>::digits &&
+				s.state_size <= limits<StateSizeType>::max() &&
+				s.transition_size <= limits<OffsetType>::max();
 	}
+private:
 	static std::size_t extra_storage(const AutomatonBase& a) {
 		return 1 //alphabet size
 				+ sizeof(StateSizeType)
@@ -397,20 +424,29 @@ public:
 				+ sizeof(OffsetType) * a.state_size()
 				+ sizeof(StateSizeType) * a.transition_size();
 	}
+public:
+	static std::size_t extra_storage(const AutomatonBase& a, PackStats s) {
+		return 1 //alphabet size
+				+ sizeof(StateSizeType)
+				+ sizeof(OutgoingMaskType) * s.state_size
+				+ sizeof(unsigned char) * div8roundup(s.state_size) //accept bitmask
+				+ sizeof(OffsetType) * s.state_size
+				+ sizeof(StateSizeType) * s.transition_size;
+	}
 
-	BitmaskAcceptAutomaton(const AutomatonBase& a) {
-		assert(can_represent(a));
+	BitmaskAcceptAutomaton(const AutomatonBase& a, PackStats stats) {
+		assert(can_represent(a, stats));
 		ReinterpretWriter p = {storage_begin()};
-		p.write<StateSizeType>(a.state_size());
-		p.write<unsigned char>(a.alphabet_size());
+		p.write<StateSizeType>(stats.state_size);
+		p.write<unsigned char>(stats.alphabet_size);
 
 		//TODO: if we know where offsets start, we can make this one big loop,
 		//so we only call a.outgoing(s) once
-		for (state_type s = 0; s < a.state_size(); ++s)
+		for (state_type s = 0; s < stats.state_size; ++s)
 			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)));
 		unsigned int acceptmask = 0;
-		for (state_type s = 0; s < a.state_size();) {
-			for (unsigned int i = 0; i < 8 && s < a.state_size(); ++i, ++s) {
+		for (state_type s = 0; s < stats.state_size;) {
+			for (unsigned int i = 0; i < 8 && s < stats.state_size; ++i, ++s) {
 				//we can safely shift on the first iteration because we start at 0
 				acceptmask |= (a.accept(s) << i);
 			}
@@ -418,12 +454,12 @@ public:
 			acceptmask = 0;
 		}
 		OffsetType offset = 0;
-		for (state_type s = 0; s < a.state_size(); ++s) {
+		for (state_type s = 0; s < stats.state_size; ++s) {
 			p.write<OffsetType>(offset);
 			//TODO: want an overflow-checked add here, I guess
 			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
 		}
-		for (state_type s = 0; s < a.state_size(); ++s) {
+		for (state_type s = 0; s < stats.state_size; ++s) {
 			SymbolSet syms = a.outgoing(s);
 			syms.sort();
 			for (symbol_type c : syms) {
@@ -567,12 +603,16 @@ extern template class BitmaskAcceptAutomaton<unsigned short, unsigned short, uns
 extern template class BitmaskAcceptAutomaton<unsigned short, unsigned int, unsigned int>;
 
 template<class A>
-std::unique_ptr<const PackedAutomaton> make_pack(const AutomatonBase& a) {
-	void* storage = operator new(sizeof(A) + A::extra_storage(a));
-	auto* p = new (storage) A(a);
+std::unique_ptr<const PackedAutomaton> make_pack(const AutomatonBase& a, PackStats stats) {
+	void* storage = operator new(sizeof(A) + A::extra_storage(a, stats));
+	auto* p = new (storage) A(a, stats);
 	//TODO: in debugging builds, allocate a few extra words, pre-fill at the end,
 	//and assert that exactly the right number of bytes were modified
 	return std::unique_ptr<const PackedAutomaton>(p);
+}
+template<class A>
+std::unique_ptr<const PackedAutomaton> make_pack(const AutomatonBase& a) {
+	return make_pack<A>(a, PackStats(a));
 }
 
 } //namespace detail

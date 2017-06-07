@@ -58,9 +58,10 @@ template class BitmaskAcceptAutomaton<unsigned short, unsigned int, unsigned int
 //TODO: I'd love to make this a variadic template (over the impl types), but I don't know how
 std::unique_ptr<const PackedAutomaton> make_best_pack(const AutomatonBase& a) {
 	std::size_t best_extra = std::numeric_limits<std::size_t>::max();
-	std::unique_ptr<const PackedAutomaton> (*make_fn)(const AutomatonBase&) = nullptr;
-#define MAKE_BEST_PACK_ATTEMPT(IMPL) if (IMPL::can_represent(a)) { \
-										std::size_t wanted = IMPL::extra_storage(a); \
+	std::unique_ptr<const PackedAutomaton> (*make_fn)(const AutomatonBase&, PackStats) = nullptr;
+	PackStats stats{a};
+#define MAKE_BEST_PACK_ATTEMPT(IMPL) if (IMPL::can_represent(a, stats)) { \
+										std::size_t wanted = IMPL::extra_storage(a, stats); \
 										if (wanted < best_extra) { \
 											best_extra = wanted; \
 											make_fn = make_pack<IMPL>; \
@@ -97,7 +98,7 @@ std::unique_ptr<const PackedAutomaton> make_best_pack(const AutomatonBase& a) {
 	MAKE_BEST_PACK_ATTEMPT(Small16BitmaskPackedAutomaton)
 	MAKE_BEST_PACK_ATTEMPT(Medium16BitmaskPackedAutomaton)
 	MAKE_BEST_PACK_ATTEMPT(Large16BitmaskPackedAutomaton)
-	return make_fn(a);
+	return make_fn(a, stats);
 }
 }
 
