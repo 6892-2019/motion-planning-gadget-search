@@ -15,6 +15,7 @@
 #ifndef __SANITIZE_ADDRESS__
 #include <jemalloc/jemalloc.h>
 #endif
+#include "numutils.hpp"
 
 template<typename T>
 class circular_deque_base {

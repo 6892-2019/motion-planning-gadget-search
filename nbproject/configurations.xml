@@ -28,6 +28,8 @@
       <in>automaton-io.cpp</in>
       <in>automaton.cpp</in>
       <in>automatonbase.cpp</in>
+      <in>bitset.hpp</in>
+      <in>circular_deque.hpp</in>
       <in>expr.cpp</in>
       <in>hopcroft.cpp</in>
       <in>hopcroft.hpp</in>
@@ -166,6 +168,10 @@
             tool="1"
             flavor2="0">
       </item>
+      <item path="src/bitset.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/circular_deque.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
           <incDir>
@@ -264,6 +270,8 @@
       <item path="test/bitset-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="test/bounded_queue-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="test/circular_deque-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="test/expr-test.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">

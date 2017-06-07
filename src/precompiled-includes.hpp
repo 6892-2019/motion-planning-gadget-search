@@ -1,7 +1,6 @@
 //The #include part of the precompiled header.
 #include <array>
 #include <vector>
-#include <queue>
 #include <stack>
 #include <boost/circular_buffer.hpp>
 #include <unordered_set>
@@ -21,6 +20,7 @@
 #include "dynarray.hpp"
 #include "linear_set.hpp"
 #include "bounded_queue.hpp"
+#include "circular_deque.hpp"
 
 #include <algorithm>
 #include <random>

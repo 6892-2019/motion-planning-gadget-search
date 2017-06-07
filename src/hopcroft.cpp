@@ -58,7 +58,7 @@ private:
 	dynarray<std::pair<state_type, state_type>> stateToPartition_;
 	dynarray<state_type> inv_;
 	dynarray<std::size_t> invStart_;
-	std::queue<std::pair<state_type, symbol_type>> L_;
+	circular_deque<std::pair<state_type, symbol_type>, 32> L_;
 	boost::dynamic_bitset<std::size_t> inL_;
 	dynarray<state_type> move_;
 	std::vector<state_type> moveSize_;
@@ -347,7 +347,7 @@ private:
 	void add(state_type part, symbol_type symbol) {
 		checkRep();
 		assert(!contains(part, symbol));
-		L_.push({part, symbol});
+		L_.push_back({part, symbol});
 		inL_.set(part * a_.alphabet_size() + symbol);
 		checkRep();
 	}
@@ -357,8 +357,7 @@ private:
 	}
 	std::pair<state_type, symbol_type> remove() {
 		checkRep();
-		auto pair = L_.front();
-		L_.pop();
+		auto pair = L_.pop_front();
 		inL_.reset(pair.first * a_.alphabet_size() + pair.second);
 		checkRep();
 		return pair;

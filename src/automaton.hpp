@@ -162,7 +162,7 @@ SymbolSet set_of_indices(automaton::bitset<N> mask) {
 template<typename Iter>
 struct LazyEdgeEnumerator {
 	dynarray<state_type> renumbering; //TODO: make this a view into a big array preinitialized to max()
-	std::queue<symbol_type> queue; //TODO: queue's not great
+	circular_deque<symbol_type, 16> queue;
 	state_type idx = 0; //the order in which things are visited
 	state_type cur; //the state currently being visited
 	symbol_type a = 0; //the next symbol to be (after permutation) stepped with
@@ -172,19 +172,18 @@ struct LazyEdgeEnumerator {
 	LazyEdgeEnumerator(Iter perm, const AutomatonBase* automaton) : renumbering(automaton->state_size()), alphabetPerm(perm), b(automaton) {
 		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
 		renumbering[0] = idx++;
-		queue.push(0);
+		queue.push_back(0);
 	}
 	std::tuple<state_type, state_type, symbol_type> operator()() {
 		if (shouldResume)
 			goto resume;
 		while (!queue.empty()) {
-			cur = queue.front();
-			queue.pop();
+			cur = queue.pop_front();
 			for (a = 0; a < b->alphabet_size(); ++a) {
 				if (auto dest = b->stepDeterministic(cur, alphabetPerm[a])) {
 					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
 						renumbering[*dest] = idx++;
-						queue.push(*dest);
+						queue.push_back(*dest);
 					}
 					shouldResume = true;
 					return {renumbering[cur], renumbering[*dest], a};
@@ -201,13 +200,12 @@ struct LazyEdgeEnumerator {
 		if (shouldResume)
 			goto resume;
 		while (!queue.empty()) {
-			cur = queue.front();
-			queue.pop();
+			cur = queue.pop_front();
 			for (a = 0; a < b->alphabet_size(); ++a) {
 				if (auto dest = b->stepDeterministic(cur, alphabetPerm[a])) {
 					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
 						renumbering[*dest] = idx++;
-						queue.push(*dest);
+						queue.push_back(*dest);
 					}
 				}
 				resume: ;
