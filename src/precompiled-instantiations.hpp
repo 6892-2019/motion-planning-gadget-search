@@ -12,11 +12,6 @@ AUTOMATA_EXTERN_TEMPLATE template class std::vector<std::vector<bool>>;
 AUTOMATA_EXTERN_TEMPLATE template class std::vector<std::uint8_t>;
 AUTOMATA_EXTERN_TEMPLATE template class std::vector<std::pair<unsigned int, unsigned int>>;
 
-AUTOMATA_EXTERN_TEMPLATE template class std::stack<unsigned int>;
-AUTOMATA_EXTERN_TEMPLATE template class std::stack<std::optional<unsigned int>>;
-AUTOMATA_EXTERN_TEMPLATE template class std::stack<std::tuple<unsigned int, unsigned int, unsigned int>>;
-AUTOMATA_EXTERN_TEMPLATE template class std::stack<std::tuple<unsigned int, unsigned int, unsigned int, bool>>;
-
 AUTOMATA_EXTERN_TEMPLATE template class std::unordered_set<unsigned int>;
 AUTOMATA_EXTERN_TEMPLATE template class std::unordered_set<std::size_t>;
 
@@ -70,5 +65,8 @@ AUTOMATA_EXTERN_TEMPLATE template class bounded_queue<std::function<void()>>;
 
 AUTOMATA_EXTERN_TEMPLATE template class circular_deque<unsigned int, 16>;
 AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::pair<unsigned int, unsigned int>, 32>;
+AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::optional<unsigned int>, 16>;
+AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::tuple<unsigned int, unsigned int, unsigned int>, 16>;
+AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::tuple<unsigned int, unsigned int, unsigned int, bool>, 16>;
 
 //TODO: <algorithm> and following

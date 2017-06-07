@@ -465,7 +465,7 @@ private:
 	static Automaton conj_impl(const Automaton& left, const Automaton& right) {
 		//(left state, right state, new state)
 		using state_triple = std::tuple<state_type, state_type, state_type>;
-		std::stack<state_triple> worklist;
+		circular_deque<state_triple, 16> worklist;
 		Map newstates(left.state_size(), right.state_size());
 
 		Automaton a;
@@ -473,13 +473,12 @@ private:
 		a.deterministic_ = left.deterministic() && right.deterministic();
 		a.addState();
 		//TODO: assuming 0 is the initial state
-		worklist.push({0, 0, 0});
+		worklist.push_back({0, 0, 0});
 		newstates.insert({0, 0}, 0);
 
 		while (!worklist.empty()) {
 			state_type ls, rs, ns;
-			std::tie(ls, rs, ns) = worklist.top();
-			worklist.pop();
+			std::tie(ls, rs, ns) = worklist.pop_back();
 			a.setAccept(ns, left.accept(ls) && right.accept(rs));
 
 			for (const Transition& lt : left.transitions_[ls])
@@ -489,7 +488,7 @@ private:
 						state_type leftnext = lt.next_, rightnext = rt.next_;
 						auto p = newstates.compute_if_absent({leftnext, rightnext}, [&]{return a.addState();});
 						if (p.second)
-							worklist.push({leftnext, rightnext, p.first});
+							worklist.push_back({leftnext, rightnext, p.first});
 						a.addTrans(ns, common, p.first);
 					}
 				}
@@ -502,7 +501,7 @@ private:
 		assert(right.deterministic());
 		//(left state, right state, new state, left automation active)
 		using state_quad = std::tuple<state_type, state_type, state_type, bool>;
-		std::stack<state_quad> worklist;
+		circular_deque<state_quad, 16> worklist;
 		detail::DenseShuffleAcceptMap newstates(left.state_size(), right.state_size());
 
 		Automaton a;
@@ -512,23 +511,22 @@ private:
 		//automaton, so we have two "initial" states and call addEpsilon later.
 		a.addState(); a.addState(); a.addState();
 		//TODO: assuming 0 is the initial state
-		worklist.push({0, 0, 1, true});
+		worklist.push_back({0, 0, 1, true});
 		newstates.insert({0, 0, true}, 1);
-		worklist.push({0, 0, 2, false});
+		worklist.push_back({0, 0, 2, false});
 		newstates.insert({0, 0, false}, 2);
 
 		while (!worklist.empty()) {
 			state_type ls, rs, ns;
 			bool leftactive;
-			std::tie(ls, rs, ns, leftactive) = worklist.top();
-			worklist.pop();
+			std::tie(ls, rs, ns, leftactive) = worklist.pop_back();
 			a.accept_.set(ns, left.accept_[ls] && right.accept_[rs]);
 
 			if (leftactive) {
 				for (Transition lt : left.transitions_[ls]) {
 					auto p = newstates.compute_if_absent({lt.next_, rs, leftactive}, [&]{return a.addState();});
 					if (p.second)
-						worklist.push({lt.next_, rs, p.first, leftactive});
+						worklist.push_back({lt.next_, rs, p.first, leftactive});
 					a.addTrans(ns, lt.symbols_, p.first);
 
 					//If we brought the active automaton to an accept state,
@@ -536,7 +534,7 @@ private:
 					if (left.accept(lt.next_)) {
 						auto q = newstates.compute_if_absent({lt.next_, rs, !leftactive}, [&]{return a.addState();});
 						if (q.second)
-							worklist.push({lt.next_, rs, q.first, !leftactive});
+							worklist.push_back({lt.next_, rs, q.first, !leftactive});
 						a.addTrans(ns, lt.symbols_, q.first);
 					}
 				}
@@ -544,7 +542,7 @@ private:
 				for (Transition rt : right.transitions_[rs]) {
 					auto p = newstates.compute_if_absent({ls, rt.next_, leftactive}, [&]{return a.addState();});
 					if (p.second)
-						worklist.push({ls, rt.next_, p.first, leftactive});
+						worklist.push_back({ls, rt.next_, p.first, leftactive});
 					a.addTrans(ns, rt.symbols_, p.first);
 
 					//If we brought the active automaton to an accept state,
@@ -552,7 +550,7 @@ private:
 					if (right.accept(rt.next_)) {
 						auto q = newstates.compute_if_absent({ls, rt.next_, !leftactive}, [&]{return a.addState();});
 						if (q.second)
-							worklist.push({ls, rt.next_, q.first, !leftactive});
+							worklist.push_back({ls, rt.next_, q.first, !leftactive});
 						a.addTrans(ns, rt.symbols_, q.first);
 					}
 				}

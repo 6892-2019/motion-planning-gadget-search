@@ -99,22 +99,21 @@ bool WorkingAutomaton::infinite() {
 	google::dense_hash_set<state_type> visited(state_size());
 	visited.set_empty_key(state_size());
 	std::vector<state_type> path;
-	std::stack<std::optional<state_type>> nexts;
+	circular_deque<std::optional<state_type>, 16> nexts;
 
-	nexts.push(0U);
+	nexts.push_back(0U);
 	while (!nexts.empty()) {
-		std::optional<state_type> n = nexts.top();
-		nexts.pop();
+		std::optional<state_type> n = nexts.pop_back();
 		if (n) {
 			path.push_back(*n);
-			nexts.push(std::nullopt);
+			nexts.push_back(std::nullopt);
 			for (state_type next : destinations(path.back())) {
 				//We might prefer a set; we could avoid storing path itself
 				//if we store the to-be-popped element in place of the empty optional.
 				if (std::find(path.begin(), path.end(), next) != path.end())
 					return true;
 				if (visited.find(next) == visited.end())
-					nexts.push(next);
+					nexts.push_back(next);
 			}
 		} else {
 			visited.insert(path.back());
@@ -139,16 +138,15 @@ google::dense_hash_set<state_type> live_states(const AutomatonBase& a) {
 	//know there's at least this much.
 	inverseEdgelist.reserve(state_size);
 
-	std::stack<state_type> nexts;
-	nexts.push(0);
+	circular_deque<state_type, 16> nexts;
+	nexts.push_back(0);
 	live.insert(0);
 	while (!nexts.empty()) {
-		state_type n = nexts.top();
-		nexts.pop();
+		state_type n = nexts.pop_back();
 		a.for_each_destination(n, [&](state_type next) {
 			inverseEdgelist.push_back({next, n});
 			if (live.insert(next).second)
-				nexts.push(next);
+				nexts.push_back(next);
 		});
 	}
 
@@ -190,15 +188,14 @@ google::dense_hash_set<state_type> live_states(const AutomatonBase& a) {
 	a.for_each_accept([&](state_type state) {
 		if (!unreachableAccepts.count(state)) {
 			live.insert(state);
-			nexts.push(state);
+			nexts.push_back(state);
 		}
 	});
 	while (!nexts.empty()) {
-		state_type n = nexts.top();
-		nexts.pop();
+		state_type n = nexts.pop_back();
 		for (state_type next : inverseDestinations(n))
 			if (live.insert(next).second)
-				nexts.push(next);
+				nexts.push_back(next);
 	}
 	return live;
 }
@@ -304,18 +301,17 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 			decltype(std::ref(set_hash)), decltype(std::ref(set_equal))> newstate(state_size,
 			std::ref(set_hash), std::ref(set_equal));
 	newstate.set_empty_key(&empty_set);
-	std::stack<std::pair<state_type*, state_type>> worklist; //TODO: maybe based on small_vector<16ish>?
+	circular_deque<std::pair<state_type*, state_type>, 16> worklist;
 
 	target.reserve(state_size); //a reasonable lower bound for connected automata
 	target.addState();
 	set_append(0);
 	state_type* first_set = commit_set();
 	newstate.insert({first_set, 0});
-	worklist.push({first_set, 0});
+	worklist.push_back({first_set, 0});
 
 	while (!worklist.empty()) {
-		auto [current_set, current_state] = worklist.top();
-		worklist.pop();
+		auto [current_set, current_state] = worklist.pop_back();
 		target.setAccept(current_state, std::any_of(set_begin(current_set), set_end(current_set),
 				[&source](state_type s) {return source.accept(s);}));
 
@@ -334,7 +330,7 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 			auto it = newstate.find(alloc_next);
 			if (it == newstate.end()) {
 				it = newstate.insert({commit_set(), target.addState()}).first;
-				worklist.push(*it);
+				worklist.push_back(*it);
 			} else
 				clear_set();
 			target.addTrans(current_state, s, it->second);

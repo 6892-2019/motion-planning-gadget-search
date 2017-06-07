@@ -1,7 +1,6 @@
 //The #include part of the precompiled header.
 #include <array>
 #include <vector>
-#include <stack>
 #include <boost/circular_buffer.hpp>
 #include <unordered_set>
 #include <unordered_map>
