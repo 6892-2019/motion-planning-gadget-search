@@ -24,16 +24,19 @@ namespace detail {
 
 class HopcroftMinimizer final {
 public:
-	HopcroftMinimizer(WorkingAutomaton& a) : a_(a), partitions_(a.state_size()), partitionBounds_(),
+	HopcroftMinimizer(WorkingAutomaton& a) : a_(a), state_size_(a.state_size()), alphabet_size_(a.alphabet_size()),
+			partitions_(state_size_), partitionBounds_(),
 			//TODO: now that the automaton isn't total, inv_ should be
 			//allocated after building the inverse edge list, so that it can
 			//be sized just right.
-			stateToPartition_(a.state_size()), inv_(a.state_size() * a.alphabet_size()),
-			invStart_(a.state_size() * (a.alphabet_size()+1)), L_(), inL_(a.state_size() * a.alphabet_size()),
-			move_(a.state_size()), moveSize_(), suspects_() {}
+			stateToPartition_(state_size_), inv_(state_size_ * a.alphabet_size()),
+			invStart_(state_size_ * (a.alphabet_size()+1)), L_(), inL_(state_size_ * a.alphabet_size()),
+			move_(state_size_), moveSize_(), suspects_() {}
 
 	HopcroftResult minimize() {
-		if (!buildInverseAndInitializePartitions()) return {a_.state_size(), {}, {}};
+		if (!buildInverseAndInitializePartitions())
+			//we've mutated a_, so must use actual size here
+			return {a_.state_size(), {}, {}};
 		initializeWaitingSet();
 		while (!L_.empty()) {
 			auto pair = remove();
@@ -43,13 +46,15 @@ public:
 			//is cheap (because partitions are singletons), so it may not be
 			//worth checking in this loop.  If not, we definitely want to
 			//check in finish() to avoid copying a bunch for no reason.
-			if (partitionBounds_.size() == a_.state_size())
-				return {a_.state_size(), {}, {}};
+			if (partitionBounds_.size() == state_size_)
+				return {state_size_, {}, {}};
 		}
 		return finish();
 	}
 private:
 	WorkingAutomaton& a_;
+	state_type state_size_;
+	symbol_type alphabet_size_;
 	//Every partition contains at least one state, so there can only be as
 	//many states as partitions.
 	dynarray<state_type> partitions_;
@@ -88,7 +93,8 @@ private:
 		};
 
 		unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
-		for (state_type s = 0; s < a_.state_size(); ++s) {
+		//TODO: for_each_accept?
+		for (state_type s = 0; s < state_size_; ++s) {
 			if (a_.accept(s))
 				partitions_[finalIdx--] = s;
 			else
@@ -101,11 +107,11 @@ private:
 		}
 
 		std::vector<InverseEntry> edgelist;
-		edgelist.reserve(a_.state_size() * a_.alphabet_size() + 1);
+		edgelist.reserve(state_size_ * alphabet_size_ + 1);
 		a_.for_each_transition([&edgelist](state_type from, symbol_type on, state_type to) {
 			edgelist.push_back(InverseEntry{from, on, to});
 		});
-		bool crashed = edgelist.size() != a_.state_size() * a_.alphabet_size();
+		bool crashed = edgelist.size() != state_size_ * alphabet_size_;
 		//We need to know if we crashed (equivalently, if we're not total), and
 		//testing whether we're total requires iterating all the states anyway,
 		//so we'll wait until after building the edgelist on the assumption that
@@ -122,7 +128,7 @@ private:
 			std::vector<typename decltype(partitions_)::iterator> bounds = {
 				partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
 			}, newbounds;
-			for (symbol_type s = 0; s < a_.alphabet_size(); ++s) {
+			for (symbol_type s = 0; s < alphabet_size_; ++s) {
 				newbounds.clear();
 				for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
 					newbounds.push_back(bounds[i]);
@@ -157,16 +163,16 @@ private:
 		//TODO: use a parallel sort (beyond a size threshold)
 		std::sort(edgelist.begin(), edgelist.end());
 		std::size_t invEltsIdx = 0;
-		for (state_type stateIdx = 0; stateIdx < a_.state_size(); ++stateIdx) {
-			for (symbol_type symbolIdx = 0; symbolIdx < a_.alphabet_size(); ++symbolIdx) {
-				invStart_[stateIdx * (a_.alphabet_size()+1) + symbolIdx] = invEltsIdx;
+		for (state_type stateIdx = 0; stateIdx < state_size_; ++stateIdx) {
+			for (symbol_type symbolIdx = 0; symbolIdx < alphabet_size_; ++symbolIdx) {
+				invStart_[stateIdx * (alphabet_size_+1) + symbolIdx] = invEltsIdx;
 				while (edgelist[invEltsIdx].target == stateIdx &&
 						edgelist[invEltsIdx].symbol == symbolIdx) {
 					inv_[invEltsIdx] = edgelist[invEltsIdx].source;
 					++invEltsIdx;
 				}
 			}
-			invStart_[stateIdx * (a_.alphabet_size()+1) + a_.alphabet_size()] = invEltsIdx;
+			invStart_[stateIdx * (alphabet_size_+1) + alphabet_size_] = invEltsIdx;
 		}
 		//TODO: we can reassert this when inv_ is lazily sized
 //			assert(invEltsIdx == inv_.size());
@@ -183,7 +189,7 @@ private:
 				maxPartition = p;
 			}
 
-		for (symbol_type i = 0; i < a_.alphabet_size(); ++i)
+		for (symbol_type i = 0; i < alphabet_size_; ++i)
 			for (state_type p = 0; p < partitionBounds_.size(); ++p)
 				if (p != maxPartition)
 					add(p, i);
@@ -214,7 +220,7 @@ private:
 				state_type newPart = split(part);
 				//This is done unconditionally outside this if.
 //					moveSize_[part] = 0;
-				for (symbol_type symbol = 0; symbol < a_.alphabet_size(); ++symbol)
+				for (symbol_type symbol = 0; symbol < alphabet_size_; ++symbol)
 					if (contains(part, symbol))
 						add(newPart, symbol);
 					else
@@ -327,9 +333,9 @@ private:
 		return boost::make_iterator_range(&partitions_[0] + p.first, &partitions_[0] + p.second);
 	}
 	boost::iterator_range<const state_type*> inverseStep(state_type target, symbol_type symbol) const {
-		assert(target <= a_.state_size());
-		assert(symbol <= a_.alphabet_size());
-		std::size_t start = target * (a_.alphabet_size()+1) + symbol;
+		assert(target <= state_size_);
+		assert(symbol <= alphabet_size_);
+		std::size_t start = target * (alphabet_size_+1) + symbol;
 		assert((start + 1) < invStart_.size());
 		return boost::make_iterator_range(&inv_[0] + invStart_[start], &inv_[0] + invStart_[start+1]);
 	}
@@ -348,17 +354,17 @@ private:
 		checkRep();
 		assert(!contains(part, symbol));
 		L_.push_back({part, symbol});
-		inL_.set(part * a_.alphabet_size() + symbol);
+		inL_.set(part * alphabet_size_ + symbol);
 		checkRep();
 	}
 	bool contains(int part, int symbol) const {
 		checkRep();
-		return inL_.test(part * a_.alphabet_size() + symbol);
+		return inL_.test(part * alphabet_size_ + symbol);
 	}
 	std::pair<state_type, symbol_type> remove() {
 		checkRep();
 		auto pair = L_.pop_front();
-		inL_.reset(pair.first * a_.alphabet_size() + pair.second);
+		inL_.reset(pair.first * alphabet_size_ + pair.second);
 		checkRep();
 		return pair;
 	}
