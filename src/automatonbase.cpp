@@ -12,7 +12,7 @@ AutomatonBase& AutomatonBase::operator=(AutomatonBase&&) = default;
 
 AutomatonBase::state_type AutomatonBase::accept_size() const {
 	state_type count = 0;
-	for (state_type s = 0; s < state_size(); ++s)
+	for (state_type s : xrange(state_size()))
 		if (accept(s))
 			++count;
 	return count;
@@ -22,20 +22,21 @@ AutomatonBase::symbol_type AutomatonBase::active_alphabet_size() const {
 }
 std::size_t AutomatonBase::edge_size() const {
 	std::size_t count = 0;
-	for (state_type s = 0; s < state_size(); ++s)
+	for (state_type s : xrange(state_size()))
 		count += destinations(s).size();
 	return count;
 }
 std::size_t AutomatonBase::transition_size() const {
 	std::size_t count = 0;
-	for (state_type s = 0; s < state_size(); ++s)
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+	auto alphabet = xrange(alphabet_size());
+	for (state_type s : xrange(state_size()))
+		for (symbol_type a : alphabet)
 			count += step(s, a).size();
 	return count;
 }
 
 void AutomatonBase::for_each_accept(std::function<void(state_type)> action) const {
-	for (state_type s = 0; s < state_size(); ++s)
+	for (state_type s : xrange(state_size()))
 		if (accept(s))
 			action(s);
 }
@@ -53,11 +54,11 @@ AutomatonBase::SymbolSet AutomatonBase::outgoing(state_type state) const {
 	assert(state < state_size());
 	SymbolSet ret;
 	if (deterministic()) {
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			if (stepDeterministic(state, a))
 				ret.insert_absent(a);
 	} else
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			for (MAYBE_UNUSED state_type next : step(state, a))
 				ret.insert(a);
 	return ret;
@@ -67,11 +68,11 @@ AutomatonBase::StateSet AutomatonBase::destinations(state_type state) const {
 	assert(state < state_size());
 	StateSet ret;
 	if (deterministic()) {
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			if (auto next = stepDeterministic(state, a))
 				ret.insert(*next);
 	} else
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			for (state_type next : step(state, a))
 				ret.insert(next);
 	return ret;
@@ -86,11 +87,11 @@ void AutomatonBase::for_each_destination(state_type state, std::function<void(st
 void AutomatonBase::for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const {
 	assert(state < state_size());
 	if (deterministic()) {
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			if (auto next = stepDeterministic(state, a))
 				action(a, *next);
 	} else
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			for (state_type next : step(state, a))
 				action(a, next);
 }
@@ -100,11 +101,11 @@ AutomatonBase::SymbolSet AutomatonBase::labels(state_type from, state_type to) c
 	assert(to < state_size());
 	SymbolSet ret;
 	if (deterministic()) {
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			if (auto next = stepDeterministic(from, a); next && *next == to)
 				ret.insert_absent(a);
 	} else
-		for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (symbol_type a : xrange(alphabet_size()))
 			for (MAYBE_UNUSED state_type next : step(from, a))
 				if (next == to) {
 					ret.insert_absent(a);
@@ -114,23 +115,24 @@ AutomatonBase::SymbolSet AutomatonBase::labels(state_type from, state_type to) c
 }
 
 void AutomatonBase::for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const {
+	auto alphabet = xrange(alphabet_size());
 	if (deterministic()) {
-		for (state_type from = 0; from < state_size(); ++from)
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (state_type from : xrange(state_size()))
+			for (symbol_type a : alphabet)
 				if (auto next = stepDeterministic(from, a))
 					action(from, a, *next);
 	} else
-		for (state_type from = 0; from < state_size(); ++from)
-			for (symbol_type a = 0; a < alphabet_size(); ++a)
+		for (state_type from : xrange(state_size()))
+			for (symbol_type a : alphabet)
 				for (state_type next : step(from, a))
 					action(from, a, next);
 }
 
-
 AutomatonBase::SymbolSet AutomatonBase::activeAlphabet() const {
 	SymbolSet ret;
-	for (symbol_type a = 0; a < alphabet_size(); ++a)
-		for (symbol_type s = 0; s < state_size(); ++s)
+	auto states = xrange(state_size());
+	for (symbol_type a : xrange(alphabet_size()))
+		for (symbol_type s : states)
 			if (!step(s, a).empty()) {
 				ret.insert_absent(a);
 				break;
@@ -146,10 +148,12 @@ bool AutomatonBase::run(std::initializer_list<unsigned int> string) const {
 
 std::size_t AutomatonBase::hash() const {
 	std::size_t h = 13;
-	h = 31*h + state_size();
-	h = 31*h + alphabet_size();
-	for (state_type s = 0; s < state_size(); ++s) {
-		for (symbol_type a = 0; a < alphabet_size(); ++a) {
+	const auto states = state_size();
+	const auto alphabet = alphabet_size();
+	h = 31*h + states;
+	h = 31*h + alphabet;
+	for (state_type s = 0; s < states; ++s) {
+		for (symbol_type a = 0; a < alphabet; ++a) {
 			StateSet dests = step(s, a);
 			dests.sort();
 			for (state_type d : dests)
