@@ -150,6 +150,15 @@ range_for_pair<Front, Sentinel> as_range_for_pair(std::pair<Front, Sentinel> pai
 }
 
 
+template<typename Integer>
+auto xrange(Integer last) {
+	return boost::irange(static_cast<Integer>(0), last);
+}
+template<typename Integer>
+auto xrange(Integer first, Integer last) {
+	return boost::irange(first, last);
+}
+
 struct indirect_equal {
 	template<typename L, typename R>
 	bool operator()(const L* l, const R* r) const noexcept(noexcept(*l == *r)) {
