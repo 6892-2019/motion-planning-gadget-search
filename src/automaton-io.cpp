@@ -20,9 +20,9 @@ void serialize(const AutomatonBase& a, std::string filename) {
 
 	lines.push_back(to_string(a.alphabet_size()) + " " + to_string(a.state_size()));
 	std::vector<std::string> accepts;
-	for (state_type s = 0; s < a.state_size(); ++s)
-		if (a.accept(s))
-			accepts.push_back(to_string(s));
+	a.for_each_accept([&accepts](state_type s) {
+		accepts.push_back(to_string(s));
+	});
 	lines.push_back("accept " + boost::algorithm::join(accepts, " "));
 
 	a.for_each_transition([&lines](state_type from, symbol_type on, state_type to) {
