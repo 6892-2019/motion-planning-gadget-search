@@ -40,8 +40,9 @@ struct ReinterpretWriter {
 	//operator().  (Well, we could if we called it as w.operator()<T>(arg).)
 	template<typename T, typename V>
 	void write(V value) {
-		*reinterpret_cast<T*>(p) = numeric_cast<T>(value);
-		p += sizeof(T);
+		T source = numeric_cast<T>(value);
+		memcpy(p, &source, sizeof(source));
+		p += sizeof(source);
 	}
 };
 
