@@ -161,6 +161,9 @@ SymbolSet set_of_indices(automaton::bitset<N> mask) {
 
 template<typename Iter>
 struct LazyEdgeEnumerator {
+	const AutomatonBase* b;
+	state_type state_size;
+	symbol_type alphabet_size;
 	dynarray<state_type> renumbering; //TODO: make this a view into a big array preinitialized to max()
 	circular_deque<symbol_type, 16> queue;
 	state_type idx = 0; //the order in which things are visited
@@ -168,8 +171,9 @@ struct LazyEdgeEnumerator {
 	symbol_type a = 0; //the next symbol to be (after permutation) stepped with
 	Iter alphabetPerm;
 	bool shouldResume = false;
-	const AutomatonBase* b;
-	LazyEdgeEnumerator(Iter perm, const AutomatonBase* automaton) : renumbering(automaton->state_size()), alphabetPerm(perm), b(automaton) {
+	LazyEdgeEnumerator(Iter perm, const AutomatonBase* automaton) : b(automaton),
+			state_size(b->state_size()), alphabet_size(b->alphabet_size()),
+			renumbering(state_size), alphabetPerm(perm) {
 		std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
 		renumbering[0] = idx++;
 		queue.push_back(0);
@@ -179,7 +183,7 @@ struct LazyEdgeEnumerator {
 			goto resume;
 		while (!queue.empty()) {
 			cur = queue.pop_front();
-			for (a = 0; a < b->alphabet_size(); ++a) {
+			for (a = 0; a < alphabet_size; ++a) {
 				if (auto dest = b->stepDeterministic(cur, alphabetPerm[a])) {
 					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
 						renumbering[*dest] = idx++;
@@ -201,7 +205,7 @@ struct LazyEdgeEnumerator {
 			goto resume;
 		while (!queue.empty()) {
 			cur = queue.pop_front();
-			for (a = 0; a < b->alphabet_size(); ++a) {
+			for (a = 0; a < alphabet_size; ++a) {
 				if (auto dest = b->stepDeterministic(cur, alphabetPerm[a])) {
 					if (renumbering[*dest] == std::numeric_limits<state_type>::max()) {
 						renumbering[*dest] = idx++;
@@ -211,12 +215,12 @@ struct LazyEdgeEnumerator {
 				resume: ;
 			}
 		}
-		assert(idx == b->state_size());
+		assert(idx == state_size);
 		assert(!std::count(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max()));
 	}
 	bool finished() const {
 		//finished the outer loop and the inner loop
-		return queue.empty() && a >= b->alphabet_size();
+		return queue.empty() && a >= alphabet_size;
 	}
 };
 
