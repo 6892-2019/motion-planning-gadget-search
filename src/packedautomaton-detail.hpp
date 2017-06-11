@@ -116,20 +116,20 @@ public:
 	}
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
-		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+		for (auto p = outgoing_begin(), q = outgoing_end(); p != q; ++p)
 			mask = numeric_cast<OutgoingMaskType>(mask | load(p)); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask);
 	}
 	AutomatonBase::state_type accept_size() const override {
 		state_type count = 0;
-		for (auto p = offsets_begin(); p != offsets_end(); ++p)
+		for (auto p = offsets_begin(), q = offsets_end(); p != q; ++p)
 			count += (load(p) >> (limits<OffsetType>::digits - 1)); //1 if the top bit is set, else 0
 		return count;
 	}
 	std::size_t transition_size() const override {
 		std::size_t count = 0;
 		//TODO: make this vectorizable/unrollable, not byte-at-a-time
-		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+		for (auto p = outgoing_begin(), q = outgoing_end(); p != q; ++p)
 			count += __builtin_popcount(load(p));
 		return count;
 	}
@@ -156,8 +156,9 @@ public:
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
 		SymbolSet ret;
+		auto alphabet = alphabet_size();
 		OutgoingMaskType mask = outgoing_mask(state);
-		for (unsigned int i = 0; i < alphabet_size(); ++i)
+		for (unsigned int i = 0; i < alphabet; ++i)
 			if (mask & (1 << i))
 				ret.insert_absent(i);
 		return ret;
@@ -290,19 +291,19 @@ public:
 	}
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
-		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+		for (auto p = outgoing_begin(), q = outgoing_end(); p != q; ++p)
 			mask = numeric_cast<OutgoingMaskType>(mask | load(p)); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
 	}
 	AutomatonBase::state_type accept_size() const override {
 		state_type count = 0;
-		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+		for (auto p = outgoing_begin(), q = outgoing_end(); p != q; ++p)
 			count += (load(p) >> (limits<OutgoingMaskType>::digits - 1)); //1 if the top bit is set, else 0
 		return count;
 	}
 	std::size_t transition_size() const override {
 		std::size_t count = 0;
-		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+		for (auto p = outgoing_begin(), q = outgoing_end(); p != q; ++p)
 			count += __builtin_popcount(load(p) & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
 		return count;
 	}
@@ -329,8 +330,9 @@ public:
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
 		SymbolSet ret;
+		auto alphabet = alphabet_size();
 		OutgoingMaskType mask = outgoing_mask(state);
-		for (unsigned int i = 0; i < alphabet_size(); ++i)
+		for (unsigned int i = 0; i < alphabet; ++i)
 			if (mask & (1 << i))
 				ret.insert_absent(i);
 		return ret;
@@ -475,19 +477,19 @@ public:
 	}
 	AutomatonBase::symbol_type active_alphabet_size() const override {
 		OutgoingMaskType mask = 0;
-		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+		for (auto p = outgoing_begin(), q = outgoing_end(); p != q; ++p)
 			mask = numeric_cast<OutgoingMaskType>(mask | load(p)); //in theory, we could short-circuit if all bits are set
 		return __builtin_popcount(mask);
 	}
 	AutomatonBase::state_type accept_size() const override {
 		state_type count = 0;
-		for (auto p = accepts_begin(); p != accepts_end(); ++p)
+		for (auto p = accepts_begin(), q = accepts_end(); p != q; ++p)
 			count += __builtin_popcount(load(p));
 		return count;
 	}
 	std::size_t transition_size() const override {
 		std::size_t count = 0;
-		for (auto p = outgoing_begin(); p != outgoing_end(); ++p)
+		for (auto p = outgoing_begin(), q = outgoing_end(); p != q; ++p)
 			count += __builtin_popcount(load(p));
 		return count;
 	}
@@ -514,8 +516,9 @@ public:
 	}
 	AutomatonBase::SymbolSet outgoing(state_type state) const override {
 		SymbolSet ret;
+		auto alphabet = alphabet_size();
 		OutgoingMaskType mask = outgoing_mask(state);
-		for (unsigned int i = 0; i < alphabet_size(); ++i)
+		for (unsigned int i = 0; i < alphabet; ++i)
 			if (mask & (1 << i))
 				ret.insert_absent(i);
 		return ret;
