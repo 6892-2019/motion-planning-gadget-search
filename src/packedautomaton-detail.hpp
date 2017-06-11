@@ -84,30 +84,27 @@ public:
 
 	OffsetAcceptAutomaton(const AutomatonBase& a, PackStats stats) {
 		assert(can_represent(a, stats));
-		ReinterpretWriter p = {storage_begin()};
-		p.write<StateSizeType>(stats.state_size);
-		p.write<unsigned char>(stats.alphabet_size);
+		ReinterpretWriter maskWriter = {storage_begin()};
+		maskWriter.write<StateSizeType>(stats.state_size);
+		maskWriter.write<unsigned char>(stats.alphabet_size);
+		ReinterpretWriter offsetWriter = {maskWriter.p + stats.state_size * sizeof(OutgoingMaskType)};
+		ReinterpretWriter destinationWriter = {offsetWriter.p + stats.state_size * sizeof(OffsetType)};
 
-		//TODO: if we know where offsets start, we can make this one big loop,
-		//so we only call a.outgoing(s) once
-		for (state_type s = 0; s < stats.state_size; ++s)
-			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)));
 		OffsetType offset = 0;
 		for (state_type s = 0; s < stats.state_size; ++s) {
-			p.write<OffsetType>(offset | (a.accept(s) ? 1 << (limits<OffsetType>::digits - 1) : 0));
+			auto out = a.outgoing(s);
+			out.sort();
+			auto mask = set_to_mask<OutgoingMaskType>(out);
+			maskWriter.write<OutgoingMaskType>(mask);
+			offsetWriter.write<OffsetType>(offset | (a.accept(s) ? 1 << (limits<OffsetType>::digits - 1) : 0));
 			//TODO: want an overflow-checked add here, I guess
-			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
-		}
-		for (state_type s = 0; s < stats.state_size; ++s) {
-			SymbolSet syms = a.outgoing(s);
-			syms.sort();
-			for (symbol_type c : syms) {
+			offset = numeric_cast<OffsetType>(offset + out.size());
+			for (symbol_type c : out) {
 				auto next = a.stepDeterministic(s, c);
 				assert(next);
-				p.write<StateSizeType>(*next);
+				destinationWriter.write<StateSizeType>(*next);
 			}
 		}
-		assert(p.p == storage_end());
 	}
 
 	state_type state_size() const override {
@@ -260,30 +257,27 @@ public:
 
 	OutgoingAcceptAutomaton(const AutomatonBase& a, PackStats stats) {
 		assert(can_represent(a, stats));
-		ReinterpretWriter p = {storage_begin()};
-		p.write<StateSizeType>(stats.state_size);
-		p.write<unsigned char>(stats.alphabet_size);
+		ReinterpretWriter maskWriter = {storage_begin()};
+		maskWriter.write<StateSizeType>(stats.state_size);
+		maskWriter.write<unsigned char>(stats.alphabet_size);
+		ReinterpretWriter offsetWriter = {maskWriter.p + stats.state_size * sizeof(OutgoingMaskType)};
+		ReinterpretWriter destinationWriter = {offsetWriter.p + stats.state_size * sizeof(OffsetType)};
 
-		//TODO: if we know where offsets start, we can make this one big loop,
-		//so we only call a.outgoing(s) once
-		for (state_type s = 0; s < stats.state_size; ++s)
-			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)) | (a.accept(s) ? 1 << (limits<OutgoingMaskType>::digits - 1) : 0));
 		OffsetType offset = 0;
 		for (state_type s = 0; s < stats.state_size; ++s) {
-			p.write<OffsetType>(offset);
+			auto out = a.outgoing(s);
+			out.sort();
+			auto mask = set_to_mask<OutgoingMaskType>(out);
+			maskWriter.write<OutgoingMaskType>(mask | (a.accept(s) ? 1 << (limits<OutgoingMaskType>::digits - 1) : 0));
+			offsetWriter.write<OffsetType>(offset);
 			//TODO: want an overflow-checked add here, I guess
-			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
-		}
-		for (state_type s = 0; s < stats.state_size; ++s) {
-			SymbolSet syms = a.outgoing(s);
-			syms.sort();
-			for (symbol_type c : syms) {
+			offset = numeric_cast<OffsetType>(offset + out.size());
+			for (symbol_type c : out) {
 				auto next = a.stepDeterministic(s, c);
 				assert(next);
-				p.write<StateSizeType>(*next);
+				destinationWriter.write<StateSizeType>(*next);
 			}
 		}
-		assert(p.p == storage_end());
 	}
 
 	state_type state_size() const override {
@@ -437,39 +431,37 @@ public:
 
 	BitmaskAcceptAutomaton(const AutomatonBase& a, PackStats stats) {
 		assert(can_represent(a, stats));
-		ReinterpretWriter p = {storage_begin()};
-		p.write<StateSizeType>(stats.state_size);
-		p.write<unsigned char>(stats.alphabet_size);
+		ReinterpretWriter maskWriter = {storage_begin()};
+		maskWriter.write<StateSizeType>(stats.state_size);
+		maskWriter.write<unsigned char>(stats.alphabet_size);
+		ReinterpretWriter acceptWriter = {maskWriter.p + stats.state_size * sizeof(OutgoingMaskType)};
+		ReinterpretWriter offsetWriter = {acceptWriter.p + div8roundup(stats.state_size) * sizeof(unsigned char)};
+		ReinterpretWriter destinationWriter = {offsetWriter.p + stats.state_size * sizeof(OffsetType)};
 
-		//TODO: if we know where offsets start, we can make this one big loop,
-		//so we only call a.outgoing(s) once
-		for (state_type s = 0; s < stats.state_size; ++s)
-			p.write<OutgoingMaskType>(set_to_mask<OutgoingMaskType>(a.outgoing(s)));
+		OffsetType offset = 0;
+		for (state_type s = 0; s < stats.state_size; ++s) {
+			auto out = a.outgoing(s);
+			out.sort();
+			auto mask = set_to_mask<OutgoingMaskType>(out);
+			maskWriter.write<OutgoingMaskType>(mask);
+			offsetWriter.write<OffsetType>(offset);
+			//TODO: want an overflow-checked add here, I guess
+			offset = numeric_cast<OffsetType>(offset + out.size());
+			for (symbol_type c : out) {
+				auto next = a.stepDeterministic(s, c);
+				assert(next);
+				destinationWriter.write<StateSizeType>(*next);
+			}
+		}
 		unsigned int acceptmask = 0;
 		for (state_type s = 0; s < stats.state_size;) {
 			for (unsigned int i = 0; i < 8 && s < stats.state_size; ++i, ++s) {
 				//we can safely shift on the first iteration because we start at 0
 				acceptmask |= (a.accept(s) << i);
 			}
-			p.write<unsigned char>(acceptmask);
+			acceptWriter.write<unsigned char>(acceptmask);
 			acceptmask = 0;
 		}
-		OffsetType offset = 0;
-		for (state_type s = 0; s < stats.state_size; ++s) {
-			p.write<OffsetType>(offset);
-			//TODO: want an overflow-checked add here, I guess
-			offset = numeric_cast<OffsetType>(offset + __builtin_popcount(outgoing_mask(s)));
-		}
-		for (state_type s = 0; s < stats.state_size; ++s) {
-			SymbolSet syms = a.outgoing(s);
-			syms.sort();
-			for (symbol_type c : syms) {
-				auto next = a.stepDeterministic(s, c);
-				assert(next);
-				p.write<StateSizeType>(*next);
-			}
-		}
-		assert(p.p == storage_end());
 	}
 
 	state_type state_size() const override {
