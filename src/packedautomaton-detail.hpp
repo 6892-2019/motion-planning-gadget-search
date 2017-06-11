@@ -67,10 +67,11 @@ public:
 	}
 private:
 	static std::size_t extra_storage(const AutomatonBase& a) {
+		state_type state_size = a.state_size();
 		return 1 //alphabet size
 				+ sizeof(StateSizeType)
-				+ sizeof(OutgoingMaskType) * a.state_size()
-				+ sizeof(OffsetType) * a.state_size()
+				+ sizeof(OutgoingMaskType) * state_size
+				+ sizeof(OffsetType) * state_size
 				+ sizeof(StateSizeType) * a.transition_size();
 	}
 public:
@@ -240,10 +241,11 @@ public:
 	}
 private:
 	static std::size_t extra_storage(const AutomatonBase& a) {
+		state_type state_size = a.state_size();
 		return 1 //alphabet size
 				+ sizeof(StateSizeType)
-				+ sizeof(OutgoingMaskType) * a.state_size()
-				+ sizeof(OffsetType) * a.state_size()
+				+ sizeof(OutgoingMaskType) * state_size
+				+ sizeof(OffsetType) * state_size
 				+ sizeof(StateSizeType) * a.transition_size();
 	}
 public:
@@ -412,11 +414,12 @@ public:
 	}
 private:
 	static std::size_t extra_storage(const AutomatonBase& a) {
+		state_type state_size = a.state_size();
 		return 1 //alphabet size
 				+ sizeof(StateSizeType)
-				+ sizeof(OutgoingMaskType) * a.state_size()
-				+ sizeof(unsigned char) * div8roundup(a.state_size()) //accept bitmask
-				+ sizeof(OffsetType) * a.state_size()
+				+ sizeof(OutgoingMaskType) * state_size
+				+ sizeof(unsigned char) * div8roundup(state_size) //accept bitmask
+				+ sizeof(OffsetType) * state_size
 				+ sizeof(StateSizeType) * a.transition_size();
 	}
 public:
