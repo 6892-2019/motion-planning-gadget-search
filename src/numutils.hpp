@@ -14,7 +14,7 @@ namespace numutils_detail {
 }
 
 template<typename Target, typename Source>
-Target numeric_cast(Source src) noexcept {
+[[gnu::const]] Target numeric_cast(Source src) noexcept {
 	using converter = boost::numeric::converter<Target, Source,
 			boost::numeric::conversion_traits<Target, Source>, //the default
 			numutils_detail::assert_on_overflow

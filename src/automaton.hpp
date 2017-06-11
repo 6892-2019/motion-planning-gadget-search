@@ -146,7 +146,8 @@ auto begin(const T& t) {
 }
 //work around array-pointer decay for half-ranges, where the length is irrelevant
 template<typename T>
-auto begin(T* ptr) {
+[[gnu::const]] //sure seems like GCC should figure this one out on its own
+T* begin(T* ptr) {
 	return ptr;
 }
 
@@ -291,7 +292,7 @@ public:
 	symbol_type alphabet_size() const override {
 		return alphabet_size_v;
 	}
-	symbol_type active_alphabet_size() const override {
+	[[gnu::pure]] symbol_type active_alphabet_size() const override {
 		symbol_mask_type mask;
 		for (state_type s = 0; s < state_size(); ++s)
 			mask |= outgoing_mask(s);

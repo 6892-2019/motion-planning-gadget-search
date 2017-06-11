@@ -24,7 +24,7 @@ inline unsigned int count_set_lowbits(unsigned int x, unsigned int pos) {
 }
 
 template<typename OutgoingMaskType>
-OutgoingMaskType set_to_mask(SymbolSet set) {
+[[gnu::pure]] OutgoingMaskType set_to_mask(SymbolSet set) {
 	std::size_t mask = 0;
 	for (symbol_type s : set)
 		mask |= 1u << s;

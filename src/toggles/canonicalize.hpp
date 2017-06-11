@@ -10,6 +10,7 @@
 
 #include "automaton.hpp"
 
+[[gnu::const]]
 std::pair<const unsigned int* const*, const unsigned int* const*>
 getPerms(unsigned int alphabetSize, unsigned int locations, bool normal, bool mirrored);
 
