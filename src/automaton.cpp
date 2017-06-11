@@ -341,7 +341,7 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 }
 
 struct Tarjan {
-	Tarjan(const AutomatonBase& a_) : a(a_), state_size(a.state_size()), lowlink(state_size), number(state_size) {
+	Tarjan(const AutomatonBase& a_) : a(a_), state_size(a.state_size()), number(state_size) {
 		std::fill(number.begin(), number.end(), std::numeric_limits<state_type>::max());
 		result.components_.reserve(state_size);
 	}
@@ -349,28 +349,30 @@ struct Tarjan {
 	state_type state_size;
 	unsigned int index;
 	std::vector<state_type> stack;
-	dynarray<state_type> lowlink, number;
+	dynarray<state_type> number;
 	SCCs result;
 
-	void strongconnect(state_type v) {
-		lowlink[v] = number[v] = index++;
+	state_type strongconnect(state_type v) {
+		state_type lowlink = index++;
+		number[v] = lowlink;
 		stack.push_back(v);
 		a.for_each_destination(v, [&](state_type w) {
 			if (number[w] == std::numeric_limits<state_type>::max()) {
-				strongconnect(w);
+				state_type otherlowlink = strongconnect(w);
 				//TODO: apparently lowlink is only used in strongconnect(v), so
 				//we could make it the return value instead of an array
-				lowlink[v] = std::min(lowlink[v], lowlink[w]);
+				lowlink = std::min(lowlink, otherlowlink);
 			} else if (number[w] < number[v] && std::find(stack.begin(), stack.end(), w) != stack.end())
-				lowlink[v] = std::min(lowlink[v], number[w]);
+				lowlink = std::min(lowlink, number[w]);
 		});
-		if (lowlink[v] == number[v]) {
+		if (lowlink == number[v]) {
 			result.indices_.push_back(static_cast<unsigned int>(result.components_.size()));
 			while (!stack.empty() && number[stack.back()] >= number[v]) {
 				result.components_.push_back(stack.back());
 				stack.pop_back();
 			}
 		}
+		return lowlink;
 	}
 	SCCs compute() {
 		for (state_type w = 0; w < state_size; ++w)
