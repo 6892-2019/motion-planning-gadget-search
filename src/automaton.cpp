@@ -39,9 +39,10 @@ bool compare_slowpath(const AutomatonBase& left, const AutomatonBase& right) {
 	if (left.edge_size() != right.edge_size()) return false;
 	if (left.transition_size() != right.transition_size()) return false;
 
-	for (AutomatonBase::state_type s = 0; s < left.state_size(); ++s) {
+	auto alphabet = xrange(left.alphabet_size());
+	for (AutomatonBase::state_type s : xrange(left.state_size())) {
 		if (left.accept(s) != right.accept(s)) return false;
-		for (AutomatonBase::symbol_type a = 0; a < left.alphabet_size(); ++a) {
+		for (AutomatonBase::symbol_type a : alphabet) {
 			StateSet ld = left.step(s, a), rd = right.step(s, a);
 			ld.sort();
 			rd.sort();
@@ -78,9 +79,9 @@ WorkingAutomaton& WorkingAutomaton::operator=(const WorkingAutomaton&) = default
 WorkingAutomaton& WorkingAutomaton::operator=(WorkingAutomaton&&) = default;
 
 auto WorkingAutomaton::append(const AutomatonBase& b) -> state_type {
-	reserve(state_size() + b.state_size());
-	state_type base = state_size();
-	for (state_type i = 0; i < b.state_size(); ++i) {
+	state_type base = state_size(), theirs = b.state_size();
+	reserve(base + theirs);
+	for (state_type i : xrange(theirs)) {
 		addState();
 		setAccept(base + i, b.accept(i));
 	}
@@ -340,11 +341,12 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 }
 
 struct Tarjan {
-	Tarjan(const AutomatonBase& a_) : a(a_), lowlink(a.state_size()), number(a.state_size()) {
+	Tarjan(const AutomatonBase& a_) : a(a_), state_size(a.state_size()), lowlink(state_size), number(state_size) {
 		std::fill(number.begin(), number.end(), std::numeric_limits<state_type>::max());
-		result.components_.reserve(a.state_size());
+		result.components_.reserve(state_size);
 	}
 	const AutomatonBase& a;
+	state_type state_size;
 	unsigned int index;
 	std::vector<state_type> stack;
 	dynarray<state_type> lowlink, number;
@@ -371,12 +373,12 @@ struct Tarjan {
 		}
 	}
 	SCCs compute() {
-		for (state_type w = 0; w < a.state_size(); ++w)
+		for (state_type w = 0; w < state_size; ++w)
 			if (number[w] == std::numeric_limits<state_type>::max())
 				strongconnect(w);
 		result.indices_.push_back(static_cast<unsigned int>(result.components_.size()));
 
-		for (state_type s = 0; s < a.state_size(); ++s)
+		for (state_type s = 0; s < state_size; ++s)
 			//Each state is in exactly one component.
 			assert(std::count(result.components_.begin(), result.components_.end(), s) == 1);
 
