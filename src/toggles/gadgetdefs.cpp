@@ -48,7 +48,7 @@ std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
 
 	ret["2-nop"] = prepare(make_nop(2));
 	ret["3-nop"] = prepare(make_nop(3));
-	ret["3-nop"] = prepare(make_nop(4));
+	ret["4-nop"] = prepare(make_nop(4));
 
 	ret["split"] = prepare(star(nCopies(alt(lit(0), lit(1), lit(2)), 2)));
 
