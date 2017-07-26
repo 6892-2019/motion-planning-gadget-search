@@ -11,7 +11,7 @@ globals.update({
   'src_dir': 'src/',
   'test_dir': 'test/',
   'vendor_dir': 'vendor/',
-  'ldflags': '-u malloc -ljemalloc_pic -lc -lpthread',
+  'ldflags': '-u malloc -ljemalloc_pic -lc -lpthread -ldl',
 })
 # must be inserted after its references
 globals['includeflags'] = '-I$builddir/include -I$src_dir/ -isystem vendor/'
