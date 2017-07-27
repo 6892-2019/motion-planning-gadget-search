@@ -52,6 +52,7 @@
       <in>automaton-test.cpp</in>
       <in>bitset-test.cpp</in>
       <in>bounded_queue-test.cpp</in>
+      <in>circular_deque-test.cpp</in>
       <in>expr-test.cpp</in>
       <in>util-test.cpp</in>
       <in>util.cpp</in>
