@@ -27,6 +27,17 @@ struct Provenance {
 		  j(secondMirrored ? secondSplice | TOPBIT : secondSplice), generation(generatio) {}
 
 	bool isInput() const {return first == ALLONES;}
+	bool isConnect() const {return second == ALLONES;}
+	bool isCombine() const {return !isInput() && !isConnect();}
+	boost::container::small_vector<std::uint32_t, 2> parents() {
+		boost::container::small_vector<std::uint32_t, 2> p;
+		if (first != ALLONES)
+			p.push_back(first);
+		if (second != ALLONES)
+			p.push_back(second);
+		return p;
+	};
+	friend std::ostream& operator<<(std::ostream&, Provenance&);
 private:
 	static constexpr std::uint32_t ALLONES = std::numeric_limits<std::uint32_t>::max();
 	static constexpr std::uint32_t TOPBIT = 1 << 31;

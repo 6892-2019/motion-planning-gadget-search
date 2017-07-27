@@ -54,7 +54,27 @@ void finish(automaton_type thing, Provenance provenance, Result& finishArg) {
 	for (const Target& t : targets) {
 		if ((hash == t.packed_hash && *packed == *t.normal) ||
 				(hash == t.mirror_packed_hash && *packed == *t.mirror)) {
-			std::cout << "TODO found\n";
+			circular_deque<std::uint32_t, 32> queue;
+			linear_set<std::uint32_t> printed;
+
+			std::cout << "<found> = " << provenance << " " << thing << '\n';
+			for (auto p : provenance.parents())
+				if (printed.insert(p).second)
+					queue.push_back(p);
+
+			while (!queue.empty()) {
+				auto idx = queue.pop_front();
+				auto prov = registry.provenance(idx);
+				std::cout << idx << " = " << prov << '\n';
+				//Ideally we'd print the automaton here, but we're no longer
+				//maintaining an id->automaton map.  We'll have to replay the
+				//log this code is printing out.
+				for (auto p : prov.parents())
+					if (printed.insert(p).second)
+						queue.push_back(p);
+			}
+
+			std::cout << std::flush;
 			std::quick_exit(0);
 		}
 	}
