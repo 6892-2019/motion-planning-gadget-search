@@ -41,39 +41,41 @@ automaton_type prepare(automaton_type a) {
 	return a;
 }
 
-automaton_type make_twostate(automaton_type&& trans00, automaton_type&& trans01,
-		automaton_type&& trans10, automaton_type&& trans11) {
-	automaton_type a;
-	a.addState(); a.addState();
-	a.setAccept(0); a.setAccept(1);
+class GadgetBuilder {
+public:
+	GadgetBuilder(automaton_type::state_type states) : gadget() {
+		for (automaton_type::state_type i = 0; i < states; ++i) {
+			gadget.addState();
+			gadget.setAccept(i);
+		}
+	}
+	GadgetBuilder& trans(automaton_type::state_type start, automaton_type::symbol_type from,
+			automaton_type::symbol_type to, automaton_type::state_type end) {
+		assert(gadget.accept(start));
+		assert(gadget.accept(end));
+		automaton_type::state_type t = gadget.addState();
+		gadget.addTrans(start, from, t);
+		gadget.addTrans(t, to, end);
+		return *this;
+	}
+	automaton_type build() {
+		branchToAnyAcceptState(gadget);
+		return prepare(std::move(gadget));
+	}
+private:
+	automaton_type gadget;
+};
 
-	auto do_trans = [&](automaton_type::state_type from, automaton_type::state_type to, auto&& trans) {
-		auto base = a.append(std::move(trans));
-		a.addEpsilon(from, base);
-		for (auto i = base; i < a.state_size(); ++i)
-			if (a.accept(i)) {
-				a.setAccept(i, false);
-				a.addEpsilon(i, to);
-			}
-	};
-	do_trans(0, 0, std::move(trans00));
-	do_trans(0, 1, std::move(trans01));
-	do_trans(1, 0, std::move(trans10));
-	do_trans(1, 1, std::move(trans11));
-
-	return prepare(a);
-}
-
-automaton_type make_twostate(automaton_type&& trans01, automaton_type&& trans10) {
-	auto empty = [](){return automaton::empty<automaton_type::alphabet_size_v>();};
-	return make_twostate(empty(), std::move(trans01), std::move(trans10), empty());
+automaton_type make_twostate(automaton_type&& state0, automaton_type&& state1) {
+	constexpr unsigned int N = automaton_type::alphabet_size_v;
+	auto base = alt(epsilon<N>(), state0, star(cat(state0, state1)), cat(state0, star(cat(state1, state0))));
+	return prepare(base);
 }
 
 std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
 	std::unordered_map<std::string, automaton_type> ret;
 	constexpr unsigned int N = automaton_type::alphabet_size_v;
 	auto lit = [](auto... symbols){return automaton::lit<N>(symbols...);};
-	auto empty = [](){return automaton::empty<automaton_type::alphabet_size_v>();};
 
 	ret["2-nop"] = prepare(make_nop(2));
 	ret["3-nop"] = prepare(make_nop(3));
@@ -112,11 +114,11 @@ std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
 	ret["4-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 3), lit(3, 0)),
 			alt(lit(1, 0), lit(2, 1), lit(3, 2), lit(0, 3)));
 
-	ret["seven-tripwire"] = make_twostate(
-			empty(),
-			alt(lit(0, 1), lit(2, 3), lit(3, 2)),
-			alt(lit(1, 0), lit(2, 3), lit(3, 2)),
-			lit(1, 2));
+	ret["seven-tripwire"] = GadgetBuilder(2)
+			.trans(0, 0, 1, 1).trans(0, 2, 3, 1).trans(0, 3, 2, 1)
+			.trans(1, 1, 0, 0).trans(1, 2, 3, 0).trans(1, 3, 2, 0)
+			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
+			.build();
 
 	return ret;
 }
