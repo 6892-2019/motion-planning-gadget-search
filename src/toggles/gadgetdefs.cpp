@@ -83,6 +83,8 @@ std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
 
 	ret["split"] = prepare(star(nCopies(alt(lit(0), lit(1), lit(2)), 2)));
 
+	ret["diode"] = prepare(star(lit(0, 1)));
+
 	ret["1-toggle"] = make_twostate(lit(0, 1), lit(1, 0));
 	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)));
 	ret["antiparallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(2, 3)), alt(lit(1, 0), lit(3, 2)));
@@ -113,6 +115,33 @@ std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
 			alt(lit(1, 0), lit(2, 1), lit(0, 2)));
 	ret["4-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 3), lit(3, 0)),
 			alt(lit(1, 0), lit(2, 1), lit(3, 2), lit(0, 3)));
+
+	//all mismatched unless otherwise noted
+	ret["parallel-seven-seven"] = GadgetBuilder(2)
+			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
+			.trans(0, 2, 3, 1).trans(0, 0, 1, 1)
+			.trans(1, 1, 0, 0).trans(1, 3, 2, 0)
+			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
+			.build();
+	ret["antiparallel-seven-seven"] = GadgetBuilder(2)
+			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
+			.trans(0, 3, 2, 1).trans(0, 0, 1, 1)
+			.trans(1, 1, 0, 0).trans(1, 2, 3, 0)
+			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
+			.build();
+	ret["crossing-seven-seven"] = GadgetBuilder(2)
+			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
+			.trans(0, 2, 3, 1).trans(0, 0, 1, 1)
+			.trans(1, 1, 0, 0).trans(1, 3, 2, 0)
+			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
+			.build();
+
+	ret["seven-lock"] = GadgetBuilder(2)
+			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
+			.trans(0, 0, 1, 1)
+			.trans(1, 1, 0, 0)
+			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
+			.build();
 
 	ret["seven-tripwire"] = GadgetBuilder(2)
 			.trans(0, 0, 1, 1).trans(0, 2, 3, 1).trans(0, 3, 2, 1)
