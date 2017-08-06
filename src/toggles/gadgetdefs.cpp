@@ -130,10 +130,10 @@ std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
 			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
 			.build();
 	ret["crossing-seven-seven"] = GadgetBuilder(2)
-			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
-			.trans(0, 2, 3, 1).trans(0, 0, 1, 1)
-			.trans(1, 1, 0, 0).trans(1, 3, 2, 0)
-			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
+			.trans(0, 1, 3, 0).trans(0, 3, 1, 0)
+			.trans(0, 1, 3, 1).trans(0, 0, 2, 1)
+			.trans(1, 2, 0, 0).trans(1, 3, 1, 0)
+			.trans(1, 0, 2, 1).trans(1, 2, 0, 1)
 			.build();
 
 	ret["seven-lock"] = GadgetBuilder(2)
