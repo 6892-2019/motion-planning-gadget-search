@@ -1,19 +1,19 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
 #include "util.hpp"
-#include <gtest/gtest.h>
+#include <doctest.h>
 
 using namespace automaton;
 using namespace automaton::impl;
 
-TEST(AutomatonTest, Canonicalize) {
+TEST_CASE("AutomatonTest_Canonicalize") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
-	EXPECT_TRUE(same_language(noop, canonicalize(noop)));
+	CHECK_UNARY(same_language(noop, canonicalize(noop)));
 	auto redundant = alt(noop, noop, noop);
-	EXPECT_TRUE(same_language(redundant, canonicalize(redundant)));
+	CHECK_UNARY(same_language(redundant, canonicalize(redundant)));
 }
 
-TEST(AutomatonTest, Canonicalize1) {
+TEST_CASE("AutomatonTest_Canonicalize1") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -26,13 +26,13 @@ TEST(AutomatonTest, Canonicalize1) {
 		std::copy(renumbering.begin(), renumbering.end(), work.begin());
 		tshuf.renumberStates(work.begin());
 		tshuf.canonicalize();
-		EXPECT_TRUE(tshuf.canonical());
-		EXPECT_TRUE(same_language(tshuf, cshuf));
-		ASSERT_EQ(tshuf, cshuf);
+		CHECK_UNARY(tshuf.canonical());
+		CHECK_UNARY(same_language(tshuf, cshuf));
+		REQUIRE_EQ(tshuf, cshuf);
 	} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
 }
 
-TEST(AutomatonTest, Canonicalize2) {
+TEST_CASE("AutomatonTest_Canonicalize2") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -45,26 +45,26 @@ TEST(AutomatonTest, Canonicalize2) {
 		auto tshuf = shuf;
 		std::shuffle(renumbering.begin()+1, renumbering.end(), rng);
 		tshuf.renumberStates(renumbering.begin());
-		EXPECT_TRUE(same_language(tshuf, cshuf));
+		CHECK_UNARY(same_language(tshuf, cshuf));
 		tshuf.canonicalize();
-		EXPECT_TRUE(tshuf.canonical());
-		EXPECT_TRUE(same_language(tshuf, cshuf));
-		ASSERT_EQ(tshuf, cshuf);
+		CHECK_UNARY(tshuf.canonical());
+		CHECK_UNARY(same_language(tshuf, cshuf));
+		REQUIRE_EQ(tshuf, cshuf);
 	}
 }
 
-TEST(AutomatonTest, CanonicalizeRenumberIdentity) {
+TEST_CASE("AutomatonTest_CanonicalizeRenumberIdentity") {
 	std::initializer_list<std::initializer_list<AutomatonBase::state_type>> perm = {{0, 1, 2, 3}};
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
 	auto shuf = shuffleAccept(noop, parallelToggleBase);
-	EXPECT_TRUE(same_language(shuf, canonicalizeRenumber(shuf, perm.begin(), perm.end())));
+	CHECK_UNARY(same_language(shuf, canonicalizeRenumber(shuf, perm.begin(), perm.end())));
 	auto redundant = alt(shuf, shuf, shuf);
-	EXPECT_TRUE(same_language(redundant, canonicalizeRenumber(redundant, perm.begin(), perm.end())));
+	CHECK_UNARY(same_language(redundant, canonicalizeRenumber(redundant, perm.begin(), perm.end())));
 }
 
-TEST(AutomatonTest, CanonicalizeRenumberIsAComposition) {
+TEST_CASE("AutomatonTest_CanonicalizeRenumberIsAComposition") {
 	std::initializer_list<std::initializer_list<AutomatonBase::state_type>> perm = {{1, 0, 3, 2}};
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
@@ -74,11 +74,11 @@ TEST(AutomatonTest, CanonicalizeRenumberIsAComposition) {
 	cshuf.renumberAlphabet(perm.begin()[0].begin());
 	cshuf.canonicalize();
 	auto crshuf = canonicalizeRenumber(shuf, perm.begin(), perm.end());
-	EXPECT_TRUE(same_language(cshuf, crshuf));
-	EXPECT_EQ(cshuf, crshuf);
+	CHECK_UNARY(same_language(cshuf, crshuf));
+	CHECK_EQ(cshuf, crshuf);
 }
 
-TEST(AutomatonTest, CanonicalizeRenumber1) {
+TEST_CASE("AutomatonTest_CanonicalizeRenumber1") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -98,13 +98,13 @@ TEST(AutomatonTest, CanonicalizeRenumber1) {
 		std::copy(renumbering.begin(), renumbering.end(), work.begin());
 		tshuf.renumberStates(work.begin());
 		tshuf.canonicalizeRenumber(perms.begin(), perms.end());
-		EXPECT_TRUE(tshuf.canonical());
-		EXPECT_TRUE(same_language(tshuf, cshuf));
-		ASSERT_EQ(tshuf, cshuf) << to_string(renumbering);
+		CHECK_UNARY(tshuf.canonical());
+		CHECK_UNARY(same_language(tshuf, cshuf));
+		REQUIRE_EQ(tshuf, cshuf); //OLDTEST: to_string(renumbering);
 	} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
 }
 
-TEST(AutomatonTest, CanonicalizeRenumber5) {
+TEST_CASE("AutomatonTest_CanonicalizeRenumber5") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -122,13 +122,13 @@ TEST(AutomatonTest, CanonicalizeRenumber5) {
 		std::copy(renumbering.begin(), renumbering.end(), work.begin());
 		tshuf.renumberStates(work.begin());
 		tshuf.canonicalizeRenumber(perms.begin(), perms.end());
-		EXPECT_TRUE(tshuf.canonical());
-		EXPECT_TRUE(same_language(tshuf, cshuf));
-		ASSERT_EQ(tshuf, cshuf) << to_string(renumbering);
+		CHECK_UNARY(tshuf.canonical());
+		CHECK_UNARY(same_language(tshuf, cshuf));
+		REQUIRE_EQ(tshuf, cshuf); //OLDTEST: to_string(renumbering);
 	} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
 }
 
-TEST(AutomatonTest, CanonicalizeRenumber2) {
+TEST_CASE("AutomatonTest_CanonicalizeRenumber2") {
 	Automaton<4> a;
 	a.reserve(5);
 	for (AutomatonBase::state_type s = 0; s < 5; ++s)
@@ -155,13 +155,13 @@ TEST(AutomatonTest, CanonicalizeRenumber2) {
 		std::copy(renumbering.begin(), renumbering.end(), work.begin());
 		silver.renumberStates(work.begin());
 		silver.canonicalizeRenumber(perms.begin(), perms.end());
-		EXPECT_TRUE(silver.canonical());
-		EXPECT_TRUE(same_language(silver, golden));
-		ASSERT_EQ(silver, golden) << to_string(renumbering);
+		CHECK_UNARY(silver.canonical());
+		CHECK_UNARY(same_language(silver, golden));
+		REQUIRE_EQ(silver, golden); //OLDTEST: to_string(renumbering);
 	} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
 }
 
-TEST(AutomatonTest, CanonicalizeRenumber3) {
+TEST_CASE("AutomatonTest_CanonicalizeRenumber3") {
 	Automaton<4> a;
 	a.reserve(5);
 	for (AutomatonBase::state_type s = 0; s < 5; ++s)
@@ -185,13 +185,13 @@ TEST(AutomatonTest, CanonicalizeRenumber3) {
 		auto silver = golden;
 		silver.renumberAlphabet(p.begin());
 		silver.canonicalizeRenumber(perms.begin(), perms.end());
-		EXPECT_TRUE(silver.canonical());
-		EXPECT_TRUE(same_language(silver, golden));
-		ASSERT_EQ(silver, golden);
+		CHECK_UNARY(silver.canonical());
+		CHECK_UNARY(same_language(silver, golden));
+		REQUIRE_EQ(silver, golden);
 	}
 }
 
-TEST(AutomatonTest, CanonicalizeRenumber4) {
+TEST_CASE("AutomatonTest_CanonicalizeRenumber4") {
 	Automaton<4> a;
 	a.reserve(5);
 	for (AutomatonBase::state_type s = 0; s < 5; ++s)
@@ -220,9 +220,9 @@ TEST(AutomatonTest, CanonicalizeRenumber4) {
 			silver.renumberAlphabet(p.begin());
 			silver.renumberStates(work.begin());
 			silver.canonicalizeRenumber(perms.begin(), perms.end());
-			EXPECT_TRUE(silver.canonical());
-			EXPECT_TRUE(same_language(silver, golden));
-			ASSERT_EQ(silver, golden) << to_string(renumbering);
+			CHECK_UNARY(silver.canonical());
+			CHECK_UNARY(same_language(silver, golden));
+			REQUIRE_EQ(silver, golden); //OLDTEST: to_string(renumbering);
 		} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
 	}
 }

@@ -1,12 +1,13 @@
 #include "precompiled.hpp"
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN //genbuild entrypoint
+#include <doctest.h>
 #include "automaton.hpp"
 #include "util.hpp"
-#include <gtest/gtest.h>
 
 using namespace automaton;
 using namespace automaton::impl;
 
-TEST(AutomatonTest, Clone) {
+TEST_CASE("AutomatonTest_Clone") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone
 	equivalentOnAllStrings<2>(a, b, 8);
@@ -20,7 +21,7 @@ TEST(AutomatonTest, Clone) {
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
-TEST(AutomatonTest, Determinize) {
+TEST_CASE("AutomatonTest_Determinize") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone
 	b.determinize();
@@ -57,7 +58,7 @@ TEST(AutomatonTest, Determinize) {
 	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
 }
 
-TEST(AutomatonTest, Totalize) {
+TEST_CASE("AutomatonTest_Totalize") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone
 	b.totalize();
@@ -74,7 +75,7 @@ TEST(AutomatonTest, Totalize) {
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
-TEST(AutomatonTest, DeterminizeTotalize) {
+TEST_CASE("AutomatonTest_DeterminizeTotalize") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone
 	b.determinize();
@@ -94,7 +95,7 @@ TEST(AutomatonTest, DeterminizeTotalize) {
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
-TEST(AutomatonTest, TotalizeDeterminize) {
+TEST_CASE("AutomatonTest_TotalizeDeterminize") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone
 	b.totalize();
@@ -114,7 +115,7 @@ TEST(AutomatonTest, TotalizeDeterminize) {
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
-TEST(AutomatonTest, RemoveDeadStates) {
+TEST_CASE("AutomatonTest_RemoveDeadStates") {
 	auto p = lit<2>(0);
 	auto q = p; //clone
 	q.removeDeadStates();
@@ -143,7 +144,7 @@ TEST(AutomatonTest, RemoveDeadStates) {
 	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
 }
 
-TEST(AutomatonTest, DeterminizeRemoveDeadStates) {
+TEST_CASE("AutomatonTest_DeterminizeRemoveDeadStates") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone
 	b.determinize();
@@ -163,7 +164,7 @@ TEST(AutomatonTest, DeterminizeRemoveDeadStates) {
 	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
 }
 
-TEST(AutomatonTest, Minimize) {
+TEST_CASE("AutomatonTest_Minimize") {
 	auto p = lit<2>(0);
 	auto q = p; //clone
 	q.minimize();
@@ -255,7 +256,8 @@ TEST(AutomatonTest, Minimize) {
 	twoAccept.setAccept(1);
 	auto twoAcceptM = twoAccept;
 	twoAcceptM.minimize();
-	ASSERT_EQ(twoAcceptM.state_size(), 1) << twoAcceptM;
+	//CHECK_EQ_MESSAGE(twoAcceptM.state_size(), 1, twoAcceptM);
+	CHECK_EQ(twoAcceptM.state_size(), 1);
 	equivalentOnAllStrings<4>(twoAccept, twoAcceptM, 4, __LINE__);
 
 	Automaton<4> twoAccept2;
@@ -268,11 +270,12 @@ TEST(AutomatonTest, Minimize) {
 	twoAccept2.addTrans(0, 1, 2);
 	auto twoAccept2M = twoAccept2;
 	twoAccept2M.minimize();
-	ASSERT_EQ(twoAccept2M.state_size(), 2) << twoAccept2M;
+	//CHECK_EQ_MESSAGE(twoAccept2M.state_size(), 2, twoAccept2M);
+	CHECK_EQ(twoAccept2M.state_size(), 2);
 	equivalentOnAllStrings<4>(twoAccept2, twoAccept2M, 4, __LINE__);
 }
 
-TEST(AutomatonTest, CatAltMinimize) {
+TEST_CASE("AutomatonTest_CatAltMinimize") {
 	auto a = alt<2>({lit<2>(0), lit<2>(1)});
 	auto foo = cat<2>({a, a, a});
 	auto catClone = foo; //clone
@@ -280,7 +283,7 @@ TEST(AutomatonTest, CatAltMinimize) {
 	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
-TEST(AutomatonTest, CatAltLitAltMinimize) {
+TEST_CASE("AutomatonTest_CatAltLitAltMinimize") {
 	auto a = alt<2>({lit<2>(0), lit<2>(1)});
 	auto foo = cat<2>({a, lit<2>(1), a});
 	auto catClone = foo; //clone
@@ -288,7 +291,7 @@ TEST(AutomatonTest, CatAltLitAltMinimize) {
 	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
-TEST(AutomatonTest, CatAltLitAltLitAltMinimize) {
+TEST_CASE("AutomatonTest_CatAltLitAltLitAltMinimize") {
 	auto a = alt<2>({lit<2>(0), lit<2>(1)});
 	auto foo = cat<2>({a, lit<2>(1), a, lit<2>(1), a});
 	auto catClone = foo; //clone
@@ -296,7 +299,7 @@ TEST(AutomatonTest, CatAltLitAltLitAltMinimize) {
 	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
-TEST(AutomatonTest, CatAltLitAltRemoveDeadStates) {
+TEST_CASE("AutomatonTest_CatAltLitAltRemoveDeadStates") {
 	auto a = alt<2>({lit<2>(0), lit<2>(1)});
 	auto foo = cat<2>({a, lit<2>(1), a});
 	auto catClone = foo; //clone
@@ -304,7 +307,7 @@ TEST(AutomatonTest, CatAltLitAltRemoveDeadStates) {
 	equivalentOnAllStrings<2>(foo, catClone, 8, __LINE__);
 }
 
-TEST(AutomatonTest, CatAltMinimizeTrinary) {
+TEST_CASE("AutomatonTest_CatAltMinimizeTrinary") {
 	auto a = alt<3>({lit<3>(0), lit<3>(1)});
 	auto b = any<3>();
 	auto foo = cat<3>({a, b, a});
@@ -313,33 +316,33 @@ TEST(AutomatonTest, CatAltMinimizeTrinary) {
 	equivalentOnAllStrings<3>(foo, catClone, 8, __LINE__);
 }
 
-TEST(AutomatonTest, HashSanity) {
+TEST_CASE("AutomatonTest_HashSanity") {
 	auto a = any<2>();
 	std::hash<Automaton<2>>()(a);
 }
 
 void equal_base(const AutomatonBase& l, const AutomatonBase& r) {
-	EXPECT_EQ(l, r);
-	EXPECT_EQ(l.hash(), r.hash());
+	CHECK_EQ(l, r);
+	CHECK_EQ(l.hash(), r.hash());
 }
 void unequal_base(const AutomatonBase& l, const AutomatonBase& r) {
-	EXPECT_NE(l, r);
+	CHECK_NE(l, r);
 }
 
-TEST(AutomatonTest, EqualitySanity) {
-	EXPECT_EQ(any<2>(), any<2>());
-	EXPECT_EQ(lit<2>(0), lit<2>(0));
-	EXPECT_NE(lit<2>(0), lit<2>(1));
+TEST_CASE("AutomatonTest_EqualitySanity") {
+	CHECK_EQ(any<2>(), any<2>());
+	CHECK_EQ(lit<2>(0), lit<2>(0));
+	CHECK_NE(lit<2>(0), lit<2>(1));
 }
 
-TEST(AutomatonTest, BaseEqualitySanity) {
+TEST_CASE("AutomatonTest_BaseEqualitySanity") {
 	equal_base(any<2>(), any<2>());
 	equal_base(lit<2>(0), lit<2>(0));
 	unequal_base(lit<2>(0), lit<2>(1));
 	unequal_base(lit<2>(0), lit<4>(0));
 }
 
-TEST(AutomatonTest, MinimizeDeadEndAcceptStates) {
+TEST_CASE("AutomatonTest_MinimizeDeadEndAcceptStates") {
 	//A minimal automaton cannot contain two states with the same accept status
 	//and no outgoing transitions, because those states would be Myhill-Nerode
 	//equivalent.
@@ -375,45 +378,46 @@ TEST(AutomatonTest, MinimizeDeadEndAcceptStates) {
 	for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
 		if (a.accept(s) && a.destinations(s).empty())
 			deadEndAccepts.push_back(s);
-	ASSERT_EQ(deadEndAccepts.size(), 1) << a;
+	//CHECK_EQ_MESSAGE(deadEndAccepts.size(), 1, a);
+	CHECK_EQ(deadEndAccepts.size(), 1);
 }
 
-TEST(AutomatonTest, ShuffleAccept01) {
+TEST_CASE("AutomatonTest_ShuffleAccept01") {
 	auto left = lit<2>(0, 0), right = lit<2>(1, 1);
 	auto comb = shuffleAccept(left, right);
-	EXPECT_TRUE(comb.run(0, 0, 1, 1));
-	EXPECT_TRUE(comb.run(1, 1, 0, 0));
-	EXPECT_FALSE(comb.run(0, 0));
-	EXPECT_FALSE(comb.run(0, 0, 0, 0));
-	EXPECT_FALSE(comb.run(1, 1));
-	EXPECT_FALSE(comb.run(1, 1, 1, 1));
-	EXPECT_FALSE(comb.run(0, 1, 0, 1));
-	EXPECT_FALSE(comb.run(1, 0, 1, 0));
-	EXPECT_FALSE(comb.run());
+	CHECK_UNARY(comb.run(0, 0, 1, 1));
+	CHECK_UNARY(comb.run(1, 1, 0, 0));
+	CHECK_UNARY_FALSE(comb.run(0, 0));
+	CHECK_UNARY_FALSE(comb.run(0, 0, 0, 0));
+	CHECK_UNARY_FALSE(comb.run(1, 1));
+	CHECK_UNARY_FALSE(comb.run(1, 1, 1, 1));
+	CHECK_UNARY_FALSE(comb.run(0, 1, 0, 1));
+	CHECK_UNARY_FALSE(comb.run(1, 0, 1, 0));
+	CHECK_UNARY_FALSE(comb.run());
 }
 
-TEST(AutomatonTest, ShuffleAccept02) {
+TEST_CASE("AutomatonTest_ShuffleAccept02") {
 	auto left = star(lit<2>(0, 0)), right = lit<2>(1, 1);
 	auto comb = shuffleAccept(left, right);
-	EXPECT_FALSE(comb.run());
-	EXPECT_FALSE(comb.run(0, 0));
-	EXPECT_TRUE(comb.run(1, 1));
-	EXPECT_TRUE(comb.run(0, 0, 1, 1));
-	EXPECT_TRUE(comb.run(0, 0, 1, 1, 0, 0));
-	EXPECT_TRUE(comb.run(1, 1, 0, 0));
-	EXPECT_FALSE(comb.run(0, 0, 0, 0));
-	EXPECT_FALSE(comb.run(1, 1, 1, 1));
-	EXPECT_FALSE(comb.run(0, 1, 0, 1));
-	EXPECT_FALSE(comb.run(1, 0, 1, 0));
+	CHECK_UNARY_FALSE(comb.run());
+	CHECK_UNARY_FALSE(comb.run(0, 0));
+	CHECK_UNARY(comb.run(1, 1));
+	CHECK_UNARY(comb.run(0, 0, 1, 1));
+	CHECK_UNARY(comb.run(0, 0, 1, 1, 0, 0));
+	CHECK_UNARY(comb.run(1, 1, 0, 0));
+	CHECK_UNARY_FALSE(comb.run(0, 0, 0, 0));
+	CHECK_UNARY_FALSE(comb.run(1, 1, 1, 1));
+	CHECK_UNARY_FALSE(comb.run(0, 1, 0, 1));
+	CHECK_UNARY_FALSE(comb.run(1, 0, 1, 0));
 }
 
-TEST(AutomatonTest, ShuffleAcceptWithEmpty) {
+TEST_CASE("AutomatonTest_ShuffleAcceptWithEmpty") {
 	auto left = star(lit<2>(0, 0)), right = empty<2>();
 	auto comb = shuffleAccept(left, right);
 	equivalentOnAllStrings<2>(comb, empty<2>(), 8, __LINE__);
 }
 
-TEST(AutomatonTest, ShuffleAcceptSymmetry) {
+TEST_CASE("AutomatonTest_ShuffleAcceptSymmetry") {
 	auto left = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
 	auto right = plus<2>(nCopies<2>(any<2>(), 3));
 	equivalentOnAllStrings<2>(shuffleAccept(left, right), shuffleAccept(right, left), 8, __LINE__);
@@ -422,14 +426,14 @@ TEST(AutomatonTest, ShuffleAcceptSymmetry) {
 	equivalentOnAllStrings<2>(shuffleAccept(left, right), shuffleAccept(right, left), 8, __LINE__);
 }
 
-TEST(AutomatonTest, ShuffleAcceptInvariantToDuplication) {
+TEST_CASE("AutomatonTest_ShuffleAcceptInvariantToDuplication") {
 	auto left = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
 	equivalentOnAllStrings<2>(shuffleAccept(left, left), shuffleAccept(left, alt(left, left)), 8, __LINE__);
 	equivalentOnAllStrings<2>(shuffleAccept(left, left), shuffleAccept(alt(left, left), left), 8, __LINE__);
 	equivalentOnAllStrings<2>(shuffleAccept(left, left), shuffleAccept(alt(left, left), alt(left, left)), 8, __LINE__);
 }
 
-TEST(AutomatonTest, ShuffleAcceptComposeMinimize) {
+TEST_CASE("AutomatonTest_ShuffleAcceptComposeMinimize") {
 	auto left = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
 	auto right = plus<2>(nCopies<2>(any<2>(), 3));
 	auto shuf = shuffleAccept(left, right);
@@ -440,7 +444,7 @@ TEST(AutomatonTest, ShuffleAcceptComposeMinimize) {
 	equivalentOnAllStrings<2>(shuf, minshuf, 8, __LINE__);
 }
 
-TEST(AutomatonTest, ShuffleAcceptSymmetry2) {
+TEST_CASE("AutomatonTest_ShuffleAcceptSymmetry2") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -453,7 +457,7 @@ TEST(AutomatonTest, ShuffleAcceptSymmetry2) {
 	equivalentOnAllStrings<4>(mshuf, rmshuf, 4, __LINE__);
 }
 
-TEST(AutomatonTest, ShuffleAcceptComposeMinimize2) {
+TEST_CASE("AutomatonTest_ShuffleAcceptComposeMinimize2") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -465,14 +469,14 @@ TEST(AutomatonTest, ShuffleAcceptComposeMinimize2) {
 	equivalentOnAllStrings<4>(rshuf, rmshuf, 4, __LINE__);
 }
 
-TEST(AutomatonTest, MinimizationPreservesLanguage) {
+TEST_CASE("AutomatonTest_MinimizationPreservesLanguage") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto mnoop = noop;
 	mnoop.minimize();
 	equivalentOnAllStrings(noop, mnoop, 4, __LINE__);
 }
 
-TEST(AutomatonTest, MinimizationPreservesLanguage2) {
+TEST_CASE("AutomatonTest_MinimizationPreservesLanguage2") {
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
 	auto mp = parallelToggleBase;
@@ -480,7 +484,7 @@ TEST(AutomatonTest, MinimizationPreservesLanguage2) {
 	equivalentOnAllStrings(parallelToggleBase, mp, 4, __LINE__);
 }
 
-TEST(AutomatonTest, MinimizationPreservesLanguage3) {
+TEST_CASE("AutomatonTest_MinimizationPreservesLanguage3") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -490,7 +494,7 @@ TEST(AutomatonTest, MinimizationPreservesLanguage3) {
 	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
 }
 
-TEST(AutomatonTest, MinimizationPreservesLanguage4) {
+TEST_CASE("AutomatonTest_MinimizationPreservesLanguage4") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
@@ -502,7 +506,7 @@ TEST(AutomatonTest, MinimizationPreservesLanguage4) {
 	equivalentOnAllStrings<4>(shuf, mshuf, 4, __LINE__);
 }
 
-TEST(AutomatonTest, MinimizationPreservesLanguage5) {
+TEST_CASE("AutomatonTest_MinimizationPreservesLanguage5") {
 	auto ltr = lit<4>(0, 1), rtl = lit<4>(1, 0);
 	auto parallelToggleBase = alt(ltr, cat(ltr, rtl));
 	auto mp = parallelToggleBase;
@@ -510,7 +514,7 @@ TEST(AutomatonTest, MinimizationPreservesLanguage5) {
 	equivalentOnAllStrings(parallelToggleBase, mp, 4, __LINE__);
 }
 
-TEST(AutomatonTest, ShuffleAcceptComposeMinimize3) {
+TEST_CASE("AutomatonTest_ShuffleAcceptComposeMinimize3") {
 	auto noop = lit<4>(0);
 	auto ltr = lit<4>(0, 1), rtl = lit<4>(1, 0);
 	auto parallelToggleBase = alt(ltr, cat(ltr, rtl));
@@ -521,55 +525,55 @@ TEST(AutomatonTest, ShuffleAcceptComposeMinimize3) {
 	equivalentOnAllStrings<4>(rshuf, rmshuf, 4, __LINE__);
 }
 
-TEST(AutomatonTest, TrivialTarjan0) {
+TEST_CASE("AutomatonTest_TrivialTarjan0") {
 	SCCs sccs = find_components(empty<2>());
-	EXPECT_EQ(sccs.size(), 1);
-	EXPECT_EQ(*sccs.begin(0), 0);
+	CHECK_EQ(sccs.size(), 1);
+	CHECK_EQ(*sccs.begin(0), 0);
 }
 
-TEST(AutomatonTest, TrivialTarjan1) {
+TEST_CASE("AutomatonTest_TrivialTarjan1") {
 	SCCs sccs = find_components(lit<2>(0, 1, 0, 1, 1));
-	EXPECT_EQ(sccs.size(), 6);
-	EXPECT_EQ(*sccs.begin(0), 5);
-	EXPECT_EQ(*sccs.begin(1), 4);
-	EXPECT_EQ(*sccs.begin(2), 3);
-	EXPECT_EQ(*sccs.begin(3), 2);
-	EXPECT_EQ(*sccs.begin(4), 1);
-	EXPECT_EQ(*sccs.begin(5), 0);
+	CHECK_EQ(sccs.size(), 6);
+	CHECK_EQ(*sccs.begin(0), 5);
+	CHECK_EQ(*sccs.begin(1), 4);
+	CHECK_EQ(*sccs.begin(2), 3);
+	CHECK_EQ(*sccs.begin(3), 2);
+	CHECK_EQ(*sccs.begin(4), 1);
+	CHECK_EQ(*sccs.begin(5), 0);
 }
 
-TEST(AutomatonTest, ConnectedTarjan) {
+TEST_CASE("AutomatonTest_ConnectedTarjan") {
 	auto a = cat(minimize(star(lit<2>(0, 0, 0, 0))), minimize(star(lit<2>(1, 1, 1, 1, 1))));
 	SCCs sccs = find_components(a);
-	EXPECT_EQ(sccs.size(), 2);
-	EXPECT_TRUE(unordered_equal(sccs.begin(1), sccs.end(1), {0, 1, 2, 3}));
-	EXPECT_TRUE(unordered_equal(sccs.begin(0), sccs.end(0), {4, 5, 6, 7, 8}));
+	CHECK_EQ(sccs.size(), 2);
+	CHECK_UNARY(unordered_equal(sccs.begin(1), sccs.end(1), {0, 1, 2, 3}));
+	CHECK_UNARY(unordered_equal(sccs.begin(0), sccs.end(0), {4, 5, 6, 7, 8}));
 }
 
-TEST(AutomatonTest, DisconnectedTarjan) {
+TEST_CASE("AutomatonTest_DisconnectedTarjan") {
 	auto a = minimize(star(lit<2>(0, 0, 0, 0)));
 	a.append(minimize(star(lit<2>(1, 1, 1, 1, 1))));
 	SCCs sccs = find_components(a);
-	EXPECT_EQ(sccs.size(), 2);
-	EXPECT_TRUE(unordered_equal(sccs.begin(0), sccs.end(0), {0, 1, 2, 3}));
-	EXPECT_TRUE(unordered_equal(sccs.begin(1), sccs.end(1), {4, 5, 6, 7, 8}));
+	CHECK_EQ(sccs.size(), 2);
+	CHECK_UNARY(unordered_equal(sccs.begin(0), sccs.end(0), {0, 1, 2, 3}));
+	CHECK_UNARY(unordered_equal(sccs.begin(1), sccs.end(1), {4, 5, 6, 7, 8}));
 }
 
-TEST(AutomatonTest, ActiveAlphabet) {
+TEST_CASE("AutomatonTest_ActiveAlphabet") {
 	auto a = lit<4>(2, 3, 2, 3, 2, 3);
 	auto active = a.activeAlphabet();
-	EXPECT_TRUE(unordered_equal(active.begin(), active.end(), {2, 3}));
-	EXPECT_EQ(a.active_alphabet_size(), 2);
-	EXPECT_EQ(active.size(), 2);
+	CHECK_UNARY(unordered_equal(active.begin(), active.end(), {2, 3}));
+	CHECK_EQ(a.active_alphabet_size(), 2);
+	CHECK_EQ(active.size(), 2);
 }
 
-TEST(AutomatonTest, WorkingHash) {
+TEST_CASE("AutomatonTest_WorkingHash") {
 	auto a = alt(lit<4>(0, 1, 2, 3), lit<4>(3, 1, 2, 0));
-	EXPECT_EQ(a.working_hash(), std::hash<decltype(a)>()(a));
+	CHECK_EQ(a.working_hash(), std::hash<decltype(a)>()(a));
 }
 
-TEST(AutomatonTest, MakeWorking) {
-	EXPECT_EQ(make_working(2)->alphabet_size(), 2);
-	EXPECT_EQ(make_working(4)->alphabet_size(), 4);
-	EXPECT_EQ(make_working(8)->alphabet_size(), 8);
+TEST_CASE("AutomatonTest_MakeWorking") {
+	CHECK_EQ(make_working(2)->alphabet_size(), 2);
+	CHECK_EQ(make_working(4)->alphabet_size(), 4);
+	CHECK_EQ(make_working(8)->alphabet_size(), 8);
 }
