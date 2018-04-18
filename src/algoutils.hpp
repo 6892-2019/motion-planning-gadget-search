@@ -213,7 +213,7 @@ template<class Target, class Source>
 //std::optional's ctors always or never create an empty optional, so we need this
 template<typename T>
 [[nodiscard]] std::optional<std::decay_t<T>> maybe_opt(bool present, T&& value) {
-	if (present) return std::nullopt;
+	if (!present) return std::nullopt;
 	return std::make_optional(std::forward<T>(value));
 }
 #endif /* ALGOUTILS_HPP */
