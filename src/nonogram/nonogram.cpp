@@ -65,6 +65,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	//somehow treating them separately is faster.
 	for (decltype(puzzle->cols().size()) r = 0; r < puzzle->rows().size(); ++r) {
 		const std::vector<Puzzle::Clue>& row = puzzle->rows()[r];
+		if (row.empty()) continue;
 		std::size_t solutions, floatingZeroes;
 		std::tie(solutions, floatingZeroes) = countSolutions(row, puzzle->cols().size());
 		R prefix = R::repeat(any, static_cast<int>(r * puzzle->cols().size())), suffix = R::repeat(any, static_cast<int>((puzzle->rows().size() - 1 - r) * puzzle->cols().size()));
@@ -98,6 +99,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 
 	for (decltype(puzzle->cols().size()) c = 0; c < puzzle->cols().size(); ++c) {
 		const std::vector<Puzzle::Clue>& col = puzzle->cols()[c];
+		if (col.empty()) continue;
 		std::size_t solutions, floatingZeroes;
 		std::tie(solutions, floatingZeroes) = countSolutions(col, puzzle->rows().size());
 		//prefix and suffix consume the parts of the row not in this column
