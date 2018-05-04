@@ -77,13 +77,23 @@ std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
 	constexpr unsigned int N = automaton_type::alphabet_size_v;
 	auto lit = [](auto... symbols){return automaton::lit<N>(symbols...);};
 
-	ret["2-nop"] = prepare(make_nop(2));
-	ret["3-nop"] = prepare(make_nop(3));
-	ret["4-nop"] = prepare(make_nop(4));
+	for (unsigned int i : xrange(2u, N))
+		ret[std::to_string(i) + "-nop"] = prepare(make_nop(i));
 
-	ret["split"] = prepare(star(nCopies(alt(lit(0), lit(1), lit(2)), 2)));
+	std::vector<automaton_type> literals;
+	literals.reserve(N);
+	literals.push_back(lit(0));
+	literals.push_back(lit(1));
+	for (unsigned int i : xrange(3u, N)) {
+		literals.push_back(lit(i-1));
+		ret[std::to_string(i) + "-split"] = prepare(star(nCopies(alt(literals.begin(), literals.end()), 2)));
+	}
+	ret["split"] = ret["3-split"];
 
 	ret["diode"] = prepare(star(lit(0, 1)));
+
+	ret["crossover"] = prepare(star(alt(lit(0, 2), lit(3, 1), lit(2, 0), lit(1, 3))));
+	ret["crossover-diode"] = prepare(star(alt(lit(0, 2), lit(3, 1))));
 
 	ret["1-toggle"] = make_twostate(lit(0, 1), lit(1, 0));
 	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)));
