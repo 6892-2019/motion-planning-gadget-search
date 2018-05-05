@@ -41,6 +41,32 @@ static std::vector<Target> targets;
 static bounded_queue<std::function<void()>> issue(4*std::thread::hardware_concurrency());
 static bounded_queue<Result> retire(4*std::thread::hardware_concurrency());
 
+[[gnu::cold]]
+void print_provenance_backtrace(AutomatonBase& thing, Provenance& provenance) {
+	circular_deque<std::uint32_t, 32> queue;
+	linear_set<std::uint32_t> printed;
+
+	std::cout << "<found> = " << provenance << " " << thing << '\n';
+	for (auto p : provenance.parents())
+		if (printed.insert(p).second)
+			queue.push_back(p);
+
+	while (!queue.empty()) {
+		auto idx = queue.pop_front();
+		auto prov = registry.provenance(idx);
+		std::cout << idx << " = " << prov << '\n';
+		//Ideally we'd print the automaton here, but we're no longer
+		//maintaining an id->automaton map.  We'll have to replay the
+		//log this code is printing out.
+		for (auto p : prov.parents())
+			if (printed.insert(p).second)
+				queue.push_back(p);
+	}
+
+	std::cout << std::flush;
+	std::quick_exit(0);
+}
+
 constexpr static unsigned int prepare_size = 10000, max_state_cutoff = 100;
 void finish(automaton_type thing, Provenance provenance, Result& finishArg) {
 	thing.minimize();
@@ -51,33 +77,10 @@ void finish(automaton_type thing, Provenance provenance, Result& finishArg) {
 	std::unique_ptr<const PackedAutomaton> packed = pack(thing);
 	std::size_t hash = packed->packed_hash();
 
-	for (const Target& t : targets) {
+	for (const Target& t : targets)
 		if ((hash == t.packed_hash && *packed == *t.normal) ||
-				(hash == t.mirror_packed_hash && *packed == *t.mirror)) {
-			circular_deque<std::uint32_t, 32> queue;
-			linear_set<std::uint32_t> printed;
-
-			std::cout << "<found> = " << provenance << " " << thing << '\n';
-			for (auto p : provenance.parents())
-				if (printed.insert(p).second)
-					queue.push_back(p);
-
-			while (!queue.empty()) {
-				auto idx = queue.pop_front();
-				auto prov = registry.provenance(idx);
-				std::cout << idx << " = " << prov << '\n';
-				//Ideally we'd print the automaton here, but we're no longer
-				//maintaining an id->automaton map.  We'll have to replay the
-				//log this code is printing out.
-				for (auto p : prov.parents())
-					if (printed.insert(p).second)
-						queue.push_back(p);
-			}
-
-			std::cout << std::flush;
-			std::quick_exit(0);
-		}
-	}
+				(hash == t.mirror_packed_hash && *packed == *t.mirror))
+			print_provenance_backtrace(thing, provenance);
 
 	for (auto& r : finishArg)
 		if (get<2>(r) == hash && *get<0>(r) == *packed)
