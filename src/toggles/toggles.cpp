@@ -122,101 +122,21 @@ public:
 	Connect(std::vector<std::pair<const PackedAutomaton*, Registry::index_type>> connectibles) : connectibles_(std::move(connectibles)) {}
 	void operator()() {
 		Result result;
+		auto finishAction = [&](automaton_type&& a, Provenance p) {
+			finish(std::move(a), p, result);
+		};
 		for (auto& [pack, index] : connectibles_) {
 			automaton_type inflated(*pack);
 			automaton_type mirrored = mirror(inflated);
 			automaton_type::symbol_type locations = inflated.active_alphabet_size();
-			connect(inflated, index, false, locations, result);
+			connect(inflated, index, false, locations, finishAction);
 			if (inflated != mirrored)
-				connect(mirrored, index, true, locations, result);
+				connect(mirrored, index, true, locations, finishAction);
 		}
 		retire.put(std::move(result));
 	}
 private:
 	std::vector<std::pair<const PackedAutomaton*, Registry::index_type>> connectibles_;
-	static void connect(automaton_type a, Registry::index_type gadgetIndex, bool mirrored,
-			unsigned int locations, Result& finishArg) {
-		using state_type = automaton_type::state_type;
-		using symbol_type = automaton_type::symbol_type;
-
-		auto setInitialStatesToAcceptingStatesInRange = [](automaton_type& a, auto first, auto last) {
-			using state_type = automaton_type::state_type;
-			state_type s = a.addState();
-			for (state_type t : make_range_for_pair(first, last))
-				if (a.accept(t))
-					a.addEpsilon(s, t);
-			a.swapStateNumbers(0, s);
-		};
-
-		auto enjoin = [](automaton_type& a, symbol_type l, symbol_type m) -> bool {
-			bool progress, changed = false;
-			//TODO: instead of fixpoint iteration, we should put the changed state s
-			//on a worklist and iterate until it's empty
-			do {
-				progress = false;
-				for (state_type s = 0; s < a.state_size(); ++s) {
-					if (a.accept(s)) continue;
-					auto dests = a.step(s, l);
-					for (state_type d : dests) {
-						assert(a.accept(d));
-						for (state_type e : a.step(d, m))
-							progress |= a.addEpsilon(s, e);
-					}
-
-					dests = a.step(s, m);
-					for (state_type d : dests) {
-						assert(a.accept(d));
-						for (state_type e : a.step(d, l))
-							progress |= a.addEpsilon(s, e);
-					}
-				}
-				changed |= progress;
-			} while (progress);
-			return changed;
-		};
-
-		//TODO: these alphamap manipulations could all be precomputed
-		std::vector<symbol_type> alphamap(automaton_type::alphabet_size_v);
-		for (unsigned int l = 0; l < locations; ++l) {
-			unsigned int m = (l+1) % locations;
-			automaton_type connected = a; //TODO: last one can move instead
-			enjoin(connected, l, m);
-			acceptingClosure(connected, locations);
-
-			std::iota(alphamap.begin(), alphamap.begin() + locations, 0);
-			std::fill(alphamap.begin() + locations, alphamap.end(), std::numeric_limits<symbol_type>::max());
-			//remove larger first to avoid off-by-one
-			alphamap.erase(alphamap.begin()+std::max(l, m));
-			alphamap.erase(alphamap.begin()+std::min(l, m));
-			//pad with 0
-			alphamap.push_back(std::numeric_limits<symbol_type>::max());
-			alphamap.push_back(std::numeric_limits<symbol_type>::max());
-			connected.renumberAlphabet(0, connected.state_size(), alphamap.begin());
-
-			//We may have disconnected the automaton (disconnecting the
-			//configuration graph of the gadget it represents).
-			SCCs sccs = find_components(connected);
-			for (unsigned int c = 0; c < sccs.size(); ++c) {
-				//last one can move, others have to copy
-				automaton_type op = (c == sccs.size()-1) ? std::move(connected) : connected;
-				setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
-				op.minimize();
-				SymbolSet active = op.activeAlphabet();
-				if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
-				if (active.size() != (locations - 2)) {
-					//compress the alphabet
-					active.sort();
-					std::copy(active.begin(), active.end(), alphamap.begin());
-					std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
-					op.renumberAlphabet(alphamap.begin());
-					//Because we're deleting unused symbols, we don't need to
-					//minimize again; any two equivalent states would differ only in
-					//the symbols we deleted, but those symbols were inactive.
-				}
-				finish(std::move(op), Provenance(gadgetIndex, l, c, mirrored, registry.provenance(gadgetIndex).generation+1), finishArg);
-			}
-		}
-	}
 };
 
 
