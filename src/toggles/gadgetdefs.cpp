@@ -2,7 +2,6 @@
 #include "../automaton.hpp"
 #include "canonicalize.hpp"
 #include "registry.hpp"
-#include "ops.hpp"
 
 using namespace automaton;
 

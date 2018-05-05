@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "ops.hpp"
+#include "registry.hpp"
 
 using namespace automaton;
 

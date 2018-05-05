@@ -96,48 +96,23 @@ public:
 		automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
 		automaton_type mirrored = mirror(unpacked);
 		bool shouldmirror = unpacked == mirrored;
+		auto finishAction = [&](automaton_type&& a, Provenance p) {
+			finish(std::move(a), p, result);
+		};
 		for (const Input& i : inputs) {
 			if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
-			combine(unpacked, sourceIndex_, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, result);
+			combine(unpacked, sourceIndex_, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 			if (i.mirror.state_size())
-				combine(unpacked, sourceIndex_, true, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, result);
+				combine(unpacked, sourceIndex_, true, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
 			if (shouldmirror) {
-				combine(mirrored, sourceIndex_, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, result);
+				combine(mirrored, sourceIndex_, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 				if (i.mirror.state_size()) //TODO: the both-mirrored combine may be redundant
-					combine(mirrored, sourceIndex_, true, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, result);
+					combine(mirrored, sourceIndex_, true, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
 			}
 		}
 		retire.put(std::move(result));
 	}
 private:
-	static void combine(const automaton_type& la, Registry::index_type l, bool leftMirror, automaton_type::state_type leftLocations,
-			const automaton_type& ra, Registry::index_type r, bool rightMirror, automaton_type::state_type rightLocations,
-			Result& finishArg) {
-		using symbol_type = automaton_type::symbol_type;
-		std::vector<symbol_type> slide(automaton_type::alphabet_size_v);
-		std::vector<symbol_type> sliderotate(automaton_type::alphabet_size_v);
-		std::fill(slide.begin(), slide.begin()+rightLocations, std::numeric_limits<symbol_type>::max());
-		std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
-		std::fill(slide.begin()+rightLocations+leftLocations, slide.end(), std::numeric_limits<symbol_type>::max());
-		for (location_type ll = 0; ll < leftLocations; ++ll) {
-			std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<symbol_type>::max());
-			std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+rightLocations, 0);
-			automaton_type lm = la;
-			lm.renumberAlphabet(slide);
-			for (location_type rl = 0; rl < rightLocations; ++rl) {
-				automaton_type rm = ra;
-				rm.renumberAlphabet(sliderotate);
-				automaton_type combined = automaton::shuffleAccept(lm, rm);
-				finish(std::move(combined), Provenance(l, ll, leftMirror, r, rl, rightMirror,
-						//TODO: make a reasoned choice for this function
-						std::max(registry.provenance(l).generation, registry.provenance(r).generation)+1),
-						finishArg);
-				std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+rightLocations-1, sliderotate.begin()+ll+rightLocations);
-			}
-			std::swap(slide[ll], slide[ll+rightLocations]);
-		}
-	}
-
 	const PackedAutomaton* source_;
 	Registry::index_type sourceIndex_;
 };
