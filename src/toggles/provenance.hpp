@@ -11,16 +11,16 @@
 #include "automaton.hpp"
 
 struct Provenance {
-	std::uint32_t first, second, i, j, generation;
+	std::uint32_t first, second, i, j;
 	Provenance() = default;
-	Provenance(std::uint32_t initialIndex) : first(ALLONES), second(initialIndex), i(ALLONES), j(ALLONES), generation(0) {}
-	Provenance(std::uint32_t parent, std::uint32_t connection, automaton::AutomatonBase::state_type newInitialState, bool mirrored, std::uint32_t generatio)
-		: first(parent), second(ALLONES), i(mirrored ? connection | TOPBIT : connection), j(newInitialState), generation(generatio) {}
+	Provenance(std::uint32_t initialIndex) : first(ALLONES), second(initialIndex), i(ALLONES), j(ALLONES) {}
+	Provenance(std::uint32_t parent, std::uint32_t connection, automaton::AutomatonBase::state_type newInitialState, bool mirrored)
+		: first(parent), second(ALLONES), i(mirrored ? connection | TOPBIT : connection), j(newInitialState) {}
 	Provenance(std::uint32_t firstParent, std::uint32_t firstSplice, bool firstMirrored,
-			std::uint32_t secondParent, std::uint32_t secondSplice, bool secondMirrored, std::uint32_t generatio)
+			std::uint32_t secondParent, std::uint32_t secondSplice, bool secondMirrored)
 		: first(firstParent), second(secondParent),
 		  i(firstMirrored ? firstSplice | TOPBIT : firstSplice),
-		  j(secondMirrored ? secondSplice | TOPBIT : secondSplice), generation(generatio) {}
+		  j(secondMirrored ? secondSplice | TOPBIT : secondSplice) {}
 
 	bool isInput() const {return first == ALLONES;}
 	bool isConnect() const {return second == ALLONES;}

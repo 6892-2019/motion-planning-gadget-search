@@ -23,7 +23,7 @@ void combine(const AutomatonType& la, uint32_t l, bool leftMirror, typename Auto
 			AutomatonType rm = ra;
 			rm.renumberAlphabet(sliderotate);
 			AutomatonType combined = automaton::shuffleAccept(lm, rm);
-			finish(std::move(combined), Provenance(l, ll, leftMirror, r, rl, rightMirror, 0));
+			finish(std::move(combined), Provenance(l, ll, leftMirror, r, rl, rightMirror));
 			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+rightLocations-1, sliderotate.begin()+ll+rightLocations);
 		}
 		std::swap(slide[ll], slide[ll+rightLocations]);
@@ -111,7 +111,7 @@ void connect(AutomatonType a, std::uint32_t gadgetIndex, bool mirrored,
 				//minimize again; any two equivalent states would differ only in
 				//the symbols we deleted, but those symbols were inactive.
 			}
-			finish(std::move(op), Provenance(gadgetIndex, l, c, mirrored, 0));
+			finish(std::move(op), Provenance(gadgetIndex, l, c, mirrored));
 		}
 	}
 }
