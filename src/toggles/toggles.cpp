@@ -1,10 +1,7 @@
 #include "precompiled.hpp"
 #include "../automaton.hpp"
-#include "../regex.hpp"
-#include "../alphabet.hpp"
 #include "../worker.hpp"
 #include "../pinning.hpp"
-
 #include "canonicalize.hpp"
 #include "registry.hpp"
 #include "ops.hpp"
