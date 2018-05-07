@@ -78,6 +78,10 @@ WorkingAutomaton::WorkingAutomaton(WorkingAutomaton&&) = default;
 WorkingAutomaton& WorkingAutomaton::operator=(const WorkingAutomaton&) = default;
 WorkingAutomaton& WorkingAutomaton::operator=(WorkingAutomaton&&) = default;
 
+bool WorkingAutomaton::addTrans(state_type from, SymbolSet on, state_type to) {
+	return std::any_of(on.begin(), on.end(), [&](symbol_type s){return this->addTrans(from, s, to);});
+}
+
 auto WorkingAutomaton::append(const AutomatonBase& b) -> state_type {
 	state_type base = state_size(), theirs = b.state_size();
 	reserve(base + theirs);

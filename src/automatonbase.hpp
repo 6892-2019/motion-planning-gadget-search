@@ -229,6 +229,12 @@ public:
 	 * already present
 	 */
 	virtual bool addTrans(state_type from, symbol_type on, state_type to) = 0;
+	/**
+	 * Add transitions to this automaton.
+	 * @return true if the automaton changed, false if every transition was
+	 * already present
+	 */
+	virtual bool addTrans(state_type from, SymbolSet on, state_type to) = 0;
 	virtual bool setAccept(state_type state, bool accepts = true) = 0;
 	/**
 	 * Removes all states and transitions from this automaton.
@@ -328,6 +334,10 @@ public:
 	~WorkingAutomaton();
 	WorkingAutomaton(const WorkingAutomaton&);
 	WorkingAutomaton(WorkingAutomaton&&);
+	//We shouldn't be calling clone() directly on an Automaton, but see
+	//https://stackoverflow.com/a/6925201/3614835 if preserving the concrete
+	//type is actually necessary.
+	virtual std::unique_ptr<WorkingAutomaton> clone() const = 0;
 	WorkingAutomaton& operator=(const WorkingAutomaton&);
 	WorkingAutomaton& operator=(WorkingAutomaton&&);
 	virtual void removeDeadStates() = 0;
@@ -335,7 +345,10 @@ public:
 	virtual void determinize() = 0;
 	virtual void minimize() = 0;
 	virtual void canonicalize() = 0;
+	virtual void swapStateNumbers(state_type a, state_type b) = 0;
 	virtual std::size_t working_hash() const = 0;
+	using AutomatonBase::addTrans;
+	bool addTrans(state_type from, SymbolSet on, state_type to) override;
 	state_type append(const AutomatonBase& b);
 
 	/**
@@ -349,6 +362,57 @@ public:
 };
 
 std::unique_ptr<WorkingAutomaton> make_working(unsigned int size);
+
+namespace detail {
+//TODO: both automatonbase.cpp and automaton.hpp want this class, but other
+//users of automatonbase.hpp don't.  We could move it to its own header, or
+//outright replace it with a map actually supporting compute_if_absent.
+class DenseShuffleAcceptMap {
+public:
+	using key_type = std::tuple<state_type, state_type, bool>;
+	DenseShuffleAcceptMap(std::size_t leftSize, std::size_t rightSize) : map_() {
+		//silent narrowing conversion: http://stackoverflow.com/q/37928951/3614835
+		map_.set_empty_key({leftSize, rightSize, false});
+	}
+	void insert(key_type oldstates, state_type newstate) {
+		map_.insert({oldstates, newstate});
+	}
+	template<class Callable>
+	std::pair<state_type, bool> compute_if_absent(key_type oldstates, Callable newstateProvider) {
+		//dense_hashtable::find_or_insert is so close to what we want :(
+		auto it = map_.find(oldstates);
+		if (it != map_.end())
+			return {it->second, false};
+		auto r = map_.insert({oldstates, newstateProvider()});
+		return {r.first->second, true};
+	}
+private:
+	google::dense_hash_map<key_type, state_type, boost::hash<key_type>> map_;
+};
+
+//std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
+//		const WorkingAutomaton& left, const WorkingAutomaton& right, unsigned int alphabet_size);
+} //namespace detail
+
+
+
+/**
+ * Computes the accepting shuffle of the given automata.  The accepting
+ * shuffle is the language accepted by running both automata in parallel,
+ * passing each character to one or the other automaton, switching the
+ * active automaton only when both automata are in accepting states.
+ */
+std::unique_ptr<WorkingAutomaton> shuffleAccept(const WorkingAutomaton& left,
+		const WorkingAutomaton& right,
+		unsigned int alphabet_size);
+/**
+ * Computes the accepting shuffle of the given automata.  The accepting
+ * shuffle is the language accepted by running both automata in parallel,
+ * passing each character to one or the other automaton, switching the
+ * active automaton only when both automata are in accepting states.
+ */
+std::unique_ptr<WorkingAutomaton> shuffleAccept(WorkingAutomaton&& left, WorkingAutomaton&& right,
+		unsigned int alphabet_size);
 
 } //namespace automaton
 

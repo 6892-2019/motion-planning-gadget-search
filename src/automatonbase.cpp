@@ -228,3 +228,115 @@ std::ostream& automaton::detail::operator<<(std::ostream& os, const AutomatonRep
 	os << "}";
 	return os;
 }
+
+namespace {
+/**
+ * @return a determinized copy of the given automaton
+ */
+std::unique_ptr<WorkingAutomaton> determinize(const WorkingAutomaton& a) {
+	std::unique_ptr<WorkingAutomaton> b = a.clone();
+	b->determinize();
+	return b;
+}
+///**
+// * @return a determinized copy of the given automaton
+// */
+//std::unique_ptr<WorkingAutomaton> determinize(WorkingAutomaton&& a) {
+//	a.determinize();
+//	//TODO: clone-by-move
+//}
+
+//Contents copied in from the Automaton static member function.  Best I can
+//tell, that function benefits from avoiding using edges() (and thus SymbolSet).
+std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
+		const WorkingAutomaton& left, const WorkingAutomaton& right, unsigned int alphabet_size) {
+	assert(left.deterministic());
+	assert(right.deterministic());
+	using state_type = WorkingAutomaton::state_type;
+	//(left state, right state, new state, left automation active)
+	using state_quad = std::tuple<state_type, state_type, state_type, bool>;
+	circular_deque<state_quad, 16> worklist;
+	automaton::detail::DenseShuffleAcceptMap newstates(left.state_size(), right.state_size());
+
+	std::unique_ptr<WorkingAutomaton> ret = make_working(alphabet_size);
+	WorkingAutomaton& a = *ret;
+	//TODO: If we know we're not deterministic, we'd like to say so up front to
+	//not waste time checking.  Also, according to the old code this is a copy
+	//of, we're not sure this is correct, anyway.
+//	a.deterministic_ = left.deterministic() && right.deterministic();
+	//We have a free choice to begin with the left or with the right
+	//automaton, so we have two "initial" states and call addEpsilon later.
+	a.addState(); a.addState(); a.addState();
+	//TODO: assuming 0 is the initial state
+	worklist.push_back({0, 0, 1, true});
+	newstates.insert({0, 0, true}, 1);
+	worklist.push_back({0, 0, 2, false});
+	newstates.insert({0, 0, false}, 2);
+
+	while (!worklist.empty()) {
+		state_type ls, rs, ns;
+		bool leftactive;
+		std::tie(ls, rs, ns, leftactive) = worklist.pop_back();
+		a.setAccept(ns, left.accept(ls) && right.accept(rs));
+
+		if (leftactive) {
+			for (auto&& [symbols, next] : left.edges(ls)) {
+				auto p = newstates.compute_if_absent({next, rs, leftactive}, [&]{return a.addState();});
+				if (p.second)
+					worklist.push_back({next, rs, p.first, leftactive});
+				a.addTrans(ns, symbols, p.first);
+
+				//If we brought the active automaton to an accept state,
+				//we can switch if we want.
+				if (left.accept(next)) {
+					auto q = newstates.compute_if_absent({next, rs, !leftactive}, [&]{return a.addState();});
+					if (q.second)
+						worklist.push_back({next, rs, q.first, !leftactive});
+					a.addTrans(ns, symbols, q.first);
+				}
+			}
+		} else {
+			for (auto&& [symbols, next] : right.edges(rs)) {
+				auto p = newstates.compute_if_absent({ls, next, leftactive}, [&]{return a.addState();});
+				if (p.second)
+					worklist.push_back({ls, next, p.first, leftactive});
+				a.addTrans(ns, symbols, p.first);
+
+				//If we brought the active automaton to an accept state,
+				//we can switch if we want.
+				if (right.accept(next)) {
+					auto q = newstates.compute_if_absent({ls, next, !leftactive}, [&]{return a.addState();});
+					if (q.second)
+						worklist.push_back({ls, next, q.first, !leftactive});
+					a.addTrans(ns, symbols, q.first);
+				}
+			}
+		}
+	}
+
+	//Choose left or right at the start.
+	a.addEpsilon(0, 1);
+	a.addEpsilon(0, 2);
+	return ret;
+}
+} //end anonymous namespace
+
+namespace automaton {
+
+std::unique_ptr<WorkingAutomaton> shuffleAccept(const WorkingAutomaton& left,
+		const WorkingAutomaton& right,
+		unsigned int alphabet_size) {
+	return shuffleAcceptDeterministic(
+			left.deterministic() ? left : *determinize(left),
+			right.deterministic() ? right : *determinize(right),
+			alphabet_size);
+}
+std::unique_ptr<WorkingAutomaton> shuffleAccept(WorkingAutomaton&& left, WorkingAutomaton&& right,
+		unsigned int alphabet_size) {
+	//We own these automata, so we can safely reuse them.
+	left.determinize();
+	right.determinize();
+	return shuffleAcceptDeterministic(std::move(left), std::move(right), alphabet_size);
+}
+
+} //namespace automaton

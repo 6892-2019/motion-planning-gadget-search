@@ -35,6 +35,9 @@ public:
 	bool addTrans(state_type from, symbol_type on, state_type to) override final {
 		die(__PRETTY_FUNCTION__);
 	}
+	bool addTrans(state_type from, SymbolSet on, state_type to) override final {
+		die(__PRETTY_FUNCTION__);
+	}
 	void clear() override final {
 		die(__PRETTY_FUNCTION__);
 	}

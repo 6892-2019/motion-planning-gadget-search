@@ -116,29 +116,6 @@ using SparseConjMap = MapConjMap<google::sparse_hash_map<std::pair<state_type, s
 //	bool useLeft_;
 //};
 
-class DenseShuffleAcceptMap {
-public:
-	using key_type = std::tuple<state_type, state_type, bool>;
-	DenseShuffleAcceptMap(std::size_t leftSize, std::size_t rightSize) : map_() {
-		//silent narrowing conversion: http://stackoverflow.com/q/37928951/3614835
-		map_.set_empty_key({leftSize, rightSize, false});
-	}
-	void insert(key_type oldstates, state_type newstate) {
-		map_.insert({oldstates, newstate});
-	}
-	template<class Callable>
-	std::pair<state_type, bool> compute_if_absent(key_type oldstates, Callable newstateProvider) {
-		//dense_hashtable::find_or_insert is so close to what we want :(
-		auto it = map_.find(oldstates);
-		if (it != map_.end())
-			return {it->second, false};
-		auto r = map_.insert({oldstates, newstateProvider()});
-		return {r.first->second, true};
-	}
-private:
-	google::dense_hash_map<key_type, state_type, boost::hash<key_type>> map_;
-};
-
 template<typename T>
 auto begin(const T& t) {
 	using std::begin;
@@ -280,6 +257,9 @@ public:
 	~Automaton() = default;
 	Automaton(const Automaton& a) = default;
 	Automaton(Automaton&& a) = default;
+	std::unique_ptr<WorkingAutomaton> clone() const override {
+		return std::make_unique<Automaton>(*this);
+	}
 	Automaton& operator=(const Automaton& a) = default;
 	Automaton& operator=(Automaton&& victim) = default;
 
@@ -848,7 +828,7 @@ public:
 	 * having to allocate a permutation array.  Note that renumbering state 0
 	 * to any other number may change the language accepted by this automaton.
 	 */
-	void swapStateNumbers(state_type a, state_type b) {
+	void swapStateNumbers(state_type a, state_type b) override {
 		if (a == b) return;
 		//This might actually be faster with a lookup table.
 		for (auto& ts : transitions_)

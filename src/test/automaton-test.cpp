@@ -469,6 +469,50 @@ TEST_CASE("AutomatonTest_ShuffleAcceptComposeMinimize2") {
 	equivalentOnAllStrings<4>(rshuf, rmshuf, 4, __LINE__);
 }
 
+namespace {
+template<class T>
+void shuffleAcceptPolymorphicEquivalence(T&& left, T&& right) {
+	auto shuf = shuffleAccept(left, right);
+	const WorkingAutomaton& left_ref = left;
+	const WorkingAutomaton& right_ref = right;
+	auto shuf_ref = shuffleAccept(left_ref, right_ref, left_ref.alphabet_size());
+	//So we can use compare_languages.  An implementation of compare_languages
+	//on WorkingAutomaton& would require conj on WorkingAutomaton&.
+	auto downcast = dynamic_cast<T&>(*shuf_ref);
+	CHECK_UNARY(compare_languages(shuf, downcast).equal());
+}
+}
+
+TEST_CASE("AutomatonTest_ShuffleAcceptPolymorphic01") {
+	auto left = lit<2>(0, 0), right = lit<2>(1, 1);
+	shuffleAcceptPolymorphicEquivalence(left, right);
+	shuffleAcceptPolymorphicEquivalence(right, left);
+}
+
+TEST_CASE("AutomatonTest_ShuffleAcceptPolymorphic02") {
+	auto left = star(lit<2>(0, 0)), right = lit<2>(1, 1);
+	shuffleAcceptPolymorphicEquivalence(left, right);
+	shuffleAcceptPolymorphicEquivalence(right, left);
+}
+
+TEST_CASE("AutomatonTest_ShuffleAcceptPolymorphicWithEmpty") {
+	auto left = star(lit<2>(0, 0)), right = empty<2>();
+	shuffleAcceptPolymorphicEquivalence(left, right);
+	shuffleAcceptPolymorphicEquivalence(right, left);
+}
+
+TEST_CASE("AutomatonTest_ShuffleAcceptPolymorphicComposeMinimize2") {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	shuffleAcceptPolymorphicEquivalence(noop, parallelToggleBase);
+	shuffleAcceptPolymorphicEquivalence(parallelToggleBase, noop);
+	noop.minimize();
+	parallelToggleBase.minimize();
+	shuffleAcceptPolymorphicEquivalence(noop, parallelToggleBase);
+	shuffleAcceptPolymorphicEquivalence(parallelToggleBase, noop);
+}
+
 TEST_CASE("AutomatonTest_MinimizationPreservesLanguage") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto mnoop = noop;
