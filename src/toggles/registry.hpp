@@ -15,8 +15,6 @@ using automaton::SymbolSet;
 using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
 
-bool acceptingClosure(automaton_type& connected, unsigned int locations);
-
 automaton_type mirror(const automaton_type& a, unsigned int locations);
 inline automaton_type mirror(const automaton_type a) {
 	return mirror(a, a.active_alphabet_size());
@@ -88,7 +86,6 @@ private:
 };
 
 using Result = std::vector<std::tuple<std::unique_ptr<const PackedAutomaton>, Provenance, std::size_t>>;
-automaton_type known_gadget(const std::string& name);
 
 #endif /* TOGGLES_REGISTRY_HPP */
 

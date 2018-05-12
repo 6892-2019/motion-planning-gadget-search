@@ -30,6 +30,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/join.hpp>
+#include <regex>
 #include "algoutils.hpp"
 
 #include <atomic>
@@ -50,7 +51,9 @@
 #include "numutils.hpp"
 #include <boost/functional/hash.hpp> //for std::pair/std::tuple hashing
 #include <farmhash/farmhash.h>
+
 #include <boost/lexical_cast.hpp>
+#include <charconv>
 
 #include <exception>
 #include <cassert>

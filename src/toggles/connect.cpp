@@ -4,12 +4,12 @@
 
 using namespace automaton;
 
-bool acceptingClosure(automaton_type& connected, unsigned int locations) {
+bool acceptingClosure(WorkingAutomaton& connected, unsigned int locations) {
 	//Transitive closure.
 	//TODO: move to Automaton? (minus only being on non-accept states)
 	//If we renumbered l to m, transitive-closed, then deleted m, that would be enough (?).
-	using state_type = automaton_type::state_type;
-	using symbol_type = automaton_type::symbol_type;
+	using state_type = typename WorkingAutomaton::state_type;
+	using symbol_type = typename WorkingAutomaton::symbol_type;
 	bool progress, changed = false;
 	do {
 		//TODO: consider a worklist instead of fixpoint iteration

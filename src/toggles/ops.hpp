@@ -4,6 +4,8 @@
 #include "automaton.hpp"
 #include "provenance.hpp"
 
+bool acceptingClosure(automaton::WorkingAutomaton& connected, unsigned int locations);
+
 template<class AutomatonType, class FinishAction>
 void combine(const AutomatonType& la, uint32_t l, bool leftMirror, typename AutomatonType::state_type leftLocations,
 		const AutomatonType& ra, uint32_t r, bool rightMirror, typename AutomatonType::state_type rightLocations,

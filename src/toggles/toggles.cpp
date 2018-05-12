@@ -5,6 +5,7 @@
 #include "canonicalize.hpp"
 #include "registry.hpp"
 #include "ops.hpp"
+#include "gadgetdefs.hpp"
 
 using namespace automaton;
 using std::get;
@@ -271,7 +272,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	boost::algorithm::split(tokens, argv[1], boost::algorithm::is_any_of(","));
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "input " << i << ": " << tokens[i] << "\n";
-		automaton_type a = known_gadget(tokens[i]);
+		automaton_type a = *known_gadget(tokens[i], automaton_type::alphabet_size_v);
 		automaton_type mirrored = mirror(a);
 		if (mirrored == a)
 			mirrored.clear();
@@ -283,7 +284,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	boost::algorithm::split(tokens, argv[2], boost::algorithm::is_any_of(","));
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "target " << i << ": " << tokens[i] << "\n";
-		automaton_type a = known_gadget(tokens[i]);
+		automaton_type a = *known_gadget(tokens[i], automaton_type::alphabet_size_v);
 		automaton_type mirrored = mirror(a);
 		std::unique_ptr<const PackedAutomaton> packed = pack(a);
 		std::size_t packed_hash = packed->packed_hash();

@@ -1,27 +1,36 @@
 #include "precompiled.hpp"
+#include "gadgetdefs.hpp"
 #include "../automaton.hpp"
 #include "canonicalize.hpp"
-#include "registry.hpp"
+#include "ops.hpp"
 
 using namespace automaton;
 
 namespace {
-automaton_type make_nop(unsigned int locations) {
-	std::vector<automaton_type> automata;
-	for (unsigned int i = 0; i < locations; ++i)
-		automata.push_back(lit<automaton_type::alphabet_size_v>(i, i));
-	return star(alt(automata.begin(), automata.end()));
+std::unique_ptr<WorkingAutomaton> make_nop(unsigned int alphabet_size, unsigned int locations) {
+	if (locations > alphabet_size) return nullptr;
+	//GadgetBuilder calls prepare which calls make_nop, so we have to do this
+	//manually to break the cycle.
+	std::unique_ptr<WorkingAutomaton> a = make_working(alphabet_size);
+	a->addState();
+	a->setAccept(0, true);
+	for (unsigned int i = 0; i < locations; ++i) {
+		auto s = a->addState();
+		a->addTrans(0, i, s);
+		a->addTrans(s, i, 0);
+	}
+	return a;
 }
 
-void setInitialStates(automaton_type& a, const StateSet& initialStates) {
-	using state_type = automaton_type::state_type;
+void setInitialStates(WorkingAutomaton& a, const StateSet& initialStates) {
+	using state_type = WorkingAutomaton::state_type;
 	state_type s = a.addState();
 	for (state_type t : initialStates)
 		a.addEpsilon(s, t);
 	a.swapStateNumbers(0, s);
 }
 
-void branchToAnyAcceptState(automaton_type& a) {
+void branchToAnyAcceptState(WorkingAutomaton& a) {
 	StateSet accepting;
 	for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
 		if (a.accept(s))
@@ -29,145 +38,284 @@ void branchToAnyAcceptState(automaton_type& a) {
 	setInitialStates(a, accepting);
 }
 
-automaton_type prepare(automaton_type a) {
-	a.minimize();
-	a = shuffleAccept(a, make_nop(a.active_alphabet_size()));
-	a.minimize();
-	acceptingClosure(a, a.active_alphabet_size());
-	branchToAnyAcceptState(a);
-	a.minimize();
-	canonicalize(a, a.active_alphabet_size());
-	return a;
+void canonicalizeQ(WorkingAutomaton& a) {
+	//This is ugh, but canonicalizeRenumber is a template and so can't easily be
+	//moved onto WorkingAutomaton.
+	switch (a.alphabet_size()) {
+#define GADGETDEFS_CANONICALIZE_CASE(N) case N: canonicalize(static_cast<Automaton<N>&>(a), a.active_alphabet_size()); break;
+		GADGETDEFS_CANONICALIZE_CASE(1)
+		GADGETDEFS_CANONICALIZE_CASE(2)
+		GADGETDEFS_CANONICALIZE_CASE(3)
+		GADGETDEFS_CANONICALIZE_CASE(4)
+		GADGETDEFS_CANONICALIZE_CASE(5)
+		GADGETDEFS_CANONICALIZE_CASE(6)
+		GADGETDEFS_CANONICALIZE_CASE(7)
+		GADGETDEFS_CANONICALIZE_CASE(8)
+		GADGETDEFS_CANONICALIZE_CASE(9)
+		GADGETDEFS_CANONICALIZE_CASE(10)
+		GADGETDEFS_CANONICALIZE_CASE(11)
+		GADGETDEFS_CANONICALIZE_CASE(12)
+		GADGETDEFS_CANONICALIZE_CASE(13)
+		GADGETDEFS_CANONICALIZE_CASE(14)
+		GADGETDEFS_CANONICALIZE_CASE(15)
+		GADGETDEFS_CANONICALIZE_CASE(16)
+#undef GADGETDEFS_CANONICALIZE_CASE
+	default:
+		std::cout << "unhandled canonicalize: " << typeid(a).name();
+		std::terminate();
+	}
 }
+
+std::unique_ptr<WorkingAutomaton> prepare(const WorkingAutomaton& a) {
+	std::unique_ptr<WorkingAutomaton> q = a.clone();
+	q->minimize();
+	q = shuffleAccept(*q, *make_nop(q->alphabet_size(), q->active_alphabet_size()), q->alphabet_size());
+	q->minimize();
+	acceptingClosure(*q, q->active_alphabet_size());
+	branchToAnyAcceptState(*q);
+	q->minimize();
+	canonicalizeQ(*q);
+	return q;
+}
+
+struct GadgetLine {
+	WorkingAutomaton::state_type start;
+	WorkingAutomaton::symbol_type from;
+	WorkingAutomaton::symbol_type to;
+	WorkingAutomaton::state_type end;
+};
 
 class GadgetBuilder {
 public:
-	GadgetBuilder(automaton_type::state_type states) : gadget() {
-		for (automaton_type::state_type i = 0; i < states; ++i) {
-			gadget.addState();
-			gadget.setAccept(i);
+	GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type states) : gadget(make_working(alphabet_size)) {
+		for (WorkingAutomaton::state_type i = 0; i < states; ++i) {
+			gadget->addState();
+			gadget->setAccept(i);
 		}
 	}
-	GadgetBuilder& trans(automaton_type::state_type start, automaton_type::symbol_type from,
-			automaton_type::symbol_type to, automaton_type::state_type end) {
-		assert(gadget.accept(start));
-		assert(gadget.accept(end));
-		automaton_type::state_type t = gadget.addState();
-		gadget.addTrans(start, from, t);
-		gadget.addTrans(t, to, end);
+	GadgetBuilder& trans(WorkingAutomaton::state_type start, WorkingAutomaton::symbol_type from,
+			WorkingAutomaton::symbol_type to, WorkingAutomaton::state_type end) {
+		assert(gadget->accept(start));
+		assert(gadget->accept(end));
+		WorkingAutomaton::state_type t = gadget->addState();
+		gadget->addTrans(start, from, t);
+		gadget->addTrans(t, to, end);
 		return *this;
 	}
-	automaton_type build() {
-		branchToAnyAcceptState(gadget);
-		return prepare(std::move(gadget));
+	std::unique_ptr<WorkingAutomaton> build() {
+		std::cout << *gadget << std::endl;
+		branchToAnyAcceptState(*gadget);
+		std::cout << *gadget << std::endl;
+		return prepare(std::move(*gadget));
+	}
+
+	static std::unique_ptr<WorkingAutomaton> interpret(unsigned int alphabet_size,
+			const GadgetLine* first, const GadgetLine* last) {
+		WorkingAutomaton::state_type max_state = 0;
+		for (GadgetLine l : make_range_for_pair(first, last))
+			max_state = std::max({max_state, l.start, l.end});
+		GadgetBuilder b(alphabet_size, max_state+1);
+		for (GadgetLine l : make_range_for_pair(first, last))
+			b.trans(l.start, l.from, l.to, l.end);
+		return b.build();
 	}
 private:
-	automaton_type gadget;
+	std::unique_ptr<WorkingAutomaton> gadget;
 };
 
-automaton_type make_twostate(automaton_type&& state0, automaton_type&& state1) {
-	constexpr unsigned int N = automaton_type::alphabet_size_v;
-	auto base = alt(epsilon<N>(), state0, star(cat(state0, state1)), cat(state0, star(cat(state1, state0))));
-	return prepare(base);
+using std::array;
+using std::pair;
+using std::tuple;
+using std::string_view;
+using namespace std::literals::string_view_literals;
+
+const pair<string_view, string_view> gadget_aliases[] = {
+	{"split"sv, "3-split"sv},
+	{"1-toggle"sv, "parallel-1-toggle"sv},
+	{"crossover-2-toggle"sv, "crossing-2-toggle"sv},
+};
+string_view translate_alias(string_view name) {
+	for (auto [from, to] : gadget_aliases)
+		if (name == from)
+			return to;
+	return name;
 }
 
-std::unordered_map<std::string, automaton_type> initialize_known_gadgets() {
-	std::unordered_map<std::string, automaton_type> ret;
-	constexpr unsigned int N = automaton_type::alphabet_size_v;
-	auto lit = [](auto... symbols){return automaton::lit<N>(symbols...);};
+const GadgetLine diode[] = {
+	{0, 0, 1, 0},
+};
+const GadgetLine crossover[] = {
+	{0, 0, 2, 0}, {0, 2, 0, 0}, {0, 1, 3, 0}, {0, 3, 1, 0},
+};
+const GadgetLine crossing_wire_diode[] = {
+	{0, 0, 2, 0}, {0, 1, 3, 0}, {0, 3, 1, 0},
+};
+const GadgetLine crossing_diode_diode[] = {
+	{0, 0, 2, 0}, {0, 1, 3, 0},
+};
+const GadgetLine antiparallel_2_toggle[] = {
+	{0, 0, 1, 1}, {0, 2, 3, 1},
+	{1, 1, 0, 0}, {1, 3, 2, 0},
+};
+const GadgetLine crossing_2_toggle[] = {
+	{0, 0, 2, 1}, {0, 3, 1, 1},
+	{1, 2, 0, 0}, {1, 1, 3, 0},
+};
+const GadgetLine noncrossing_tripwire_lock[] = {
+	{0, 0, 1, 1}, {0, 1, 0, 1}, {0, 2, 3, 1}, {0, 3, 2, 1},
+	{1, 0, 1, 0}, {1, 1, 0, 0},
+};
+const GadgetLine crossing_tripwire_lock[] = {
+	{0, 0, 2, 1}, {0, 2, 0, 1}, {0, 1, 3, 1}, {0, 3, 1, 1},
+	{1, 0, 2, 0}, {1, 2, 0, 0},
+};
+const GadgetLine noncrossing_toggle_lock[] = {
+	{0, 0, 1, 1}, {0, 2, 3, 1}, {0, 3, 2, 1},
+	{1, 1, 0, 0},
+};
+const GadgetLine crossing_toggle_lock[] = {
+	{0, 0, 2, 1}, {0, 1, 3, 1}, {0, 3, 1, 1},
+	{1, 2, 0, 1},
+};
+const GadgetLine noncrossing_tripwire_toggle[] = {
+	{0, 0, 1, 1}, {0, 2, 3, 1}, {0, 3, 2, 1},
+	{1, 1, 0, 0}, {1, 2, 3, 0}, {1, 3, 2, 0},
+};
+const GadgetLine crossing_tripwire_toggle[] = {
+	{0, 0, 2, 1}, {0, 1, 3, 1}, {0, 3, 1, 1},
+	{1, 2, 0, 0}, {1, 1, 3, 0}, {1, 3, 1, 0},
+};
+const GadgetLine parallel_seven_seven[] = {
+	{0, 2, 3, 0}, {0, 3, 2, 0},
+	{0, 2, 3, 1}, {0, 0, 1, 1},
+	{1, 1, 0, 0}, {1, 3, 2, 0},
+	{1, 0, 1, 1}, {1, 1, 0, 1},
+};
+const GadgetLine antiparallel_seven_seven[] = {
+	{0, 2, 3, 0}, {0, 3, 2, 0},
+	{0, 3, 2, 1}, {0, 0, 1, 1},
+	{1, 1, 0, 0}, {1, 2, 3, 0},
+	{1, 0, 1, 1}, {1, 1, 0, 1},
+};
+const GadgetLine crossing_seven_seven[] = {
+	{0, 1, 3, 0}, {0, 3, 1, 0},
+	{0, 1, 3, 1}, {0, 0, 2, 1},
+	{1, 2, 0, 0}, {1, 3, 1, 0},
+	{1, 0, 2, 1}, {1, 2, 0, 1},
+};
+const GadgetLine seven_lock[] = {
+	{0, 2, 3, 0}, {0, 3, 2, 0},
+	{0, 0, 1, 1},
+	{1, 1, 0, 0},
+	{1, 0, 1, 1}, {1, 1, 0, 1},
+};
+const GadgetLine seven_tripwire[] = {
+	{0, 0, 1, 1}, {0, 2, 3, 1}, {0, 3, 2, 1},
+	{1, 1, 0, 0}, {1, 2, 3, 0}, {1, 3, 2, 0},
+	{1, 0, 1, 1}, {1, 1, 0, 1},
+};
 
-	for (unsigned int i : xrange(2u, N))
-		ret[std::to_string(i) + "-nop"] = prepare(make_nop(i));
+const tuple<string_view, const GadgetLine*, const GadgetLine*> simple_gadgets[] = {
+	{"diode"sv, std::begin(diode), std::end(diode)},
+	{"crossover"sv, std::begin(crossover), std::end(crossover)},
+	{"crossing-wire-diode"sv, std::begin(crossing_wire_diode), std::end(crossing_wire_diode)},
+	{"crossing-diode-diode"sv, std::begin(crossing_diode_diode), std::end(crossing_diode_diode)},
+	{"antiparallel-2-toggle"sv, std::begin(antiparallel_2_toggle), std::end(antiparallel_2_toggle)},
+	{"crossing-2-toggle"sv, std::begin(crossing_2_toggle), std::end(crossing_2_toggle)},
+	{"noncrossing-tripwire-lock"sv, std::begin(noncrossing_tripwire_lock), std::end(noncrossing_tripwire_lock)},
+	{"crossing-tripwire-lock"sv, std::begin(crossing_tripwire_lock), std::end(crossing_tripwire_lock)},
+	{"noncrossing-toggle-lock"sv, std::begin(noncrossing_toggle_lock), std::end(noncrossing_toggle_lock)},
+	{"crossing-toggle-lock"sv, std::begin(crossing_toggle_lock), std::end(crossing_toggle_lock)},
+	{"noncrossing-tripwire-toggle"sv, std::begin(noncrossing_tripwire_toggle), std::end(noncrossing_tripwire_toggle)},
+	{"crossing-tripwire-toggle"sv, std::begin(crossing_tripwire_toggle), std::end(crossing_tripwire_toggle)},
+	{"parallel-seven-seven"sv, std::begin(parallel_seven_seven), std::end(parallel_seven_seven)},
+	{"antiparallel-seven-seven"sv, std::begin(antiparallel_seven_seven), std::end(antiparallel_seven_seven)},
+	{"crossing-seven-seven"sv, std::begin(crossing_seven_seven), std::end(crossing_seven_seven)},
+	{"seven-lock"sv, std::begin(seven_lock), std::end(seven_lock)},
+	{"seven-tripwire"sv, std::begin(seven_tripwire), std::end(seven_tripwire)},
+};
 
-	std::vector<automaton_type> literals;
-	literals.reserve(N);
-	literals.push_back(lit(0));
-	literals.push_back(lit(1));
-	for (unsigned int i : xrange(3u, N)) {
-		literals.push_back(lit(i-1));
-		ret[std::to_string(i) + "-split"] = prepare(star(nCopies(alt(literals.begin(), literals.end()), 2)));
+//TODO: move this somewhere else
+template<typename Integer, class Iter>
+Integer from_chars(Iter first, Iter last, int base = 10) {
+	Integer i;
+	if (auto [ptr, ec] = std::from_chars(first, last, i, base); ec != std::errc() || ptr != last) {
+		throw std::logic_error("from_chars problem"); //TODO: appropriate exception and messages
 	}
-	ret["split"] = ret["3-split"];
-
-	ret["diode"] = prepare(star(lit(0, 1)));
-
-	ret["crossover"] = prepare(star(alt(lit(0, 2), lit(3, 1), lit(2, 0), lit(1, 3))));
-	ret["crossover-diode"] = prepare(star(alt(lit(0, 2), lit(3, 1))));
-
-	ret["1-toggle"] = make_twostate(lit(0, 1), lit(1, 0));
-	ret["parallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(3, 2)), alt(lit(1, 0), lit(2, 3)));
-	ret["antiparallel-2-toggle"] = make_twostate(alt(lit(0, 1), lit(2, 3)), alt(lit(1, 0), lit(3, 2)));
-	ret["crossover-2-toggle"] = make_twostate(alt(lit(0, 2), lit(3, 1)), alt(lit(2, 0), lit(1, 3)));
-
-	ret["noncrossing-tripwire-lock"] = make_twostate(
-			alt(lit(0, 1), lit(1, 0), lit(3, 2), lit(2, 3)),
-			alt(lit(0, 1), lit(1, 0)));
-	ret["crossing-tripwire-lock"] = make_twostate(
-			alt(lit(0, 2), lit(2, 0), lit(3, 1), lit(1, 3)),
-			alt(lit(0, 2), lit(2, 0)));
-
-	ret["noncrossing-toggle-lock"] = make_twostate(
-			alt(lit(0, 1), lit(3, 2), lit(2, 3)),
-			alt(lit(1, 0)));
-	ret["crossing-toggle-lock"] = make_twostate(
-			alt(lit(0, 2), lit(3, 1), lit(1, 3)),
-			alt(lit(2, 0)));
-
-	ret["noncrossing-tripwire-toggle"] = make_twostate(
-			alt(lit(0, 1), lit(3, 2), lit(2, 3)),
-			alt(lit(1, 0), lit(3, 2), lit(2, 3)));
-	ret["crossing-tripwire-toggle"] = make_twostate(
-			alt(lit(0, 2), lit(3, 1), lit(1, 3)),
-			alt(lit(2, 0), lit(3, 1), lit(1, 3)));
-
-	ret["3-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 0)),
-			alt(lit(1, 0), lit(2, 1), lit(0, 2)));
-	ret["4-spinner"] = make_twostate(alt(lit(0, 1), lit(1, 2), lit(2, 3), lit(3, 0)),
-			alt(lit(1, 0), lit(2, 1), lit(3, 2), lit(0, 3)));
-
-	//all mismatched unless otherwise noted
-	ret["parallel-seven-seven"] = GadgetBuilder(2)
-			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
-			.trans(0, 2, 3, 1).trans(0, 0, 1, 1)
-			.trans(1, 1, 0, 0).trans(1, 3, 2, 0)
-			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
-			.build();
-	ret["antiparallel-seven-seven"] = GadgetBuilder(2)
-			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
-			.trans(0, 3, 2, 1).trans(0, 0, 1, 1)
-			.trans(1, 1, 0, 0).trans(1, 2, 3, 0)
-			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
-			.build();
-	ret["crossing-seven-seven"] = GadgetBuilder(2)
-			.trans(0, 1, 3, 0).trans(0, 3, 1, 0)
-			.trans(0, 1, 3, 1).trans(0, 0, 2, 1)
-			.trans(1, 2, 0, 0).trans(1, 3, 1, 0)
-			.trans(1, 0, 2, 1).trans(1, 2, 0, 1)
-			.build();
-
-	ret["seven-lock"] = GadgetBuilder(2)
-			.trans(0, 2, 3, 0).trans(0, 3, 2, 0)
-			.trans(0, 0, 1, 1)
-			.trans(1, 1, 0, 0)
-			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
-			.build();
-
-	ret["seven-tripwire"] = GadgetBuilder(2)
-			.trans(0, 0, 1, 1).trans(0, 2, 3, 1).trans(0, 3, 2, 1)
-			.trans(1, 1, 0, 0).trans(1, 2, 3, 0).trans(1, 3, 2, 0)
-			.trans(1, 0, 1, 1).trans(1, 1, 0, 1)
-			.build();
-
-	return ret;
+	return i;
 }
+template<typename Integer>
+Integer from_chars(string_view s, int base = 10) {
+	return from_chars<Integer>(s.begin(), s.end(), base);
+}
+
+unsigned int parse_locations(unsigned int alphabet_size, const std::cmatch& match) {
+	unsigned int locations = from_chars<unsigned int>(match[1].first, match[1].second);
+	if (locations > alphabet_size)
+		throw std::logic_error("too many locations for this alphabet size"); //TODO: appropriate exception and message
+	return locations;
+}
+
+std::unique_ptr<WorkingAutomaton> make_nop(unsigned int alphabet_size, const std::cmatch& match) {
+	auto q = make_nop(alphabet_size, parse_locations(alphabet_size, match));
+	return prepare(*q);
+}
+
+std::unique_ptr<WorkingAutomaton> make_split(unsigned int alphabet_size, const std::cmatch& match) {
+	unsigned int locations = parse_locations(alphabet_size, match);
+	GadgetBuilder b(alphabet_size, 1);
+	for (auto i : xrange(locations))
+		for (auto j : xrange(locations))
+			b.trans(0, i, j, 0);
+	return b.build();
+}
+
+std::unique_ptr<WorkingAutomaton> make_parallel_toggle(unsigned int alphabet_size, const std::cmatch& match) {
+	unsigned int lines = from_chars<unsigned int>(match[1].first, match[1].second);
+	unsigned int locations = 2*lines;
+	if (locations > alphabet_size)
+		throw std::logic_error("too many locations for this alphabet size"); //TODO: appropriate exception and message
+	GadgetBuilder b(alphabet_size, 2);
+	for (auto i : xrange(lines)) {
+		b.trans(0, (locations - i) % locations, i+1, 1);
+		b.trans(1, i+1, (locations - i) % locations, 0);
+	}
+	return b.build();
+}
+
+std::unique_ptr<WorkingAutomaton> make_spinner(unsigned int alphabet_size, const std::cmatch& match) {
+	unsigned int locations = parse_locations(alphabet_size, match);
+	GadgetBuilder b(alphabet_size, 2);
+	for (auto i : xrange(locations)) {
+		b.trans(0, i, (i+1) % locations, 1);
+		b.trans(1, (i+1) % locations, i, 0);
+	}
+	return b.build();
+}
+
+using RegexGadgetFactory = std::unique_ptr<WorkingAutomaton>(*)(unsigned int alphabet_size, const std::cmatch&);
+const pair<string_view, RegexGadgetFactory> regex_gadgets[] = {
+	{"(\\d+)-nop"sv, make_nop},
+	{"(\\d+)-split"sv, make_split},
+	{"parallel-(\\d+)-toggle"sv, make_parallel_toggle},
+	{"(\\d+)-spinner"sv, make_spinner},
+};
+
 } //anonymous namespace
 
-automaton_type known_gadget(const std::string& name) {
-	static std::unordered_map<std::string, automaton_type> map = initialize_known_gadgets();
-	auto i = map.find(name);
-	if (i == map.end()) {
-		std::cout << "couldn't find " << name << std::endl;
-		std::exit(1);
+std::unique_ptr<WorkingAutomaton> known_gadget(std::string_view name, unsigned int alphabet_size) {
+	name = translate_alias(name);
+
+	for (auto [n, first, last] : simple_gadgets)
+		if (name == n)
+			return GadgetBuilder::interpret(alphabet_size, first, last);
+
+	std::cmatch match;
+	for (auto [r, factory] : regex_gadgets) {
+		std::regex expr(r.data(), r.length());
+		if (std::regex_match(name.begin(), name.end(), match, expr))
+			return factory(alphabet_size, match);
 	}
-	return i->second;
+
+	throw std::runtime_error("bad name");
 }
