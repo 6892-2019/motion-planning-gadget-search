@@ -79,7 +79,12 @@ WorkingAutomaton& WorkingAutomaton::operator=(const WorkingAutomaton&) = default
 WorkingAutomaton& WorkingAutomaton::operator=(WorkingAutomaton&&) = default;
 
 bool WorkingAutomaton::addTrans(state_type from, SymbolSet on, state_type to) {
-	return std::any_of(on.begin(), on.end(), [&](symbol_type s){return this->addTrans(from, s, to);});
+	//std::all_of short-circuits and std::accumulate takes binary ops, so
+	//we'll just use the loop.
+	bool changed = false;
+	for (symbol_type s : on)
+		changed |= addTrans(from, s, to);
+	return changed;
 }
 
 auto WorkingAutomaton::append(const AutomatonBase& b) -> state_type {

@@ -513,6 +513,44 @@ TEST_CASE("AutomatonTest_ShuffleAcceptPolymorphicComposeMinimize2") {
 	shuffleAcceptPolymorphicEquivalence(parallelToggleBase, noop);
 }
 
+namespace {
+Automaton<8> make11149738326866() {
+	Automaton<8> a;
+	a.reserve(2);
+	for (AutomatonBase::state_type s = 0; s < 2; ++s)
+			a.addState();
+	for (AutomatonBase::state_type s : {0, })
+			a.setAccept(s);
+	a.addTrans(0, 0, 1);
+	a.addTrans(0, 1, 1);
+	a.addTrans(0, 2, 1);
+	a.addTrans(1, 0, 0);
+	a.addTrans(1, 1, 0);
+	a.addTrans(1, 2, 0);
+	return a;
+}
+Automaton<8> make11204764538191() {
+	Automaton<8> a;
+	a.reserve(4);
+	for (AutomatonBase::state_type s = 0; s < 4; ++s)
+			a.addState();
+	for (AutomatonBase::state_type s : {0, })
+			a.setAccept(s);
+	a.addTrans(0, 0, 1);
+	a.addTrans(0, 1, 2);
+	a.addTrans(0, 2, 3);
+	a.addTrans(1, 0, 0);
+	a.addTrans(2, 1, 0);
+	a.addTrans(3, 2, 0);
+	return a;
+}
+}
+
+TEST_CASE("AutomatonTest_ShuffleAcceptPolymorphicSplitNop") {
+	shuffleAcceptPolymorphicEquivalence(make11149738326866(), make11204764538191());
+	shuffleAcceptPolymorphicEquivalence(make11204764538191(), make11149738326866());
+}
+
 TEST_CASE("AutomatonTest_MinimizationPreservesLanguage") {
 	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
 	auto mnoop = noop;
