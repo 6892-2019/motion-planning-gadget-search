@@ -315,5 +315,14 @@ std::unique_ptr<WorkingAutomaton> known_gadget(std::string_view name, unsigned i
 			return factory(alphabet_size, match);
 	}
 
-	throw std::runtime_error("bad name");
+	throw std::runtime_error("known_gadget("+std::string(name)+", "+std::to_string(alphabet_size)+")");
+}
+
+std::vector<std::string_view> known_gadget_keys() {
+	std::vector<std::string_view> ret;
+	for (auto& q : simple_gadgets)
+		ret.push_back(std::get<std::string_view>(q));
+	for (auto& q : regex_gadgets)
+		ret.push_back(std::get<std::string_view>(q));
+	return ret;
 }
