@@ -103,9 +103,7 @@ public:
 		return *this;
 	}
 	std::unique_ptr<WorkingAutomaton> build() {
-		std::cout << *gadget << std::endl;
 		branchToAnyAcceptState(*gadget);
-		std::cout << *gadget << std::endl;
 		return prepare(std::move(*gadget));
 	}
 
