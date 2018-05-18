@@ -332,5 +332,5 @@ std::string unknown_gadget::format(const std::string& thing, unsigned int reques
 }
 
 std::string bad_alphabet_size::format(const std::string& gadget, unsigned int requested, unsigned int required) {
-	return "bad alphabet size for "+gadget+": "+std::to_string(requested)+", but "+std::to_string(required)+" required";
+	return "bad alphabet size for "+gadget+": "+std::to_string(requested)+" requested, but "+std::to_string(required)+" required";
 }
