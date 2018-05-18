@@ -37,3 +37,24 @@ TEST_CASE("gadgetdefs_NoDuplicates") {
 				CHECK_NE(*iauto, *jauto);
 			}
 }
+
+TEST_CASE("gadgetdefs_unknown") {
+	try {
+		auto p = known_gadget("fgsfds", 42);
+		FAIL("didn't throw");
+	} catch (const unknown_gadget& e) {
+		CHECK_EQ(e.gadget(), "fgsfds");
+		CHECK_EQ(e.requested(), 42);
+	}
+}
+
+TEST_CASE("gadgetdefs_toobig") {
+	try {
+		auto p = known_gadget("42-split", 4);
+		FAIL("didn't throw");
+	} catch (const bad_alphabet_size& e) {
+		CHECK_EQ(e.gadget(), "42-split");
+		CHECK_EQ(e.requested(), 4);
+		CHECK_EQ(e.required(), 42);
+	}
+}

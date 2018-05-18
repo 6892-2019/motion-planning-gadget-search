@@ -250,7 +250,7 @@ Integer from_chars(string_view s, int base = 10) {
 unsigned int parse_locations(unsigned int alphabet_size, const std::cmatch& match) {
 	unsigned int locations = from_chars<unsigned int>(match[1].first, match[1].second);
 	if (locations > alphabet_size)
-		throw std::logic_error("too many locations for this alphabet size"); //TODO: appropriate exception and message
+		throw bad_alphabet_size(match.str(), alphabet_size, locations);
 	return locations;
 }
 
@@ -272,7 +272,7 @@ std::unique_ptr<WorkingAutomaton> make_parallel_toggle(unsigned int alphabet_siz
 	unsigned int lines = from_chars<unsigned int>(match[1].first, match[1].second);
 	unsigned int locations = 2*lines;
 	if (locations > alphabet_size)
-		throw std::logic_error("too many locations for this alphabet size"); //TODO: appropriate exception and message
+		throw bad_alphabet_size(match.str(), alphabet_size, locations);
 	GadgetBuilder b(alphabet_size, 2);
 	for (auto i : xrange(lines)) {
 		b.trans(0, (locations - i) % locations, i+1, 1);
@@ -315,7 +315,7 @@ std::unique_ptr<WorkingAutomaton> known_gadget(std::string_view name, unsigned i
 			return factory(alphabet_size, match);
 	}
 
-	throw std::runtime_error("known_gadget("+std::string(name)+", "+std::to_string(alphabet_size)+")");
+	throw unknown_gadget(name, alphabet_size);
 }
 
 std::vector<std::string_view> known_gadget_keys() {
@@ -325,4 +325,12 @@ std::vector<std::string_view> known_gadget_keys() {
 	for (auto& q : regex_gadgets)
 		ret.push_back(std::get<std::string_view>(q));
 	return ret;
+}
+
+std::string unknown_gadget::format(const std::string& thing, unsigned int requested) {
+	return "unknown gadget "+thing+" (with requested size "+std::to_string(requested)+")";
+}
+
+std::string bad_alphabet_size::format(const std::string& gadget, unsigned int requested, unsigned int required) {
+	return "bad alphabet size for "+gadget+": "+std::to_string(requested)+", but "+std::to_string(required)+" required";
 }
