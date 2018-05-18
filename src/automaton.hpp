@@ -509,7 +509,7 @@ private:
 
 			if (leftactive) {
 				for (Transition lt : left.transitions_[ls]) {
-					auto p = newstates.compute_if_absent({lt.next_, rs, leftactive}, [&]{return a.addState();});
+					auto p = newstates.get_or_add_state({lt.next_, rs, leftactive}, a);
 					if (p.second)
 						worklist.push_back({lt.next_, rs, p.first, leftactive});
 					a.addTrans(ns, lt.symbols_, p.first);
@@ -517,7 +517,7 @@ private:
 					//If we brought the active automaton to an accept state,
 					//we can switch if we want.
 					if (left.accept(lt.next_)) {
-						auto q = newstates.compute_if_absent({lt.next_, rs, !leftactive}, [&]{return a.addState();});
+						auto q = newstates.get_or_add_state({lt.next_, rs, !leftactive}, a);
 						if (q.second)
 							worklist.push_back({lt.next_, rs, q.first, !leftactive});
 						a.addTrans(ns, lt.symbols_, q.first);
@@ -525,7 +525,7 @@ private:
 				}
 			} else {
 				for (Transition rt : right.transitions_[rs]) {
-					auto p = newstates.compute_if_absent({ls, rt.next_, leftactive}, [&]{return a.addState();});
+					auto p = newstates.get_or_add_state({ls, rt.next_, leftactive}, a);
 					if (p.second)
 						worklist.push_back({ls, rt.next_, p.first, leftactive});
 					a.addTrans(ns, rt.symbols_, p.first);
@@ -533,7 +533,7 @@ private:
 					//If we brought the active automaton to an accept state,
 					//we can switch if we want.
 					if (right.accept(rt.next_)) {
-						auto q = newstates.compute_if_absent({ls, rt.next_, !leftactive}, [&]{return a.addState();});
+						auto q = newstates.get_or_add_state({ls, rt.next_, !leftactive}, a);
 						if (q.second)
 							worklist.push_back({ls, rt.next_, q.first, !leftactive});
 						a.addTrans(ns, rt.symbols_, q.first);

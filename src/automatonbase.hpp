@@ -377,13 +377,12 @@ public:
 	void insert(key_type oldstates, state_type newstate) {
 		map_.insert({oldstates, newstate});
 	}
-	template<class Callable>
-	std::pair<state_type, bool> compute_if_absent(key_type oldstates, Callable newstateProvider) {
+	std::pair<state_type, bool> get_or_add_state(key_type oldstates, AutomatonBase& automaton) {
 		//dense_hashtable::find_or_insert is so close to what we want :(
 		auto it = map_.find(oldstates);
 		if (it != map_.end())
 			return {it->second, false};
-		auto r = map_.insert({oldstates, newstateProvider()});
+		auto r = map_.insert({oldstates, automaton.addState()});
 		return {r.first->second, true};
 	}
 private:

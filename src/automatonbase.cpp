@@ -281,7 +281,7 @@ std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
 
 		if (leftactive) {
 			for (auto&& [symbols, next] : left.edges(ls)) {
-				auto p = newstates.compute_if_absent({next, rs, leftactive}, [&]{return a.addState();});
+				auto p = newstates.get_or_add_state({next, rs, leftactive}, a);
 				if (p.second)
 					worklist.push_back({next, rs, p.first, leftactive});
 				a.addTrans(ns, symbols, p.first);
@@ -289,7 +289,7 @@ std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
 				//If we brought the active automaton to an accept state,
 				//we can switch if we want.
 				if (left.accept(next)) {
-					auto q = newstates.compute_if_absent({next, rs, !leftactive}, [&]{return a.addState();});
+					auto q = newstates.get_or_add_state({next, rs, !leftactive}, a);
 					if (q.second)
 						worklist.push_back({next, rs, q.first, !leftactive});
 					a.addTrans(ns, symbols, q.first);
@@ -297,7 +297,7 @@ std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
 			}
 		} else {
 			for (auto&& [symbols, next] : right.edges(rs)) {
-				auto p = newstates.compute_if_absent({ls, next, leftactive}, [&]{return a.addState();});
+				auto p = newstates.get_or_add_state({ls, next, leftactive}, a);
 				if (p.second)
 					worklist.push_back({ls, next, p.first, leftactive});
 				a.addTrans(ns, symbols, p.first);
@@ -305,7 +305,7 @@ std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
 				//If we brought the active automaton to an accept state,
 				//we can switch if we want.
 				if (right.accept(next)) {
-					auto q = newstates.compute_if_absent({ls, next, !leftactive}, [&]{return a.addState();});
+					auto q = newstates.get_or_add_state({ls, next, !leftactive}, a);
 					if (q.second)
 						worklist.push_back({ls, next, q.first, !leftactive});
 					a.addTrans(ns, symbols, q.first);
