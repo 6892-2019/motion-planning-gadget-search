@@ -296,8 +296,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	}
 	std::cout << std::flush;
 
-	for (int i = 1; i < std::thread::hardware_concurrency(); ++i) {
-//	for (int i = 1; i < 2; ++i) {
+	for (unsigned int i = 1; i < std::thread::hardware_concurrency(); ++i) {
+//	for (unsigned int i = 1; i < 2; ++i) {
 		std::thread worker(&worker_thread, i, std::ref(issue));
 		worker.detach();
 	}
