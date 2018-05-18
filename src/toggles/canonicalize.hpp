@@ -16,6 +16,12 @@ getPerms(unsigned int alphabetSize, unsigned int locations, bool normal, bool mi
 
 template<unsigned int N>
 void canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool allowMirroring = true) {
+	if (locations == 1) {
+		//We can't renumber the symbols/locations because there's only one, but
+		//we still have to renumber the states.
+		a.canonicalize();
+		return;
+	}
 	auto perms = getPerms(a.alphabet_size(), locations, true, allowMirroring);
 	a.canonicalizeRenumber(perms.first, perms.second);
 }
