@@ -160,34 +160,18 @@ auto xrange(Integer first, Integer last) {
 }
 
 struct indirect_equal {
+	using is_transparent = std::true_type;
 	template<typename L, typename R>
-	bool operator()(const L* l, const R* r) const noexcept(noexcept(*l == *r)) {
-		//TODO: also test pointer equality (and return true)?
-		//maybe as identical_or_indirect_equal?
-		return *l == *r;
-	}
-	template<typename L, typename R>
-	bool operator()(const std::unique_ptr<L>& l, const std::unique_ptr<R>& r) const noexcept(noexcept(*l == *r)) {
-		return *l == *r;
-	}
-	template<typename T>
-	std::size_t operator()(const std::unique_ptr<const T>& p) const noexcept(noexcept(std::hash<T>()(*p))) {
-		return std::hash<T>()(*p);
-	}
+	constexpr decltype(auto) operator()(L&& l, R&& r) const
+	noexcept(noexcept(*std::forward<L>(l) == *std::forward<R>(r)))
+	{return *std::forward<L>(l) == *std::forward<R>(r);}
 };
 struct indirect_hash {
+	using is_transparent = std::true_type;
 	template<typename T>
-	std::size_t operator()(const T* p) const noexcept(noexcept(std::hash<T>()(*p))) {
-		return std::hash<T>()(*p);
-	}
-	template<typename T>
-	std::size_t operator()(const std::unique_ptr<T>& p) const noexcept(noexcept(std::hash<T>()(*p))) {
-		return std::hash<T>()(*p);
-	}
-	template<typename T>
-	std::size_t operator()(const std::unique_ptr<const T>& p) const noexcept(noexcept(std::hash<T>()(*p))) {
-		return std::hash<T>()(*p);
-	}
+	constexpr decltype(auto) operator()(T&& p) const
+	noexcept(noexcept(std::hash<std::remove_cv_t<std::remove_reference_t<decltype(*std::forward<T>(p))>>>()(*std::forward<T>(p))))
+	{return std::hash<std::remove_cv_t<std::remove_reference_t<decltype(*std::forward<T>(p))>>>()(*std::forward<T>(p));}
 };
 
 
