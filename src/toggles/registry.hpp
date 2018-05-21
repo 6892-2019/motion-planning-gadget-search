@@ -15,11 +15,6 @@ using automaton::SymbolSet;
 using location_type = std::uint8_t;
 using automaton_type = automaton::Automaton<8>;
 
-automaton_type mirror(const automaton_type& a, unsigned int locations);
-inline automaton_type mirror(const automaton_type a) {
-	return mirror(a, a.active_alphabet_size());
-}
-
 class Registry {
 public:
 	using index_type = std::uint32_t;
