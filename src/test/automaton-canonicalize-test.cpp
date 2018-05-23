@@ -128,7 +128,8 @@ TEST_CASE("AutomatonTest_CanonicalizeRenumber5") {
 	} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
 }
 
-TEST_CASE("AutomatonTest_CanonicalizeRenumber2") {
+namespace {
+Automaton<4> make348090513652570() {
 	Automaton<4> a;
 	a.reserve(5);
 	for (AutomatonBase::state_type s = 0; s < 5; ++s)
@@ -142,7 +143,12 @@ TEST_CASE("AutomatonTest_CanonicalizeRenumber2") {
 	a.addTrans(3, 0, 4);
 	a.addTrans(4, 0, 2);
 	a.addTrans(4, 1, 3);
+	return a;
+}
+}
 
+TEST_CASE("AutomatonTest_CanonicalizeRenumber2") {
+	Automaton<4> a = make348090513652570();
 	std::initializer_list<std::initializer_list<AutomatonBase::state_type>> perms = {
 		{0, 1, 2, 3}, {1, 2, 3, 0}, {2, 3, 0, 1}, {3, 0, 1, 2},
 		{3, 2, 1, 0}, {2, 1, 0, 3}, {1, 0, 3, 2}, {0, 3, 2, 1},
@@ -162,20 +168,7 @@ TEST_CASE("AutomatonTest_CanonicalizeRenumber2") {
 }
 
 TEST_CASE("AutomatonTest_CanonicalizeRenumber3") {
-	Automaton<4> a;
-	a.reserve(5);
-	for (AutomatonBase::state_type s = 0; s < 5; ++s)
-		a.addState();
-	for (AutomatonBase::state_type s : {2, 3, 4, })
-		a.setAccept(s);
-	a.addTrans(0, 0, 1);
-	a.addTrans(0, 3, 1);
-	a.addTrans(1, 3, 4);
-	a.addTrans(2, 1, 3);
-	a.addTrans(3, 0, 4);
-	a.addTrans(4, 0, 2);
-	a.addTrans(4, 1, 3);
-
+	Automaton<4> a = make348090513652570();
 	std::initializer_list<std::initializer_list<AutomatonBase::state_type>> perms = {
 		{0, 1, 2, 3}, {1, 2, 3, 0}, {2, 3, 0, 1}, {3, 0, 1, 2},
 		{3, 2, 1, 0}, {2, 1, 0, 3}, {1, 0, 3, 2}, {0, 3, 2, 1},
@@ -192,20 +185,7 @@ TEST_CASE("AutomatonTest_CanonicalizeRenumber3") {
 }
 
 TEST_CASE("AutomatonTest_CanonicalizeRenumber4") {
-	Automaton<4> a;
-	a.reserve(5);
-	for (AutomatonBase::state_type s = 0; s < 5; ++s)
-		a.addState();
-	for (AutomatonBase::state_type s : {2, 3, 4, })
-		a.setAccept(s);
-	a.addTrans(0, 0, 1);
-	a.addTrans(0, 3, 1);
-	a.addTrans(1, 3, 4);
-	a.addTrans(2, 1, 3);
-	a.addTrans(3, 0, 4);
-	a.addTrans(4, 0, 2);
-	a.addTrans(4, 1, 3);
-
+	Automaton<4> a = make348090513652570();
 	std::initializer_list<std::initializer_list<AutomatonBase::state_type>> perms = {
 		{0, 1, 2, 3}, {1, 2, 3, 0}, {2, 3, 0, 1}, {3, 0, 1, 2},
 		{3, 2, 1, 0}, {2, 1, 0, 3}, {1, 0, 3, 2}, {0, 3, 2, 1},
