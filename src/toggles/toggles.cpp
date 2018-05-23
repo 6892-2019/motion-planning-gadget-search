@@ -104,7 +104,7 @@ public:
 			if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
 			combine(unpacked, sourceIndex_, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 			if (i.mirror.state_size())
-				combine(unpacked, sourceIndex_, true, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
+				combine(unpacked, sourceIndex_, false, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
 			if (shouldmirror) {
 				combine(mirrored, sourceIndex_, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 				if (i.mirror.state_size()) //TODO: the both-mirrored combine may be redundant
