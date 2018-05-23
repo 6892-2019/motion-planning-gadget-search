@@ -51,7 +51,7 @@ public:
 		vector<PackProv> nextgen;
 		auto finishAction = [&](automaton_type&& a, Provenance p) {
 			a.minimize();
-			a.canonicalize();
+			canonicalize(a, a.active_alphabet_size());
 			auto packed = pack(a);
 			auto hash = packed->packed_hash();
 			//Check the closed set to deduplicate early.

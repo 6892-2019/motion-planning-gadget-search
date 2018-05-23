@@ -71,7 +71,7 @@ void finish(automaton_type thing, Provenance provenance, Result& finishArg) {
 	if (registry.registered_size() >= prepare_size && thing.state_size() > max_state_cutoff)
 		return;
 
-	thing.canonicalize();
+	canonicalize(thing, thing.active_alphabet_size());
 	std::unique_ptr<const PackedAutomaton> packed = pack(thing);
 	std::size_t hash = packed->packed_hash();
 
