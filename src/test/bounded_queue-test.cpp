@@ -112,3 +112,13 @@ TEST_CASE("BoundedQueueTest_UsThemUnsequencedLargeManyThreads") {
 		CHECK_EQ(results[i], i);
 	CHECK_EQ(queue.size(), 0);
 }
+
+TEST_CASE("BoundedQueueTest_MoveOnly") {
+	bounded_queue<std::unique_ptr<int>> queue(5);
+	queue.put(std::make_unique<int>(0));
+	queue.offer(std::make_unique<int>(1));
+	auto p = queue.take();
+	auto q = queue.poll().value();
+	CHECK_EQ(*p, 0);
+	CHECK_EQ(*q, 1);
+}
