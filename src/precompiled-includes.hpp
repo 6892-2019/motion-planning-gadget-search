@@ -35,6 +35,7 @@
 
 #include <atomic>
 #include <thread>
+#include <future>
 #include <mutex>
 #include <condition_variable>
 
