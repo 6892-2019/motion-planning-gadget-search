@@ -5,7 +5,7 @@ import os
 
 # the vendor/ subdirectories we want
 # TODO: currently we make all headers available; this only controls objects
-import_vendored = ['vta', 'farmhash']
+import_vendored = ['vta', 'farmhash', 'fmt']
 
 # flags that don't depend on the configuration
 global_flags = OrderedDict()
@@ -76,7 +76,7 @@ for dependency in import_vendored:
   for subdir, dirs, files in os.walk('vendor/'+dependency+'/'):
     group_name = os.path.relpath('src/', 'src/')
     for f in files:
-      if f.endswith('.cpp'):
+      if f.endswith(('.cpp', '.cc')):
         source_path = os.path.join(subdir, f)
         object_path = "${config}_builddir/" + source_path[:-4] + ".o"
         #is_entrypoint = 'genbuild entrypoint' in open(source_path).read()
