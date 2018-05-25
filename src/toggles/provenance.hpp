@@ -33,6 +33,14 @@ struct Provenance {
 			p.push_back(second);
 		return p;
 	};
+	bool firstMirrored() const {
+		assert(isConnect() || isCombine());
+		return i & TOPBIT;
+	}
+	bool secondMirrored() const {
+		assert(isCombine());
+		return j & TOPBIT;
+	}
 	friend std::ostream& operator<<(std::ostream&, Provenance&);
 private:
 	static constexpr std::uint32_t ALLONES = std::numeric_limits<std::uint32_t>::max();
