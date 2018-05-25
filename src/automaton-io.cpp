@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "automatonbase.hpp"
 #include "ioutils.hpp"
+#include "fmt/format.h"
 
 using std::to_string;
 using boost::lexical_cast;
@@ -8,6 +9,20 @@ using state_type = automaton::AutomatonBase::state_type;
 using symbol_type = automaton::AutomatonBase::symbol_type;
 
 namespace automaton {
+
+std::string defaultFilename(const AutomatonBase& a) {
+	const char* category = a.canonical() ? "can" :
+			a.minimal() ? "min" :
+			a.deterministic() ? "det" :
+			"non";
+	return fmt::format("{}-{}-{}-{}-{}-{}.auto",
+			a.alphabet_size(),
+			a.state_size(),
+			a.edge_size(),
+			a.transition_size(),
+			category,
+			a.hash());
+}
 
 void serialize(const AutomatonBase& a, std::string filename) {
 	std::vector<std::string> lines;

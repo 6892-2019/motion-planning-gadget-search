@@ -7,6 +7,8 @@
 
 namespace automaton {
 
+std::string defaultFilename(const AutomatonBase& a);
+
 void serialize(const AutomatonBase& a, std::string filename);
 
 std::unique_ptr<WorkingAutomaton> deserialize(std::string filename);
