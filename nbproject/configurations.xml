@@ -88,8 +88,8 @@
         <rebuildPropChanged>false</rebuildPropChanged>
       </toolsSet>
       <flagsDictionary>
-        <element flagsID="0" commonFlags="-std=c++14 -Og -march=native -pedantic"/>
-        <element flagsID="1" commonFlags="-std=c++14 -march=native -pedantic"/>
+        <element flagsID="0" commonFlags="-std=c++1z -Og -march=native -pedantic"/>
+        <element flagsID="1" commonFlags="-std=c++1z -march=native -pedantic"/>
       </flagsDictionary>
       <codeAssistance>
       </codeAssistance>
