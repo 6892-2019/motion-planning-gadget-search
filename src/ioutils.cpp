@@ -15,7 +15,7 @@ void writeAllLines(std::string filename, const std::vector<std::string>& lines) 
 		file << l << "\n";
 }
 
-bool removePrefix(std::string& str, std::experimental::string_view prefix) {
+bool removePrefix(std::string& str, std::string_view prefix) {
 	if (str.size() < prefix.size() ||
 			!std::equal(str.begin(), str.begin()+prefix.size(), prefix.begin(), prefix.end()))
 		return false;

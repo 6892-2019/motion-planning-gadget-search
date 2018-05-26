@@ -10,7 +10,7 @@
 
 #include <vector>
 #include <string>
-#include <experimental/string_view>
+#include <string_view>
 
 /**
  * Reads all lines from the file named by the given filename.
@@ -27,7 +27,7 @@ void writeAllLines(std::string filename, const std::vector<std::string>& lines);
  * If the given string starts with the given prefix, erases that prefix.
  * @return true iff the prefix was present (and erased)
  */
-bool removePrefix(std::string& str, std::experimental::string_view prefix);
+bool removePrefix(std::string& str, std::string_view prefix);
 
 #endif /* IOUTILS_HPP */
 
