@@ -91,3 +91,17 @@ T from_string(std::string_view view) {
 		FROM_STRING_CASE(int,to_int)
 		FROM_STRING_CASE(unsigned int,to_uint)
 #undef FROM_STRING_CASE
+
+StringBuilder& operator<<(StringBuilder& out, std::string_view view) {
+	out.data_.append(view.begin(), view.size());
+	return out;
+}
+StringBuilder& operator<<(StringBuilder& out, const char* string) {
+	return out << std::string_view(string);
+}
+StringBuilder& operator<<(StringBuilder& out, unsigned int string) {
+	return out << std::to_string(string);
+}
+StringBuilder& operator<<(StringBuilder& out, unsigned long string) {
+	return out << std::to_string(string);
+}

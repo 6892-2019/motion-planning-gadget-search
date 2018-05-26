@@ -173,9 +173,9 @@ std::string stringize(SymbolSet set) {
 		strings.push_back(std::to_string(s));
 	return join(strings, ", ");
 }
-}
 
-std::ostream& automaton::operator<<(std::ostream& o, const AutomatonBase& a) {
+template<class Streamish>
+Streamish& into_stream(Streamish& o, const AutomatonBase& a) {
 	o << a.state_size() << " states (" << a.accept_size() << " accepting), "
 			<< a.edge_size() << " edges, " << a.transition_size() << " transitions";
 	if (a.deterministic())
@@ -205,6 +205,11 @@ std::ostream& automaton::operator<<(std::ostream& o, const AutomatonBase& a) {
 		}
 	}
 	return o;
+}
+}
+
+std::ostream& automaton::operator<<(std::ostream& o, const AutomatonBase& a) {
+	return into_stream(o, a);
 }
 
 std::ostream& automaton::detail::operator<<(std::ostream& os, const AutomatonReprStreamer& rs) {
@@ -323,6 +328,12 @@ std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
 } //end anonymous namespace
 
 namespace automaton {
+
+std::string to_string(const AutomatonBase& a) {
+	StringBuilder sb;
+	into_stream(sb, a);
+	return std::move(sb).data();
+}
 
 std::unique_ptr<WorkingAutomaton> shuffleAccept(const WorkingAutomaton& left,
 		const WorkingAutomaton& right,

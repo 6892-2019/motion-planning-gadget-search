@@ -39,5 +39,17 @@ T from_string(std::string_view view);
 #undef FROM_STRING_CASE
 
 
+class StringBuilder {
+public:
+	std::string data() const & {return data_;}
+	std::string data() && {return std::move(data_);}
+private:
+	std::string data_;
+	friend StringBuilder& operator<<(StringBuilder& out, std::string_view view);
+};
+StringBuilder& operator<<(StringBuilder& out, const char* string);
+StringBuilder& operator<<(StringBuilder& out, unsigned int string);
+StringBuilder& operator<<(StringBuilder& out, unsigned long string);
+
 #endif /* STRINGUTILS_HPP */
 

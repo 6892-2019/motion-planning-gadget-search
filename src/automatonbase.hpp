@@ -271,6 +271,7 @@ inline bool operator!=(const AutomatonBase& left, const AutomatonBase& right) {
 }
 
 std::ostream& operator<<(std::ostream& o, const AutomatonBase& a);
+std::string to_string(const AutomatonBase& a);
 
 using SymbolSet = AutomatonBase::SymbolSet;
 using StateSet = AutomatonBase::StateSet;

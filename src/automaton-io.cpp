@@ -3,11 +3,12 @@
 #include "ioutils.hpp"
 #include "stringutils.hpp"
 
-using std::to_string;
 using state_type = automaton::AutomatonBase::state_type;
 using symbol_type = automaton::AutomatonBase::symbol_type;
 
 namespace automaton {
+//This needs to be in the namespace so it can compete with automaton::to_string.
+using std::to_string;
 
 std::string defaultFilename(const AutomatonBase& a) {
 	const char* category = a.canonical() ? "can" :
@@ -31,7 +32,7 @@ std::string defaultFilename(const AutomatonBase& a) {
 
 void serialize(const AutomatonBase& a, std::string filename) {
 	//start with a human-readable description
-	std::string humanable = boost::lexical_cast<std::string>(a);
+	std::string humanable = automaton::to_string(a);
 	std::vector<std::string> lines = split(humanable, '\n');
 	//make them comments
 	for (std::string& l : lines)
