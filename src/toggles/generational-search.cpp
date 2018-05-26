@@ -5,6 +5,7 @@
 #include "gadgetdefs.hpp"
 #include "packedautomaton.hpp"
 #include "hopscotch/hopscotch_set.h"
+#include "stringutils.hpp"
 
 using namespace automaton;
 using std::vector;
@@ -361,15 +362,13 @@ private:
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	vector<automaton_type> inputs, outputs;
 
-	std::vector<std::string> tokens;
-	boost::algorithm::split(tokens, argv[1], boost::algorithm::is_any_of(","));
+	std::vector<std::string_view> tokens = split_view(argv[1], ',');
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "input " << i << ": " << tokens[i] << "\n";
 		inputs.push_back(*known_gadget(tokens[i], automaton_type::alphabet_size_v));
 	}
 
-	tokens.clear();
-	boost::algorithm::split(tokens, argv[2], boost::algorithm::is_any_of(","));
+	tokens = split_view(argv[2], ',');
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "output " << i << ": " << tokens[i] << "\n";
 		outputs.push_back(*known_gadget(tokens[i], automaton_type::alphabet_size_v));

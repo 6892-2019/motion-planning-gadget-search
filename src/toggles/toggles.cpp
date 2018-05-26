@@ -6,6 +6,7 @@
 #include "registry.hpp"
 #include "ops.hpp"
 #include "gadgetdefs.hpp"
+#include "stringutils.hpp"
 
 using namespace automaton;
 using std::get;
@@ -268,8 +269,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	gethostname(hostname, sizeof(hostname));
 	std::cout << "running on " << hostname << "\n";
 
-	std::vector<std::string> tokens;
-	boost::algorithm::split(tokens, argv[1], boost::algorithm::is_any_of(","));
+	std::vector<std::string_view> tokens = split_view(argv[1], ',');
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "input " << i << ": " << tokens[i] << "\n";
 		automaton_type a = *known_gadget(tokens[i], automaton_type::alphabet_size_v);
@@ -280,8 +280,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 		registry.offer(pack(a), Provenance(i));
 	}
 
-	tokens.clear();
-	boost::algorithm::split(tokens, argv[2], boost::algorithm::is_any_of(","));
+	tokens = split_view(argv[2], ',');
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "target " << i << ": " << tokens[i] << "\n";
 		automaton_type a = *known_gadget(tokens[i], automaton_type::alphabet_size_v);

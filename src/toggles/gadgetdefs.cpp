@@ -3,6 +3,7 @@
 #include "../automaton.hpp"
 #include "canonicalize.hpp"
 #include "ops.hpp"
+#include "stringutils.hpp"
 
 using namespace automaton;
 
@@ -233,22 +234,8 @@ const tuple<string_view, const GadgetLine*, const GadgetLine*> simple_gadgets[] 
 	{"seven-tripwire"sv, std::begin(seven_tripwire), std::end(seven_tripwire)},
 };
 
-//TODO: move this somewhere else
-template<typename Integer, class Iter>
-Integer from_chars(Iter first, Iter last, int base = 10) {
-	Integer i;
-	if (auto [ptr, ec] = std::from_chars(first, last, i, base); ec != std::errc() || ptr != last) {
-		throw std::logic_error("from_chars problem"); //TODO: appropriate exception and messages
-	}
-	return i;
-}
-template<typename Integer>
-Integer from_chars(string_view s, int base = 10) {
-	return from_chars<Integer>(s.begin(), s.end(), base);
-}
-
 unsigned int parse_locations(unsigned int alphabet_size, const std::cmatch& match) {
-	unsigned int locations = from_chars<unsigned int>(match[1].first, match[1].second);
+	unsigned int locations = to_uint(std::string_view(match[1].first, match[1].length()));
 	if (locations > alphabet_size)
 		throw bad_alphabet_size(match.str(), alphabet_size, locations);
 	return locations;
@@ -269,7 +256,7 @@ std::unique_ptr<WorkingAutomaton> make_split(unsigned int alphabet_size, const s
 }
 
 std::unique_ptr<WorkingAutomaton> make_parallel_toggle(unsigned int alphabet_size, const std::cmatch& match) {
-	unsigned int lines = from_chars<unsigned int>(match[1].first, match[1].second);
+	unsigned int lines = to_uint(std::string_view(match[1].first, match[1].length()));
 	unsigned int locations = 2*lines;
 	if (locations > alphabet_size)
 		throw bad_alphabet_size(match.str(), alphabet_size, locations);
@@ -328,6 +315,7 @@ std::vector<std::string_view> known_gadget_keys() {
 }
 
 std::string unknown_gadget::format(const std::string& thing, unsigned int requested) {
+	//TODO: maybe replace with fmt formatting
 	return "unknown gadget "+thing+" (with requested size "+std::to_string(requested)+")";
 }
 

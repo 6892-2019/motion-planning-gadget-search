@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "automatonbase.hpp"
+#include "stringutils.hpp"
 
 using namespace automaton;
 
@@ -169,8 +170,8 @@ std::string stringize(SymbolSet set) {
 	std::vector<std::string> strings;
 	set.sort();
 	for (auto s : set)
-		strings.push_back(boost::lexical_cast<std::string>(s));
-	return boost::algorithm::join(strings, ", ");
+		strings.push_back(std::to_string(s));
+	return join(strings, ", ");
 }
 }
 
@@ -188,9 +189,9 @@ std::ostream& automaton::operator<<(std::ostream& o, const AutomatonBase& a) {
 			//this is a bit wasteful: join a string only to print it
 			<< stringize(a.activeAlphabet()) << "\n";
 
-	auto length = boost::lexical_cast<std::string>(a.state_size() - 1).size();
+	auto length = std::to_string(a.state_size() - 1).size();
 	auto leftpad = [length](auto thing) {
-		auto s = boost::lexical_cast<std::string>(thing);
+		auto s = std::to_string(thing);
 		while (s.size() < length)
 			s = " " + s; //waste
 		return s;

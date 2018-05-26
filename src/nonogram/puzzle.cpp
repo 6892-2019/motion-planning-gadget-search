@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "puzzle.hpp"
 #include "ioutils.hpp"
+#include "stringutils.hpp"
 
 /**
  * If the given string starts with the given prefix, erases that prefix.
@@ -41,16 +42,16 @@ std::unique_ptr<Puzzle> Puzzle::fromNONFile(std::string filename) {
 		} else if (line == "rows" || line == "columns") {
 			std::vector<std::vector<Clue>>& target = line == "rows" ? rows : cols;
 			++i;
-			std::vector<std::string> tokens;
+			std::vector<std::string_view> tokens;
 			for (; !lines[i].empty(); ++i)
 				if (lines[i] == "0")
 					target.push_back({});
 				else {
 					tokens.clear();
-					boost::algorithm::split(tokens, lines[i], boost::algorithm::is_any_of(","));
+					split_view(tokens, lines[i], ',');
 					std::vector<Clue> clues;
-					for (const std::string& t : tokens)
-						clues.push_back(Clue(std::stoi(t)));
+					for (const std::string_view t : tokens)
+						clues.push_back(Clue(to_int(t)));
 					target.push_back(std::move(clues));
 				}
 		}
