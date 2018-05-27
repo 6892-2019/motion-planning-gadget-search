@@ -7,25 +7,6 @@
 
 bool acceptingClosure(automaton::WorkingAutomaton& connected, unsigned int locations);
 
-template<class AutomatonType>
-AutomatonType mirror(const AutomatonType& a, unsigned int locations) {
-	using symbol_type = typename automaton::AutomatonBase::symbol_type;
-	//TODO: precompute and reuse for 2..automaton_type::alphabet_size_v
-	//TODO: can we replace this with canonicalize-renumber using mirrored perms only?
-	std::vector<symbol_type> symbols(
-			boost::make_counting_iterator<symbol_type>(0),
-			boost::make_counting_iterator<symbol_type>(AutomatonType::alphabet_size_v));
-	std::reverse(symbols.begin(), symbols.begin()+locations);
-	AutomatonType b = a;
-	b.renumberAlphabet(symbols);
-	canonicalize(b, locations, false);
-	return b;
-}
-template<class AutomatonType>
-AutomatonType mirror(const AutomatonType& a) {
-	return mirror(a, a.active_alphabet_size());
-}
-
 template<class AutomatonType, class FinishAction>
 void combine(const AutomatonType& la, uint32_t l, bool leftMirror, typename AutomatonType::state_type leftLocations,
 		const AutomatonType& ra, uint32_t r, bool rightMirror, typename AutomatonType::state_type rightLocations,

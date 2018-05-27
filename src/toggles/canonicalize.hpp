@@ -26,5 +26,23 @@ void canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool
 	a.canonicalizeRenumber(perms.first, perms.second);
 }
 
+template<class AutomatonType>
+AutomatonType mirror(const AutomatonType& a, unsigned int locations) {
+	AutomatonType b = a;
+	if (locations == 1) {
+		//We can't renumber the symbols/locations because there's only one, but
+		//we still have to renumber the states.
+		b.canonicalize();
+		return b;
+	}
+	auto perms = getPerms(b.alphabet_size(), locations, false, true); //mirrored perms only
+	b.canonicalizeRenumber(perms.first, perms.second);
+	return b;
+}
+template<class AutomatonType>
+AutomatonType mirror(const AutomatonType& a) {
+	return mirror(a, a.active_alphabet_size());
+}
+
 #endif /* CANONICALIZE_HPP */
 
