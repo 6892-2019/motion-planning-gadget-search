@@ -72,6 +72,43 @@ vector<unique_ptr<WorkingAutomaton>> load_automata(char** first, char** last) {
 	}
 	return result;
 }
+
+vector<unique_ptr<const PackedAutomaton>> pack_all(const std::vector<unique_ptr<WorkingAutomaton>>& working) {
+	vector<unique_ptr<const PackedAutomaton>> p;
+	for (const auto& w : working) {
+		automaton_type trash(*w);
+		canonicalize(trash, trash.active_alphabet_size());
+		p.push_back(pack(trash));
+	}
+	return p;
+}
+
+int benchmark_connect(int argc, char* argv[]) {
+	if (argc < 3) {
+		std::cout << "specify at least one automaton file or response file\n";
+		return 1;
+	}
+	auto packed = pack_all(load_automata(&argv[2], &argv[argc]));
+	std::cout << "loaded " << packed.size() << " automata\n";
+	Finisher finisher;
+
+	auto start = myclock::now();
+	for (const auto& p : packed)
+		connect_once(p.get(), 0, finisher);
+	auto end = myclock::now();
+
+	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();;
+	std::size_t hash = 0;
+	//Print the hash a) to prevent the benchmark from being optimized out and
+	//b) so we can tell if our optimizations changed the result or not.
+	for (auto& pa : finisher.nextgen)
+		hash += pa->packed_hash();
+	std::cout << elapsed << " microseconds, " << chiral << " chiral "
+			<< finisher.nextgen.size() << " results, "
+			<< finisher.pruned << " pruned, "
+			<< hash << std::endl;
+	return 0;
+}
 }
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
@@ -80,41 +117,9 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 		return 1;
 	}
 
-	if (argv[1] == "connect"sv) {
-		if (argc < 3) {
-			std::cout << "specify at least one automaton file or response file\n";
-			return 1;
-		}
-		auto working = load_automata(&argv[2], &argv[argc]);
-		auto packed = [&working]{ //https://stackoverflow.com/a/26089938/3614835
-			vector<unique_ptr<const PackedAutomaton>> p;
-			for (const auto& w : working) {
-				automaton_type trash(*w);
-				canonicalize(trash, trash.active_alphabet_size());
-				p.push_back(pack(trash));
-			}
-			return p;
-		}();
-		std::cout << "loaded " << packed.size() << " automata\n";
-		Finisher finisher;
-
-		auto start = myclock::now();
-		for (const auto& p : packed)
-			connect_once(p.get(), 0, finisher);
-		auto end = myclock::now();
-
-		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();;
-		std::size_t hash = 0;
-		//Print the hash a) to prevent the benchmark from being optimized out and
-		//b) so we can tell if our optimizations changed the result or not.
-		for (auto& pa : finisher.nextgen)
-			hash += pa->packed_hash();
-		std::cout << elapsed << " microseconds, " << chiral << " chiral "
-				<< finisher.nextgen.size() << " results, "
-				<< finisher.pruned << " pruned, "
-				<< hash << std::endl;
-		return 0;
-	} else {
+	if (argv[1] == "connect"sv)
+		return benchmark_connect(argc, argv);
+	else {
 		std::cout << "bad mode " << argv[1] << std::endl;
 		return 1;
 	}
