@@ -41,14 +41,14 @@ struct Finisher {
 	}
 };
 
-static unsigned int chiral = 0;
+static unsigned int connect_chiral = 0;
 void connect_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
 	automaton_type inflated(*source);
 	automaton_type mirrored = mirror(inflated);
 	automaton_type::symbol_type locations = inflated.active_alphabet_size();
 	connect(inflated, sourceIndex, false, locations, finishAction);
 	if (inflated != mirrored) {
-		++chiral;
+		++connect_chiral;
 		connect(mirrored, sourceIndex, true, locations, finishAction);
 	}
 }
@@ -103,6 +103,48 @@ int benchmark_connect(int argc, char* argv[]) {
 	//b) so we can tell if our optimizations changed the result or not.
 	for (auto& pa : finisher.nextgen)
 		hash += pa->packed_hash();
+	std::cout << elapsed << " microseconds, " << connect_chiral << " chiral "
+			<< finisher.nextgen.size() << " results, "
+			<< finisher.pruned << " pruned, "
+			<< hash << std::endl;
+	return 0;
+}
+
+int benchmark_mirror(int argc, char* argv[]) {
+	if (argc < 3) {
+		std::cout << "specify at least one automaton file or response file\n";
+		return 1;
+	}
+	auto working_ptrs = load_automata(&argv[2], &argv[argc]);
+	vector<automaton_type> working;
+	for (auto& p : working_ptrs) {
+		working.emplace_back(*p);
+		canonicalize(working.back(), working.back().active_alphabet_size());
+	}
+	std::cout << "loaded " << working.size() << " automata\n";
+	Finisher finisher;
+
+	vector<automaton_type> result;
+	result.reserve(working.size());
+	auto start = myclock::now();
+	for (const auto& a : working) {
+		result.push_back(mirror(a));
+	}
+	auto end = myclock::now();
+
+	unsigned int chiral = 0;
+	for (unsigned int i = 0; i < working.size(); ++i) {
+		if (result[i] != working[i])
+			++chiral;
+		finisher(std::move(result[i]), Provenance(0)); //just for hashing/stats
+	}
+
+	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();;
+	std::size_t hash = 0;
+	//Print the hash a) to prevent the benchmark from being optimized out and
+	//b) so we can tell if our optimizations changed the result or not.
+	for (auto& pa : finisher.nextgen)
+		hash += pa->packed_hash();
 	std::cout << elapsed << " microseconds, " << chiral << " chiral "
 			<< finisher.nextgen.size() << " results, "
 			<< finisher.pruned << " pruned, "
@@ -119,6 +161,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 
 	if (argv[1] == "connect"sv)
 		return benchmark_connect(argc, argv);
+	else if (argv[1] == "mirror"sv)
+		return benchmark_mirror(argc, argv);
 	else {
 		std::cout << "bad mode " << argv[1] << std::endl;
 		return 1;
