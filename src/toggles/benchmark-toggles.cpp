@@ -41,16 +41,10 @@ struct Finisher {
 	}
 };
 
-static unsigned int connect_chiral = 0;
 void connect_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
 	automaton_type inflated(*source);
-	automaton_type mirrored = mirror(inflated);
 	automaton_type::symbol_type locations = inflated.active_alphabet_size();
 	connect(inflated, sourceIndex, false, locations, finishAction);
-	if (inflated != mirrored) {
-		++connect_chiral;
-		connect(mirrored, sourceIndex, true, locations, finishAction);
-	}
 }
 
 vector<unique_ptr<WorkingAutomaton>> load_automata(char** first, char** last) {
@@ -103,7 +97,7 @@ int benchmark_connect(int argc, char* argv[]) {
 	//b) so we can tell if our optimizations changed the result or not.
 	for (auto& pa : finisher.nextgen)
 		hash += pa->packed_hash();
-	std::cout << elapsed << " microseconds, " << connect_chiral << " chiral "
+	std::cout << elapsed << " microseconds, "
 			<< finisher.nextgen.size() << " results, "
 			<< finisher.pruned << " pruned, "
 			<< hash << std::endl;

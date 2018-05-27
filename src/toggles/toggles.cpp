@@ -129,11 +129,8 @@ public:
 		};
 		for (auto& [pack, index] : connectibles_) {
 			automaton_type inflated(*pack);
-			automaton_type mirrored = mirror(inflated);
 			automaton_type::symbol_type locations = inflated.active_alphabet_size();
 			connect(inflated, index, false, locations, finishAction);
-			if (inflated != mirrored)
-				connect(mirrored, index, true, locations, finishAction);
 		}
 		retire.put(std::move(result));
 	}

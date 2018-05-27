@@ -302,11 +302,8 @@ private:
 
 	void connect_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
 		automaton_type inflated(*source);
-		automaton_type mirrored = mirror(inflated);
 		automaton_type::symbol_type locations = inflated.active_alphabet_size();
 		connect(inflated, sourceIndex, false, locations, finishAction);
-		if (inflated != mirrored)
-			connect(mirrored, sourceIndex, true, locations, finishAction);
 	}
 
 	Finisher connect_range(const PackedAutomaton** first, const PackedAutomaton** last, index_type firstSourceIndex) {
