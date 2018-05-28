@@ -4,6 +4,7 @@
     <df root="src" name="0">
       <df name="benchmark">
         <in>benchmark-minimize.cpp</in>
+        <in>benchmark-pack.cpp</in>
       </df>
       <df name="fuzz">
         <in>fuzz-state-renumbering.cpp</in>
@@ -15,11 +16,32 @@
       <df name="pathpuzzles">
         <in>pathpuzzles.cpp</in>
       </df>
+      <df name="test">
+        <in>algoutils-test.cpp</in>
+        <in>automaton-canonicalize-test.cpp</in>
+        <in>automaton-pack-test.cpp</in>
+        <in>automaton-regexesque-test.cpp</in>
+        <in>automaton-test.cpp</in>
+        <in>bitset-test.cpp</in>
+        <in>bounded_queue-test.cpp</in>
+        <in>circular_deque-test.cpp</in>
+        <in>expr-test.cpp</in>
+        <in>polyvariant-automaton-test.cpp</in>
+        <in>polyvariant-test.cpp</in>
+        <in>regex-test.cpp</in>
+        <in>util-test.cpp</in>
+        <in>util.cpp</in>
+      </df>
       <df name="toggles">
+        <in>benchmark-toggles.cpp</in>
         <in>canonicalize.cpp</in>
-        <in>connect.cpp</in>
         <in>gadgetdefs.cpp</in>
+        <in>gadgetdefs.hpp</in>
+        <in>generational-search.cpp</in>
+        <in>ops.cpp</in>
+        <in>provenance.hpp</in>
         <in>registry.cpp</in>
+        <in>test-gadgetdefs.cpp</in>
         <in>toggles.cpp</in>
       </df>
       <in>alphabet.cpp</in>
@@ -39,38 +61,15 @@
       <in>natural_set.cpp</in>
       <in>packedautomaton.cpp</in>
       <in>pinning.cpp</in>
+      <in>polyvariant.hpp</in>
       <in>precompiled-instantiations.cpp</in>
+      <in>stringutils.cpp</in>
       <in>worker.cpp</in>
     </df>
-    <df root="src" name="1">
-    </df>
-    <df root="test" name="2">
-      <in>algoutils-test.cpp</in>
-      <in>automaton-canonicalize-test.cpp</in>
-      <in>automaton-pack-test.cpp</in>
-      <in>automaton-regexesque-test.cpp</in>
-      <in>automaton-test.cpp</in>
-      <in>bitset-test.cpp</in>
-      <in>bounded_queue-test.cpp</in>
-      <in>circular_deque-test.cpp</in>
-      <in>expr-test.cpp</in>
-      <in>util-test.cpp</in>
-      <in>util.cpp</in>
-    </df>
-    <df root="test" name="3">
-    </df>
     <logicalFolder name="ExternalFiles"
                    displayName="Important Files"
                    projectFiles="false"
                    kind="IMPORTANT_FILES_FOLDER">
-      <itemPath>Makefile</itemPath>
-      <itemPath>nbproject/private/launcher.properties</itemPath>
-    </logicalFolder>
-    <logicalFolder name="ExternalFiles"
-                   displayName="Important Files"
-                   projectFiles="false"
-                   kind="IMPORTANT_FILES_FOLDER">
-      <itemPath>Makefile</itemPath>
       <itemPath>nbproject/private/launcher.properties</itemPath>
     </logicalFolder>
   </logicalFolder>
@@ -99,12 +98,14 @@
           <buildCommand>ninja -f debug.ninja</buildCommand>
           <cleanCommand>ninja -f debug.ninja -t clean</cleanCommand>
           <executablePath></executablePath>
-          <ccTool>
+          <ccTool flags="1">
             <standard>11</standard>
             <incDir>
               <pElem>build/debug/include</pElem>
               <pElem>vendor</pElem>
               <pElem>src</pElem>
+              <pElem>../nauty</pElem>
+              <pElem>.</pElem>
             </incDir>
           </ccTool>
         </makeTool>
@@ -138,14 +139,6 @@
           </incDir>
         </ccTool>
       </folder>
-      <folder path="2">
-        <ccTool>
-          <incDir>
-            <pElem>../nauty</pElem>
-            <pElem>.</pElem>
-          </incDir>
-        </ccTool>
-      </folder>
       <item path="src/alphabet.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
           <incDir>
@@ -168,6 +161,8 @@
             ex="false"
             tool="1"
             flavor2="0">
+      </item>
+      <item path="src/benchmark/benchmark-pack.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/bitset.hpp" ex="false" tool="3" flavor2="0">
       </item>
@@ -237,50 +232,75 @@
       </item>
       <item path="src/pinning.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/polyvariant.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/precompiled-instantiations.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/stringutils.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/algoutils-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/automaton-canonicalize-test.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/test/automaton-pack-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/automaton-regexesque-test.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/test/automaton-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/bitset-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/bounded_queue-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/circular_deque-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/expr-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/polyvariant-automaton-test.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/test/polyvariant-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/regex-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/util-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/util.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/benchmark-toggles.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/canonicalize.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/connect.cpp" ex="false" tool="1" flavor2="0">
-      </item>
       <item path="src/toggles/gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/toggles/gadgetdefs.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/toggles/generational-search.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/ops.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/provenance.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/toggles/registry.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/test-gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/toggles.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
         </ccTool>
       </item>
       <item path="src/worker.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/algoutils-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/automaton-canonicalize-test.cpp"
-            ex="false"
-            tool="1"
-            flavor2="0">
-      </item>
-      <item path="test/automaton-pack-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/automaton-regexesque-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/automaton-test.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
-        </ccTool>
-      </item>
-      <item path="test/bitset-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/bounded_queue-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/circular_deque-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/expr-test.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
-        </ccTool>
-      </item>
-      <item path="test/util-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="test/util.cpp" ex="false" tool="1" flavor2="0">
       </item>
     </conf>
   </confs>
