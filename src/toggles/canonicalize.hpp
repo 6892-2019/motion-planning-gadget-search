@@ -34,6 +34,11 @@ AutomatonType mirror(const AutomatonType& a, unsigned int locations) {
 		//we still have to renumber the states.
 		b.canonicalize();
 		return b;
+	} else if (locations == 2) {
+		//In this special case, the mirrored and mirrored perms are the same.
+		//It's just a regular canonicalize.
+		canonicalize(b, locations);
+		return b;
 	}
 	auto perms = getPerms(b.alphabet_size(), locations, false, true); //mirrored perms only
 	b.canonicalizeRenumber(perms.first, perms.second);
