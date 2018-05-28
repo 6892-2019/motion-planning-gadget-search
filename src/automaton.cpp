@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
 #include "packedautomaton.hpp"
+#include "automaton-io.hpp"
 
 using namespace automaton;
 
@@ -237,6 +238,14 @@ std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumberin
 	return {std::move(survivorFrom), std::move(remap)};
 }
 
+[[gnu::cold, noreturn]]
+void determinize_bailout(const AutomatonBase& source) {
+	auto filename = defaultFilename(source);
+	serialize(source, filename);
+	std::cout << "bailing out of determinize; automaton written to " << filename << std::endl;
+	std::terminate();
+}
+
 void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 	assert(source.alphabet_size() == target.alphabet_size());
 	assert(target.state_size() == 0);
@@ -257,8 +266,7 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 		if (alloc_cur == alloc_page_end) {
 			if (alloc_next == page_handles.back().get()) {
 				//TODO: realloc this set into a double-sized page (then skip the below new-page alloc)
-				std::cout << "set size of full page\n";
-				std::terminate();
+				determinize_bailout(source);
 			}
 			//TODO: if we're allocating lots of pages, may want to start doubling size
 			page_handles.emplace_back(static_cast<state_type*>(std::malloc(DETERMINIZE_PAGE_SIZE)));
