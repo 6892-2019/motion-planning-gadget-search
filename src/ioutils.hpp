@@ -29,5 +29,13 @@ void writeAllLines(std::string filename, const std::vector<std::string>& lines);
  */
 bool removePrefix(std::string& str, std::string_view prefix);
 
+/**
+ * Process response files among the given range of arguments.  Strings beginning
+ * with '@' are interpreted as paths to files containing further arguments, one
+ * per line, which are resolved relative to the response file.  No validation is
+ * done to check if the rest of the arguments actually denote files.
+ */
+std::vector<std::string> processFilenameArgs(const char** first, const char** last);
+
 #endif /* IOUTILS_HPP */
 

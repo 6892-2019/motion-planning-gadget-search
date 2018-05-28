@@ -47,23 +47,11 @@ void connect_once(const PackedAutomaton* source, index_type sourceIndex, Finishe
 	connect(inflated, sourceIndex, false, locations, finishAction);
 }
 
-vector<unique_ptr<WorkingAutomaton>> load_automata(char** first, char** last) {
-	vector<string> queue(first, last);
-	std::reverse(queue.begin(), queue.end());
+vector<unique_ptr<WorkingAutomaton>> load_automata(const char** first, const char** last) {
+	vector<string> filenames = processFilenameArgs(first, last);
 	vector<unique_ptr<WorkingAutomaton>> result;
-	while (!queue.empty()) {
-		string filename = std::move(queue.back());
-		queue.pop_back();
-		if (filename[0] == '@') { //response file
-			//TODO: enough filename smarts to resolve paths relative to the
-			//directory containing the response file
-			filename.erase(0, 1);
-			vector<string> lines = readAllLines(filename);
-			std::reverse(lines.begin(), lines.end());
-			queue.insert(queue.end(), std::move_iterator(lines.begin()), std::move_iterator(lines.end()));
-		} else
-			result.push_back(deserialize(filename));
-	}
+	for (auto& filename : filenames)
+		result.push_back(deserialize(std::move(filename)));
 	return result;
 }
 
@@ -77,7 +65,7 @@ vector<unique_ptr<const PackedAutomaton>> pack_all(const std::vector<unique_ptr<
 	return p;
 }
 
-int benchmark_connect(int argc, char* argv[]) {
+int benchmark_connect(int argc, const char* argv[]) {
 	if (argc < 3) {
 		std::cout << "specify at least one automaton file or response file\n";
 		return 1;
@@ -104,7 +92,7 @@ int benchmark_connect(int argc, char* argv[]) {
 	return 0;
 }
 
-int benchmark_mirror(int argc, char* argv[]) {
+int benchmark_mirror(int argc, const char* argv[]) {
 	if (argc < 3) {
 		std::cout << "specify at least one automaton file or response file\n";
 		return 1;
@@ -147,7 +135,7 @@ int benchmark_mirror(int argc, char* argv[]) {
 }
 }
 
-int main(int argc, char* argv[]) { //genbuild entrypoint
+int main(int argc, const char* argv[]) { //genbuild entrypoint
 	if (argc < 2) {
 		std::cout << "need more args\n";
 		return 1;
