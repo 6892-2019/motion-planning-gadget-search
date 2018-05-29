@@ -14,14 +14,14 @@ global_flags = OrderedDict()
 global_flags['builddir'] = 'build' # significant to Ninja
 global_flags['modeflags'] = '-std=c++1z'
 global_flags['warnflags'] = '-pedantic -Wall -Wextra -Wuninitialized -Winit-self -Wconversion -Wuseless-cast -Wlogical-op -Waggressive-loop-optimizations -Winvalid-pch -Wno-unused-parameter -Wduplicated-cond -Wnull-dereference -Wno-dangling-else -Wsuggest-override -fdiagnostics-color=always'
-global_flags['ldflags'] = '-u malloc -ljemalloc_pic -lc -lpthread -ldl'
+global_flags['ldflags'] = '-u malloc -ljemalloc_pic -lc -lpthread -ldl -Wl,--gc-sections'
 
 # configuration-specific flag *templates*
 config_flags = OrderedDict()
 config_flags['{config}_builddir'] = '$builddir/{config}'
 config_flags['{config}_modeflags'] = '$modeflags'
 config_flags['{config}_warnflags'] = '$warnflags'
-config_flags['{config}_optflags'] = '{optflags}'
+config_flags['{config}_optflags'] = '{optflags} -ffunction-sections -fdata-sections'
 config_flags['{config}_ldflags'] = '$ldflags' # could change in the future
 config_flags['{config}_includeflags'] = '-I${config}_builddir/include -Isrc/ -isystem vendor/'
 config_flags['{config}_pchtarget'] = '${config}_builddir/include/precompiled.hpp.gch'
