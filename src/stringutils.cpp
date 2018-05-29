@@ -9,6 +9,14 @@ bool removePrefix(std::string& str, std::string_view prefix) {
 	return true;
 }
 
+bool removeSuffix(std::string& str, std::string_view suffix) {
+	if (str.size() < suffix.size() ||
+		!std::equal(str.end() - suffix.size(), str.end(), suffix.begin(), suffix.end()))
+	return false;
+	str.erase(str.size() - suffix.size());
+	return true;
+}
+
 std::vector<std::string> split(std::string_view haystack, char delimiter) {
 	std::vector<std::string> result;
 	split(result, haystack, delimiter);

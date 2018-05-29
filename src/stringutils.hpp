@@ -18,6 +18,12 @@
  */
 bool removePrefix(std::string& str, std::string_view prefix);
 
+/**
+ * If the given string ends with the given suffix, erases that suffix.
+ * @return true iff the suffix was present (and erased)
+ */
+bool removeSuffix(std::string& str, std::string_view suffix);
+
 std::vector<std::string> split(std::string_view haystack, char delimiter);
 void split(std::vector<std::string>& out, std::string_view haystack, char delimiter);
 
