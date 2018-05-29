@@ -236,6 +236,8 @@ const tuple<string_view, const GadgetLine*, const GadgetLine*> simple_gadgets[] 
 
 unsigned int parse_locations(unsigned int alphabet_size, const std::cmatch& match) {
 	unsigned int locations = to_uint(std::string_view(match[1].first, match[1].length()));
+	if (locations == 0)
+		throw std::runtime_error("0-location gadget is invalid");
 	if (locations > alphabet_size)
 		throw bad_alphabet_size(match.str(), alphabet_size, locations);
 	return locations;
@@ -258,6 +260,8 @@ std::unique_ptr<WorkingAutomaton> make_split(unsigned int alphabet_size, const s
 std::unique_ptr<WorkingAutomaton> make_parallel_toggle(unsigned int alphabet_size, const std::cmatch& match) {
 	unsigned int lines = to_uint(std::string_view(match[1].first, match[1].length()));
 	unsigned int locations = 2*lines;
+	if (locations == 0)
+		throw std::runtime_error("0-location gadget is invalid");
 	if (locations > alphabet_size)
 		throw bad_alphabet_size(match.str(), alphabet_size, locations);
 	GadgetBuilder b(alphabet_size, 2);
