@@ -7,6 +7,8 @@ import os
 # TODO: currently we make all headers available; this only controls objects
 import_vendored = ['vta', 'farmhash', 'fmt']
 
+default_targets = ['debug', 'release']
+
 # flags that don't depend on the configuration
 global_flags = OrderedDict()
 global_flags['builddir'] = 'build' # significant to Ninja
@@ -127,4 +129,7 @@ with open('build.ninja', 'wb') as buildfile:
     #group (i.e., excluding the entrypoint object) used more than once
     for exe, objs in link_groups.iteritems():
       buildfile.write('build {}: {} {}\n'.format(exe, '{config}_ld', ' '.join(objs)).format(**config))
-
+    
+    buildfile.write('build {}: phony {}\n'.format('{config}', ' '.join(link_groups.iterkeys())).format(**config))
+  
+  buildfile.write('\ndefault {}\n'.format(' '.join(default_targets)))
