@@ -24,12 +24,6 @@ std::vector<std::string> readAllLines(std::string filename);
 void writeAllLines(std::string filename, const std::vector<std::string>& lines);
 
 /**
- * If the given string starts with the given prefix, erases that prefix.
- * @return true iff the prefix was present (and erased)
- */
-bool removePrefix(std::string& str, std::string_view prefix);
-
-/**
  * Process response files among the given range of arguments.  Strings beginning
  * with '@' are interpreted as paths to files containing further arguments, one
  * per line, which are resolved relative to the response file.  No validation is

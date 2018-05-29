@@ -1,6 +1,14 @@
 #include "precompiled.hpp"
 #include "stringutils.hpp"
 
+bool removePrefix(std::string& str, std::string_view prefix) {
+	if (str.size() < prefix.size() ||
+			!std::equal(str.begin(), str.begin()+prefix.size(), prefix.begin(), prefix.end()))
+		return false;
+	str.erase(0, prefix.size());
+	return true;
+}
+
 std::vector<std::string> split(std::string_view haystack, char delimiter) {
 	std::vector<std::string> result;
 	split(result, haystack, delimiter);

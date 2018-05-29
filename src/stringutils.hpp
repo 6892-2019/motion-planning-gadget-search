@@ -12,6 +12,12 @@
 #include <string_view>
 #include <vector>
 
+/**
+ * If the given string starts with the given prefix, erases that prefix.
+ * @return true iff the prefix was present (and erased)
+ */
+bool removePrefix(std::string& str, std::string_view prefix);
+
 std::vector<std::string> split(std::string_view haystack, char delimiter);
 void split(std::vector<std::string>& out, std::string_view haystack, char delimiter);
 

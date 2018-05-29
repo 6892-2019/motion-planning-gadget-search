@@ -18,14 +18,6 @@ void writeAllLines(std::string filename, const std::vector<std::string>& lines) 
 		file << l << "\n";
 }
 
-bool removePrefix(std::string& str, std::string_view prefix) {
-	if (str.size() < prefix.size() ||
-			!std::equal(str.begin(), str.begin()+prefix.size(), prefix.begin(), prefix.end()))
-		return false;
-	str.erase(0, prefix.size());
-	return true;
-}
-
 std::vector<std::string> processFilenameArgs(const char** first, const char** last) {
 	vector<string> queue(first, last);
 	std::reverse(queue.begin(), queue.end());
