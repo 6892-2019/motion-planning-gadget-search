@@ -151,9 +151,13 @@
       </item>
       <item path="src/automaton-instantiations-1.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/automaton-instantiations.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/automaton-io.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/automaton.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/automaton.tcc" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/automatonbase.cpp" ex="false" tool="1" flavor2="0">
       </item>

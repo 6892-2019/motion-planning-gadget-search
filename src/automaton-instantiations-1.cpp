@@ -1,11 +1,25 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
 
-template class automaton::Automaton<9u>;
-template class automaton::Automaton<10u>;
-template class automaton::Automaton<11u>;
-template class automaton::Automaton<12u>;
-template class automaton::Automaton<13u>;
-template class automaton::Automaton<14u>;
-template class automaton::Automaton<15u>;
-template class automaton::Automaton<16u>;
+#include "automaton.tcc"
+
+namespace automaton {
+#define AUTOMATON_EXTERN_TEMPLATE /* not extern */
+#define AUTOMATON_SIZE 9
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 10
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 11
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 12
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 13
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 14
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 15
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 16
+#include "automaton-instantiations.hpp"
+#undef AUTOMATON_EXTERN_TEMPLATE
+} //namespace automaton

@@ -1,0 +1,8 @@
+//NO INCLUDE GUARD
+
+AUTOMATON_EXTERN_TEMPLATE template class Automaton<AUTOMATON_SIZE>;
+//AUTOMATON_EXTERN_TEMPLATE template Automaton<AUTOMATON_SIZE> conj<AUTOMATON_SIZE>(
+//		const Automaton<AUTOMATON_SIZE>& left, const Automaton<AUTOMATON_SIZE>& right);
+
+#undef AUTOMATON_SIZE
+//don't undefine AUTOMATON_EXTERN_TEMPLATE

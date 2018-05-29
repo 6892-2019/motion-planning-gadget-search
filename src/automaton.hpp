@@ -238,206 +238,66 @@ public:
 	 * TODO: many methods assume there's at least one state; this isn't wrong,
 	 * but we should add assertions to make it explicit
 	 */
-	Automaton() : deterministic_(true), minimal_(false), canonical_(false) {}
-	Automaton(const AutomatonBase& a) : deterministic_(false), minimal_(false), canonical_(false) {
-		reserve(a.state_size());
-		for (state_type s = 0; s < a.state_size(); ++s) {
-			addState();
-			setAccept(s, a.accept(s));
-		}
-		a.for_each_transition([&](state_type from, symbol_type on, state_type to) {
-			addTrans(from, on, to);
-		});
-		deterministic_ = a.deterministic();
-		minimal_ = a.minimal();
-		canonical_ = a.canonical();
-		if (canonical())
-			prepareForEquals();
-	}
-	~Automaton() = default;
-	Automaton(const Automaton& a) = default;
-	Automaton(Automaton&& a) = default;
-	std::unique_ptr<WorkingAutomaton> clone() const override {
-		return std::make_unique<Automaton>(*this);
-	}
-	Automaton& operator=(const Automaton& a) = default;
-	Automaton& operator=(Automaton&& victim) = default;
+	Automaton();
+	Automaton(const AutomatonBase& a);
+	~Automaton();
+	Automaton(const Automaton& a);
+	Automaton(Automaton&& a);
+	std::unique_ptr<WorkingAutomaton> clone() const override;
+	Automaton& operator=(const Automaton& a);
+	Automaton& operator=(Automaton&& victim);
 
-	state_type state_size() const override {
-		return static_cast<state_type>(transitions_.size());
-	}
-	state_type accept_size() const override {
-		return static_cast<state_type>(accept_.count());
-	}
-	symbol_type alphabet_size() const override {
-		return alphabet_size_v;
-	}
-	[[gnu::pure]] symbol_type active_alphabet_size() const override {
-		symbol_mask_type mask;
-		for (state_type s = 0; s < state_size(); ++s)
-			mask |= outgoing_mask(s);
-		return mask.count();
-	}
-	std::size_t edge_size() const override {
-		return std::accumulate(transitions_.begin(), transitions_.end(), static_cast<std::size_t>(0),
-				[](std::size_t l, const auto& r) {return l + r.size();});
-	}
-	std::size_t transition_size() const override {
-		std::size_t answer = 0;
-		for (auto& ts : transitions_)
-			for (auto t : ts)
-				answer += t.symbols_.count();
-		return answer;
-	}
+	state_type state_size() const override;
+	state_type accept_size() const override;
+	symbol_type alphabet_size() const override;
+	[[gnu::pure]] symbol_type active_alphabet_size() const override;
+	std::size_t edge_size() const override;
+	std::size_t transition_size() const override;
 
-	bool deterministic() const override {return deterministic_;}
-	bool minimal() const override {return minimal_;}
-	bool canonical() const override {return canonical_;}
+	bool deterministic() const override;
+	bool minimal() const override;
+	bool canonical() const override;
 
-	bool accept(state_type state) const override {
-		assert(state < state_size());
-		return accept_[state];
-	}
+	bool accept(state_type state) const override;
 
-	void for_each_accept(std::function<void(state_type)> action) const override {
-		for (auto s = accept_.find_first(); s < accept_.size(); s = accept_.find_next(s))
-			action(static_cast<state_type>(s));
-	}
+	void for_each_accept(std::function<void(state_type)> action) const override;
 
-	StateSet step(state_type current, symbol_type symbol) const override {
-		assert(current < state_size());
-		assert(symbol < AlphabetSize);
-		StateSet next;
-		for (const Transition& t : transitions_[current])
-			if (t.symbols_[symbol])
-				//We can go to many t.next_, but to each t.next_ only once.
-				next.insert_absent(t.next_);
-		//We used to assert(next.size() <= 1 || !deterministic_), but the
-		//addTrans calls isStateDeterministic calls step (us) when checking
-		//whether to clear deterministic_.  If we change the implementation of
-		//isStateDeterministic to not actually build the steps, we could add the
-		//assert back.
-		return next;
-	}
+	StateSet step(state_type current, symbol_type symbol) const override;
 
-	SymbolSet outgoing(state_type state) const override {
-		return detail::set_of_indices(outgoing_mask(state));
-	}
+	SymbolSet outgoing(state_type state) const override;
 
 	/**
 	 * Returns the states directly reachable from the given state.
 	 * @return the states directly reachable from the given state
 	 */
-	StateSet destinations(state_type state) const override {
-		StateSet dest;
-		for (const Transition& t : transitions_[state])
-			dest.insert_absent(t.next_);
-		return dest;
-	}
+	StateSet destinations(state_type state) const override;
 
-	std::optional<state_type> stepDeterministic(state_type current, symbol_type symbol) const override {
-		assert(deterministic());
-		assert(current < state_size());
-		assert(symbol < AlphabetSize);
-		for (const Transition& t : transitions_[current])
-			if (t.symbols_[symbol])
-				return t.next_;
-		return std::nullopt;
-	}
+	std::optional<state_type> stepDeterministic(state_type current, symbol_type symbol) const override;
 
-	void for_each_destination(state_type state, std::function<void(state_type)> action) const override {
-		assert(state < state_size());
-		for (const auto& t : transitions_[state])
-			action(t.next_);
-	}
+	void for_each_destination(state_type state, std::function<void(state_type)> action) const override;
 
 	//TODO: templated overload of for_each_destination, for use when this
 	//object's actual type is known (not via AutomatonBase)
 
-	SymbolSet labels(state_type from, state_type to) const override {
-		for (const Transition& t : transitions_[from])
-			if (t.next_ == to)
-				return detail::set_of_indices(t.symbols_);
-		return {};
-	}
+	SymbolSet labels(state_type from, state_type to) const override;
 
-	void for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const override {
-		for (const Transition& t : transitions_[state])
-			for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
-				action(a, t.next_);
-	}
+	void for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const override;
 
-	void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const override {
-		for (state_type s = 0; s < state_size(); ++s)
-			for (const Transition& t : transitions_[s])
-				for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
-					action(s, a, t.next_);
-	}
+	void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const override;
 
-	void reserve(state_type state_capacity) override {
-		transitions_.reserve(state_capacity);
-		accept_.reserve(state_capacity);
-	}
+	void reserve(state_type state_capacity) override;
 
-	state_type addState() override {
-		state_type s = state_size();
-		transitions_.push_back({});
-		accept_.push_back(false);
-		minimal_ = canonical_ = false;
-		return s;
-	}
+	state_type addState() override;
 
-	bool addEpsilon(state_type from, state_type to) override {
-		bool changed = false;
-		if (accept_[to]) {
-			changed |= !accept_[from];
-			accept_.set(from);
-		}
-		for (const Transition& t : transitions_[to])
-			changed |= addTrans(from, t.symbols_, t.next_);
-		minimal_ = canonical_ = false;
-		return changed;
-	}
+	bool addEpsilon(state_type from, state_type to) override;
 
-	bool addTrans(state_type from, symbol_type symbol, state_type to) override {
-		for (Transition& t : transitions_[from])
-			if (t.next_ == to) {
-				if (t.symbols_[symbol])
-					return false;
-				t.symbols_.set(symbol);
-				if (deterministic_ && !isStateDeterministic(from))
-					deterministic_ = false;
-				return true;
-			}
-		transitions_[from].push_back({});
-		transitions_[from].back().next_ = to;
-		transitions_[from].back().symbols_.set(symbol);
-		if (deterministic_ && !isStateDeterministic(from))
-			deterministic_ = false;
-		minimal_ = canonical_ = false;
-		return true;
-	}
+	bool addTrans(state_type from, symbol_type symbol, state_type to) override;
 
-	bool setAccept(state_type state, bool accepts = true) override {
-		bool old = accept_.test(state);
-		accept_.set(state, accepts);
-		minimal_ = canonical_ = false;
-		return accepts == old;
-	}
+	bool setAccept(state_type state, bool accepts = true) override;
 
-	void clear() override {
-		transitions_.clear();
-		accept_.clear();
-		deterministic_ = true;
-		minimal_ = canonical_ = false;
-	}
+	void clear() override;
 
-	void shrink_to_fit() {
-		transitions_.shrink_to_fit();
-		for (auto& ts : transitions_)
-			ts.shrink_to_fit();
-		accept_.shrink_to_fit();
-	}
+	void shrink_to_fit();
 
 
 private:
@@ -481,72 +341,7 @@ private:
 		return a;
 	}
 
-	static Automaton shuffleAcceptDeterministic(const Automaton& left, const Automaton& right) {
-		assert(left.deterministic());
-		assert(right.deterministic());
-		//(left state, right state, new state, left automation active)
-		using state_quad = std::tuple<state_type, state_type, state_type, bool>;
-		circular_deque<state_quad, 16> worklist;
-		detail::DenseShuffleAcceptMap newstates(left.state_size(), right.state_size());
-
-		Automaton a;
-		//TODO: are we sure?
-		a.deterministic_ = left.deterministic() && right.deterministic();
-		//We have a free choice to begin with the left or with the right
-		//automaton, so we have two "initial" states and call addEpsilon later.
-		a.addState(); a.addState(); a.addState();
-		//TODO: assuming 0 is the initial state
-		worklist.push_back({0, 0, 1, true});
-		newstates.insert({0, 0, true}, 1);
-		worklist.push_back({0, 0, 2, false});
-		newstates.insert({0, 0, false}, 2);
-
-		while (!worklist.empty()) {
-			state_type ls, rs, ns;
-			bool leftactive;
-			std::tie(ls, rs, ns, leftactive) = worklist.pop_back();
-			a.accept_.set(ns, left.accept_[ls] && right.accept_[rs]);
-
-			if (leftactive) {
-				for (Transition lt : left.transitions_[ls]) {
-					auto p = newstates.get_or_add_state({lt.next_, rs, leftactive}, a);
-					if (p.second)
-						worklist.push_back({lt.next_, rs, p.first, leftactive});
-					a.addTrans(ns, lt.symbols_, p.first);
-
-					//If we brought the active automaton to an accept state,
-					//we can switch if we want.
-					if (left.accept(lt.next_)) {
-						auto q = newstates.get_or_add_state({lt.next_, rs, !leftactive}, a);
-						if (q.second)
-							worklist.push_back({lt.next_, rs, q.first, !leftactive});
-						a.addTrans(ns, lt.symbols_, q.first);
-					}
-				}
-			} else {
-				for (Transition rt : right.transitions_[rs]) {
-					auto p = newstates.get_or_add_state({ls, rt.next_, leftactive}, a);
-					if (p.second)
-						worklist.push_back({ls, rt.next_, p.first, leftactive});
-					a.addTrans(ns, rt.symbols_, p.first);
-
-					//If we brought the active automaton to an accept state,
-					//we can switch if we want.
-					if (right.accept(rt.next_)) {
-						auto q = newstates.get_or_add_state({ls, rt.next_, !leftactive}, a);
-						if (q.second)
-							worklist.push_back({ls, rt.next_, q.first, !leftactive});
-						a.addTrans(ns, rt.symbols_, q.first);
-					}
-				}
-			}
-		}
-
-		//Choose left or right at the start.
-		a.addEpsilon(0, 1);
-		a.addEpsilon(0, 2);
-		return a;
-	}
+	static Automaton shuffleAcceptDeterministic(const Automaton& left, const Automaton& right);
 
 	//This grants more friendship then we need, but we'd have to forward-declare
 	//to grant to just one instantiation, and that's not really worth it.
@@ -565,148 +360,35 @@ public:
 	 * the static member function that creates empty automata.
 	 * @return true iff this automaton's language is empty
 	 */
-	bool isEmpty() {
-		removeDeadStates();
-		return state_size() == 1U && accept_.none();
-	}
+	bool isEmpty();
 
-	void determinize() override {
-		if (deterministic()) return;
-		//TODO: I can't see any way to do this in-place, but it might be better
-		//to store an edge list instead, clear, and commit back into *this.
-		//If we're going to minimize, we might be able to pass that edge list
-		//directly to HopcroftMinimizer, too.
-		Automaton a;
-		detail::determinize_into(*this, a);
-		MAYBE_UNUSED std::size_t oldsize = state_size();
-		*this = std::move(a);
-		assert(deterministic());
-		AUTOMATON_DEBUG(std::cout << "determinize: " << oldsize << " -> " << state_size() << std::endl);
-	}
+	void determinize() override;
 
 	/**
 	 * Fills in any missing transitions with transitions to an explicit crash
 	 * state.
 	 */
-	void totalize() override {
-		state_type crash;
-		bool madeCrashState = false;
-		for (state_type s = 0; s < state_size(); ++s) {
-			symbol_mask_type missing = ~outgoing_mask(s);
-			if (missing.any()) {
-				if (!madeCrashState) {
-					crash = addState();
-					madeCrashState = true;
-				}
-				addTrans(s, missing, crash);
-			}
-		}
-	}
+	void totalize() override;
 
 	/**
 	 * Removes dead states and transitions from this automaton.
 	 */
-	void removeDeadStates() override {
-		auto live = detail::live_states(*this);
-		if (live.size() == state_size())
-			return;
-		if (live.empty()) {
-			*this = empty<AlphabetSize>();
-			return;
-		}
-		MAYBE_UNUSED std::size_t oldsize = state_size();
-		//We will be minimal or canonical here, but we might be deterministic.
-		//compressRenumber conservatively kills determinism, so we need to
-		//preserve it ourselves.
-		bool det = deterministic_;
-		auto res = detail::find_dead_state_renumbering(*this, live);
-		compressRenumber(static_cast<state_type>(res.first.size()), res.first.begin(), res.second.begin());
-		deterministic_ = det;
-		AUTOMATON_DEBUG(std::cout << "removeDeadStates: " << oldsize << " -> " << state_size() << std::endl);
-	}
+	void removeDeadStates() override;
 
-	void minimize() override {
-		if (minimal()) {
-			assert(deterministic());
-			return;
-		}
-		determinize();
-		//The Java library explicitly checks for the all-strings automaton here,
-		//but it doesn't seem to be necessary.
-		//Java totalizes the automaton here (then removes the added state in
-		//removeDeadStates after minimizing).  That isn't required; our Hopcroft
-		//implementation understands states are not equivalent if one crashes
-		//and the other doesn't.
-		//Instead, we remove dead states before minimizing, to prevent
-		//transitions to dead states from distinguishing states that are
-		//otherwise equivalent.
-		removeDeadStates();
-		MAYBE_UNUSED std::size_t oldsize = state_size();
-		detail::HopcroftResult res = detail::hopcroft(*this);
-		if (res.newSize != state_size())
-			compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
-		AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << state_size() << std::endl);
-#ifndef NDEBUG
-		//make sure hopcroft and/or compress didn't screw up
-		for (state_type s = 0; s < state_size(); ++s)
-			assert(isStateDeterministic(s));
-#endif
-		deterministic_ = minimal_ = true;
-	}
+	void minimize() override;
 
 private:
 	/**
 	 * Compresses the states of this automaton.
 	 */
-	void compressRenumber(state_type newSize, const state_type* survivorFrom, const state_type* remapping) {
-		for (state_type s = 0; s < newSize; ++s) {
-			state_type victim = survivorFrom[s];
-			if (victim != s) {
-				transitions_[s] = std::move(transitions_[victim]);
-				setAccept(s, accept(victim));
-			}
-
-			//Renumber and compress redundant transitions.
-			auto& ts = transitions_[s];
-			for (auto i = ts.size(); i-- > 0;) {
-				if (remapping[ts[i].next_] == std::numeric_limits<state_type>::max())
-					ts.erase(ts.begin() + i);
-				else {
-					ts[i].next_ = remapping[ts[i].next_];
-					//compare against previously remapped transitions, iterating backwards
-					for (auto j = ts.size(); j-- > (i+1);)
-						if (ts[i].next_ == ts[j].next_) {
-							ts[i].symbols_ |= ts[j].symbols_;
-							ts.erase(ts.begin() + j);
-							break; //can only be one other with same next_
-						}
-				}
-			}
-		}
-		transitions_.resize(newSize);
-		accept_.resize(newSize);
-		deterministic_ = minimal_ = canonical_ = false;
-	}
+	void compressRenumber(state_type newSize, const state_type* survivorFrom, const state_type* remapping);
 
 public:
 	/**
 	 * Renumbers states to bring this automaton into a canonical form. Canonical
 	 * automata are structurally equal iff they accept the same language.
 	 */
-	void canonicalize() override {
-		if (canonical()) {
-			assert(deterministic());
-			assert(minimal());
-			return;
-		}
-		minimize();
-
-		detail::LazyEdgeEnumerator<identity_permutation> enumerator{identity_permutation(), this};
-		enumerator.runToCompletion();
-		renumberStates(enumerator.renumbering.begin());
-		prepareForEquals();
-		canonical_ = true;
-	}
+	void canonicalize() override;
 
 	/**
 	 * Renumbers states and symbols to bring this automaton into a canonical
@@ -828,24 +510,7 @@ public:
 	 * having to allocate a permutation array.  Note that renumbering state 0
 	 * to any other number may change the language accepted by this automaton.
 	 */
-	void swapStateNumbers(state_type a, state_type b) override {
-		if (a == b) return;
-		//This might actually be faster with a lookup table.
-		for (auto& ts : transitions_)
-			for (Transition& t : ts)
-				if (t.next_ == a)
-					t.next_ = b;
-				else if (t.next_ == b)
-					t.next_ = a;
-		bool aa = accept_.test(a);
-		accept_.set(a, accept_.test(b));
-		accept_.set(b, aa);
-		using std::swap;
-		swap(transitions_[a], transitions_[b]);
-		canonical_ = false;
-		if (a == 0 || b == 0)
-			minimal_ = false;
-	}
+	void swapStateNumbers(state_type a, state_type b) override;
 
 	/**
 	 * Renumbers states and symbols.  After this method returns, state i is
@@ -900,54 +565,24 @@ public:
 	 * TODO: this is a hack.  We should move canonicalization into Automaton and
 	 * do any preparation there instead.
 	 */
-	void prepareForEquals() {
-		for (auto& ts : transitions_)
-			//We shouldn't have two Transitions with the same destination, so we
-			//sort only on next_.
-			std::sort(ts.begin(), ts.end(), [](Transition a, Transition b){return a.next_ < b.next_;});
-		assert(preparedForEquals());
-	}
+	void prepareForEquals();
 
 private:
-	bool preparedForEquals() const {
-		return std::all_of(transitions_.begin(), transitions_.end(), [](const auto& ts) {
-			return std::is_sorted(ts.begin(), ts.end(), [](Transition a, Transition b) {
-				return a.next_ < b.next_;
-			});
-		});
-	}
+	bool preparedForEquals() const;
 
 public:
 	/**
 	 * Compares this automaton with another for structural equality.  Call
 	 * prepareForEquals() on both automata first.
 	 */
-	bool operator==(const Automaton& other) const {
-		assert(preparedForEquals());
-		assert(other.preparedForEquals());
-		return std::tie(accept_, transitions_) == std::tie(other.accept_, other.transitions_);
-	}
+	bool operator==(const Automaton& other) const;
 	/**
 	 * Compares this automaton with another for structural inequality.  Call
 	 * prepareForEquals() on both automata first.
 	 */
-	bool operator!=(const Automaton& other) const {
-		return !(*this == other);
-	}
+	bool operator!=(const Automaton& other) const;
 
-	std::size_t working_hash() const override {
-		size_t h = 13;
-		h = h * 31 + state_size();
-		for (const auto& ts : transitions_) {
-			h = h * 31 + ts.size();
-			for (auto t : ts) {
-				h = h * 31 + t.next_;
-				h = h * 31 + std::hash<symbol_mask_type>()(t.symbols_);
-			}
-		}
-		//punt on accept_ for now
-		return h;
-	}
+	std::size_t working_hash() const override;
 
 private:
 
@@ -994,58 +629,16 @@ public:
 	 * @return the number of states of this automaton before appending;
 	 * equivalently, the number of the first inserted state (if any)
 	 */
-	state_type append(const Automaton& b) {
-		reserve(state_size() + b.state_size());
-		state_type base = state_size();
-		for (const auto& t : b.transitions_) {
-			transitions_.push_back(t);
-			for (Transition& nt : transitions_.back())
-				nt.next_ += base;
-		}
-		for (state_type p = 0; p < b.state_size(); ++p)
-			accept_.push_back(b.accept(p));
-		deterministic_ &= b.deterministic();
-		minimal_ = canonical_ = false;
-		return base;
-	}
+	state_type append(const Automaton& b);
 
-	state_type append(Automaton&& b) {
-		reserve(state_size() + b.state_size());
-		state_type base = state_size();
-		transitions_.insert(transitions_.end(), std::make_move_iterator(b.transitions_.begin()),
-				std::make_move_iterator(b.transitions_.end()));
-		for (state_type s = base; s < state_size(); ++s)
-			for (Transition& nt : transitions_[s])
-				nt.next_ += base;
-		for (state_type p = 0; p < b.state_size(); ++p)
-			accept_.push_back(b.accept(p));
-		deterministic_ &= b.deterministic();
-		minimal_ = canonical_ = false;
-		return base;
-	}
+	state_type append(Automaton&& b);
 
 	/**
 	 * Adds the given transitions to this automaton.
 	 * @return true if the automaton changed, false if all transitions were
 	 * already present
 	 */
-	bool addTrans(state_type from, symbol_mask_type symbols, state_type to) {
-		for (Transition& t : transitions_[from])
-			if (t.next_ == to) {
-				auto before = t.symbols_;
-				t.symbols_ |= symbols;
-				if (t.symbols_ == before)
-					return false;
-				if (deterministic_ && !isStateDeterministic(from))
-					deterministic_ = false;
-				return true;
-			}
-		transitions_[from].push_back(Transition(to, symbols));
-		if (deterministic_ && !isStateDeterministic(from))
-			deterministic_ = false;
-		minimal_ = canonical_ = false;
-		return true;
-	}
+	bool addTrans(state_type from, symbol_mask_type symbols, state_type to);
 
 	/**
 	 * Returns a mask of the symbols for which the given state has outgoing
@@ -1053,37 +646,19 @@ public:
 	 * @return a mask of the symbols for which the given state has outgoing
 	 * transitions.
 	 */
-	symbol_mask_type outgoing_mask(state_type state) const {
-		symbol_mask_type mask;
-		for (const Transition& t : transitions_[state])
-			mask |= t.symbols_;
-		return mask;
-	}
+	symbol_mask_type outgoing_mask(state_type state) const;
 
 	/**
 	 * @return a set containing the symbols that appear as labels on transitions
 	 * in this automaton.
 	 */
-	SymbolSet activeAlphabet() const override {
-		symbol_mask_type mask;
-		for (state_type s = 0; s < state_size(); ++s)
-			mask |= outgoing_mask(s);
-		return detail::set_of_indices(mask);
-	}
+	SymbolSet activeAlphabet() const override;
 
 	/**
 	 * Returns true iff the given state transitions to at most one state on
 	 * every symbol.
 	 */
-	bool isStateDeterministic(state_type state) const {
-		symbol_mask_type overall;
-		unsigned int sum = 0;
-		for (const Transition& t : transitions_[state]) {
-			overall |= t.symbols_;
-			sum += t.symbols_.count();
-		}
-		return overall.count() == sum;
-	}
+	bool isStateDeterministic(state_type state) const;
 private:
 	template<class Alphabet, class Callable>
 	void enumerateRecurse(std::vector<state_type>& stateStack, std::vector<typename Alphabet::symbol_type>& symbolString, Callable callback) {
@@ -1121,22 +696,38 @@ private:
 	friend Automaton<N> lit(Symbols... symbols);
 };
 
-extern template class automaton::Automaton<1u>;
-extern template class automaton::Automaton<2u>;
-extern template class automaton::Automaton<3u>;
-extern template class automaton::Automaton<4u>;
-extern template class automaton::Automaton<5u>;
-extern template class automaton::Automaton<6u>;
-extern template class automaton::Automaton<7u>;
-extern template class automaton::Automaton<8u>;
-extern template class automaton::Automaton<9u>;
-extern template class automaton::Automaton<10u>;
-extern template class automaton::Automaton<11u>;
-extern template class automaton::Automaton<12u>;
-extern template class automaton::Automaton<13u>;
-extern template class automaton::Automaton<14u>;
-extern template class automaton::Automaton<15u>;
-extern template class automaton::Automaton<16u>;
+#define AUTOMATON_EXTERN_TEMPLATE extern
+#define AUTOMATON_SIZE 1
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 2
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 3
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 4
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 5
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 6
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 7
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 8
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 9
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 10
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 12
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 13
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 14
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 15
+#include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 16
+#include "automaton-instantiations.hpp"
+#undef AUTOMATON_EXTERN_TEMPLATE
 
 /**
  * Returns an Automaton that accepts the empty language.
