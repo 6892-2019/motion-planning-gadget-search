@@ -164,102 +164,88 @@ TEST_CASE("AutomatonTest_DeterminizeRemoveDeadStates") {
 	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
 }
 
-TEST_CASE("AutomatonTest_Minimize") {
-	auto p = lit<2>(0);
-	auto q = p; //clone
+template<unsigned int N>
+Automaton<N> minimizePreservesLanguage(const Automaton<N>& p) {
+	auto q = p;
 	q.minimize();
-	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
-	p = cat<2>({lit<2>(0), lit<2>(1)});
-	q = p; //clone
-	q.minimize();
-	equivalentOnAllStrings<2>(p, q, 8, __LINE__);
-	auto a = range<2>(lit<2>(0), 2, 6);
-	auto b = a; //clone
-	b.minimize();
-	equivalentOnAllStrings<2>(a, b, 8, __LINE__);
+	auto cmp = compare_languages(p, q);
+	CHECK_UNARY(cmp.equal());
+	//TODO: generate and print witnesses
+	return q;
+}
+
+TEST_CASE("AutomatonTest_Minimize00") {
+	minimizePreservesLanguage(lit<2>(0));
+}
+TEST_CASE("AutomatonTest_Minimize01") {
+	minimizePreservesLanguage(cat<2>({lit<2>(0), lit<2>(1)}));
+}
+TEST_CASE("AutomatonTest_Minimize02") {
+	minimizePreservesLanguage(range<2>(lit<2>(0), 2, 6));
+}
+TEST_CASE("AutomatonTest_Minimize03") {
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	minimizePreservesLanguage(alt<2>({d, e}));
+}
+TEST_CASE("AutomatonTest_Minimize04") {
 	auto d = cat<2>({lit<2>(0), lit<2>(1)});
 	auto e = cat<2>({lit<2>(1), lit<2>(0)});
 	auto f = alt<2>({d, e});
-	auto fc = f; //clone
-	fc.minimize();
-	equivalentOnAllStrings<2>(f, fc, 8, __LINE__);
-	auto g = conj<2>(f, d);
-	auto gc = g; //clone
-	gc.minimize();
-	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
-	auto h = comp<2>(lit<2>(0));
-	auto hc = h; //clone
-	hc.minimize();
-	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
-	h = all<2>();
-	hc = h; //clone
-	hc.minimize();
-	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
-	h = empty<2>();
-	hc = h; //clone
-	hc.minimize();
-	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
-	h = alt<2>({d, d, d, d, d, d, d});
-	hc = h; //clone
-	hc.minimize();
-	equivalentOnAllStrings<2>(h, hc, 8, __LINE__);
-
+	minimizePreservesLanguage(conj<2>(f, d));
+}
+TEST_CASE("AutomatonTest_Minimize05") {
+	minimizePreservesLanguage(comp<2>(lit<2>(0)));
+}
+TEST_CASE("AutomatonTest_Minimize06") {
+	minimizePreservesLanguage(all<2>());
+}
+TEST_CASE("AutomatonTest_Minimize07") {
+	minimizePreservesLanguage(empty<2>());
+}
+TEST_CASE("AutomatonTest_Minimize08") {
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	minimizePreservesLanguage(alt<2>({d, d, d, d, d, d, d}));
+}
+TEST_CASE("AutomatonTest_Minimize09") {
+	minimizePreservesLanguage(star<2>(nCopies<2>(any<2>(), 3))); //multOf3
+}
+TEST_CASE("AutomatonTest_Minimize10") {
+	minimizePreservesLanguage(cat<2>({star<2>(nCopies<2>(any<2>(), 3)), lit<2>(0)})); //multOf3Zero
+}
+TEST_CASE("AutomatonTest_Minimize11") {
+	minimizePreservesLanguage(cat<2>({star<2>(nCopies<2>(any<2>(), 3)), lit<2>(1)})); //multOf3One
+}
+TEST_CASE("AutomatonTest_Minimize12") {
 	auto multOf3 = star<2>(nCopies<2>(any<2>(), 3));
-	auto multOf3Clone = multOf3; //clone
-	multOf3Clone.minimize();
-	equivalentOnAllStrings<2>(multOf3, multOf3Clone, 8, __LINE__);
-
-	auto multOf3Zero = cat<2>({star<2>(nCopies<2>(any<2>(), 3)), lit<2>(0)});
-	auto multOf3ZeroClone = multOf3Zero; //clone
-	multOf3ZeroClone.minimize();
-	equivalentOnAllStrings<2>(multOf3Zero, multOf3ZeroClone, 8, __LINE__);
-
-	auto multOf3One = cat<2>({star<2>(nCopies<2>(any<2>(), 3)), lit<2>(1)});
-	auto multOf3OneClone = multOf3One; //clone
-	multOf3OneClone.minimize();
-	equivalentOnAllStrings<2>(multOf3One, multOf3OneClone, 8, __LINE__);
-
-	auto finiteMultOf3 = conj<2>(multOf3, nCopies<2>(any<2>(), 6));
-	auto finiteMultOf3Clone = finiteMultOf3; //clone
-	finiteMultOf3Clone.minimize();
-	equivalentOnAllStrings<2>(finiteMultOf3, finiteMultOf3Clone, 8, __LINE__);
-
+	minimizePreservesLanguage(conj<2>(multOf3, nCopies<2>(any<2>(), 6))); //finiteMultOf3
+}
+TEST_CASE("AutomatonTest_Minimize13") {
+	minimizePreservesLanguage(plus<2>(nCopies<2>(any<2>(), 3))); //posMultOf3
+}
+TEST_CASE("AutomatonTest_Minimize14") {
 	auto posMultOf3 = plus<2>(nCopies<2>(any<2>(), 3));
-	auto posMultOf3Clone = posMultOf3; //clone
-	posMultOf3Clone.minimize();
-	equivalentOnAllStrings<2>(posMultOf3, posMultOf3Clone, 8, __LINE__);
-
-	auto finitePosMultOf3 = conj<2>(posMultOf3, nCopies<2>(any<2>(), 6));
-	auto finitePosMultOf3Clone = finitePosMultOf3; //clone
-	finitePosMultOf3Clone.minimize();
-	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
-
-	auto zeroStarOne = cat<2>({star<2>(lit<2>(0)), lit<2>(1)});
-	auto zeroStarOneClone = zeroStarOne; //clone
-	zeroStarOneClone.minimize();
-	equivalentOnAllStrings<2>(zeroStarOne, zeroStarOneClone, 8, __LINE__);
-
-	auto zeroZeroStarOne = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(0)})), lit<2>(1)});
-	auto zeroZeroStarOneClone = zeroZeroStarOne; //clone
-	zeroZeroStarOneClone.minimize();
-	equivalentOnAllStrings<2>(zeroZeroStarOne, zeroZeroStarOneClone, 8, __LINE__);
-
-	auto zeroOneStarOne = cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)});
-	auto zeroOneStarOneClone = zeroOneStarOne; //clone
-	zeroOneStarOneClone.minimize();
-	equivalentOnAllStrings<2>(zeroOneStarOne, zeroOneStarOneClone, 8, __LINE__);
-
+	minimizePreservesLanguage(conj<2>(posMultOf3, nCopies<2>(any<2>(), 6))); //finitePosMultOf3
+}
+TEST_CASE("AutomatonTest_Minimize015") {
+	minimizePreservesLanguage(cat<2>({star<2>(lit<2>(0)), lit<2>(1)})); //zeroStarOne
+}
+TEST_CASE("AutomatonTest_Minimize16") {
+	minimizePreservesLanguage(cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(0)})), lit<2>(1)})); //zeroZeroStarOne
+}
+TEST_CASE("AutomatonTest_Minimize17") {
+	minimizePreservesLanguage(cat<2>({star<2>(cat<2>({lit<2>(0), lit<2>(1)})), lit<2>(1)})); //zeroOneStarOne
+}
+TEST_CASE("AutomatonTest_Minimize18") {
 	Automaton<4> twoAccept;
 	twoAccept.addState();
 	twoAccept.addState();
 	twoAccept.setAccept(0);
 	twoAccept.setAccept(1);
-	auto twoAcceptM = twoAccept;
-	twoAcceptM.minimize();
-	//CHECK_EQ_MESSAGE(twoAcceptM.state_size(), 1, twoAcceptM);
+	auto twoAcceptM = minimizePreservesLanguage(twoAccept);
 	CHECK_EQ(twoAcceptM.state_size(), 1);
-	equivalentOnAllStrings<4>(twoAccept, twoAcceptM, 4, __LINE__);
-
+}
+TEST_CASE("AutomatonTest_Minimize19") {
 	Automaton<4> twoAccept2;
 	twoAccept2.addState();
 	twoAccept2.addState();
@@ -268,11 +254,8 @@ TEST_CASE("AutomatonTest_Minimize") {
 	twoAccept2.setAccept(2);
 	twoAccept2.addTrans(0, 0, 1);
 	twoAccept2.addTrans(0, 1, 2);
-	auto twoAccept2M = twoAccept2;
-	twoAccept2M.minimize();
-	//CHECK_EQ_MESSAGE(twoAccept2M.state_size(), 2, twoAccept2M);
+	auto twoAccept2M = minimizePreservesLanguage(twoAccept2);
 	CHECK_EQ(twoAccept2M.state_size(), 2);
-	equivalentOnAllStrings<4>(twoAccept2, twoAccept2M, 4, __LINE__);
 }
 
 TEST_CASE("AutomatonTest_CatAltMinimize") {
