@@ -63,10 +63,24 @@ AUTOMATA_EXTERN_TEMPLATE template class linear_set<unsigned int>;
 
 AUTOMATA_EXTERN_TEMPLATE template class bounded_queue<std::function<void()>>;
 
-AUTOMATA_EXTERN_TEMPLATE template class circular_deque<unsigned int, 16>;
-AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::pair<unsigned int, unsigned int>, 32>;
-AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::optional<unsigned int>, 16>;
-AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::tuple<unsigned int, unsigned int, unsigned int>, 16>;
-AUTOMATA_EXTERN_TEMPLATE template class circular_deque<std::tuple<unsigned int, unsigned int, unsigned int, bool>, 16>;
+#include <boost/preprocessor/seq/for_each.hpp>
+//https://stackoverflow.com/a/35999754/3614835
+#define UNPACK_COMMA_TYPE( ... ) __VA_ARGS__
+#define INSTANTIATE_CIRCULAR_DEQUE_SZ(r, type, size) \
+	AUTOMATA_EXTERN_TEMPLATE template class circular_deque<UNPACK_COMMA_TYPE type, size>;
+#define INSTANTIATE_CIRCULAR_DEQUE(type, sizes) \
+	AUTOMATA_EXTERN_TEMPLATE template class circular_deque_base<UNPACK_COMMA_TYPE type>; \
+	BOOST_PP_SEQ_FOR_EACH(INSTANTIATE_CIRCULAR_DEQUE_SZ, type, sizes)
+
+INSTANTIATE_CIRCULAR_DEQUE((unsigned int), (16)(32))
+INSTANTIATE_CIRCULAR_DEQUE((std::optional<unsigned int>), (16))
+INSTANTIATE_CIRCULAR_DEQUE((std::pair<unsigned int, unsigned int>), (16)(32))
+INSTANTIATE_CIRCULAR_DEQUE((std::pair<unsigned int*, unsigned int>), (16))
+INSTANTIATE_CIRCULAR_DEQUE((std::tuple<unsigned int, unsigned int, unsigned int>), (16))
+INSTANTIATE_CIRCULAR_DEQUE((std::tuple<unsigned int, unsigned int, unsigned int, bool>), (16))
+
+#undef INSTANTIATE_CIRCULAR_DEQUE_SZ
+#undef INSTANTIATE_CIRCULAR_DEQUE
+#undef UNPACK_COMMA_TYPE
 
 //TODO: <algorithm> and following

@@ -172,6 +172,8 @@
       </item>
       <item path="src/circular_deque.hpp" ex="false" tool="3" flavor2="0">
       </item>
+      <item path="src/circular_deque.tcc" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
           <incDir>
