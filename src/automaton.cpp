@@ -246,12 +246,10 @@ void determinize_bailout(const AutomatonBase& source) {
 	std::terminate();
 }
 
-void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
-	assert(source.alphabet_size() == target.alphabet_size());
-	assert(target.state_size() == 0);
+template<class AddTransAction, class SetAcceptAction>
+void determinize(const AutomatonBase& source, AddTransAction addTrans, SetAcceptAction setAccept) {
 	const state_type state_size = source.state_size();
 	const symbol_type alphabet_size = source.alphabet_size();
-
 	const int DETERMINIZE_PAGE_SIZE = 4096, DETERMINIZE_PAGE_UNITS = DETERMINIZE_PAGE_SIZE/sizeof(state_type);
 	//manages page lifetime: free them all at the end
 	boost::container::small_vector<std::unique_ptr<state_type, free_deleter>, 8> page_handles;
@@ -321,8 +319,7 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 	newstate.set_empty_key(&empty_set);
 	circular_deque<std::pair<state_type*, state_type>, 16> worklist;
 
-	target.reserve(state_size); //a reasonable lower bound for connected automata
-	target.addState();
+	state_type newStates = 1; //start with an initial state
 	set_append(0);
 	state_type* first_set = commit_set();
 	newstate.insert({first_set, 0});
@@ -330,7 +327,7 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 
 	while (!worklist.empty()) {
 		auto [current_set, current_state] = worklist.pop_back();
-		target.setAccept(current_state, std::any_of(set_begin(current_set), set_end(current_set),
+		setAccept(current_state, std::any_of(set_begin(current_set), set_end(current_set),
 				[&source](state_type s) {return source.accept(s);}));
 
 		//TODO: it may be better to build one set per symbol in parallel here,
@@ -347,14 +344,32 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 				continue; //all NFA states crashed
 			auto it = newstate.find(alloc_next);
 			if (it == newstate.end()) {
-				it = newstate.insert({commit_set(), target.addState()}).first;
+				it = newstate.insert({commit_set(), newStates++}).first;
 				worklist.push_back(*it);
 			} else
 				clear_set();
-			target.addTrans(current_state, s, it->second);
-			assert(target.deterministic());
+			addTrans(current_state, s, it->second);
 		}
 	}
+}
+
+void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
+	assert(source.alphabet_size() == target.alphabet_size());
+	assert(target.state_size() == 0);
+	target.reserve(source.state_size()); //a reasonable lower bound for connected automata
+	target.addState();
+	determinize(source, [&target](auto from, auto on, auto to) {
+			//There's no addState lambda parameter, so we add a state the first
+			//time we see a transition to it.  (determinize won't add a state
+			//unless it's about to add a transition to it.)
+			assert(to <= target.state_size());
+			if (to == target.state_size())
+				target.addState();
+			target.addTrans(from, on, to);
+			assert(target.deterministic());
+		}, [&target](auto state, auto b){
+			target.setAccept(state, b);
+		});
 }
 
 struct Tarjan {
