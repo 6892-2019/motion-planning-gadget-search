@@ -29,22 +29,12 @@ AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_set<unsigned int>;
 
 AUTOMATA_EXTERN_TEMPLATE template class google::sparse_hash_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
 
-//can't use the alias template in an explicit instantiation
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<2>::least, 2>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<3>::least, 3>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<4>::least, 4>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<5>::least, 5>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<6>::least, 6>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<7>::least, 7>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<8>::least, 8>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<9>::least, 9>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<10>::least, 10>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<11>::least, 11>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<12>::least, 12>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<13>::least, 13>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<14>::least, 14>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<15>::least, 15>;
-AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<16>::least, 16>;
+#include <boost/preprocessor/repetition/repeat_from_to.hpp>
+#define INSTANTIATE_BITSET(z, size, unused_data_parameter) \
+	AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<size>::least, size>;
+// ^ we can't use the alias template in an explicit instantiation
+BOOST_PP_REPEAT_FROM_TO(2, 17, INSTANTIATE_BITSET, unused_data_parameter)
+#undef INSTANTIATE_BITSET
 
 AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned char, unsigned char>;
 AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned short, unsigned short>;
