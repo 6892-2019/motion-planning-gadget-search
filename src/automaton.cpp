@@ -249,7 +249,7 @@ void removeDeadStates(ExplodedAutomaton& a) {
 	for (auto state : a.accept)
 		nexts.push_back(state);
 
-	std::sort(a.edges.begin(), a.edges.end(), Edge::Backwards());
+	std::sort(a.edges.begin(), a.edges.end(), [](const Edge& l, const Edge& r){return l.target < r.target;});
 	auto inverseOutgoing = [&](state_type s) {
 		return as_range_for_pair(std::equal_range(a.edges.begin(), a.edges.end(), s,overload(
 				[](state_type s, const Edge& e){return s < e.target;},
