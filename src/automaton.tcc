@@ -1,3 +1,5 @@
+#include "hopcroft.hpp"
+
 namespace automaton {
 template<unsigned int AlphabetSize>
 Automaton<AlphabetSize>::Automaton() : deterministic_(true), minimal_(false), canonical_(false) {}
@@ -373,15 +375,18 @@ void Automaton<AlphabetSize>::minimize() {
 		*this = empty<AlphabetSize>();
 		return;
 	}
-	clear();
-	this->deterministic_ = false; //for speed when imploding
-	implode(*this, exp); //TODO: carry exploded form forward into hopcroft
-	this->deterministic_ = true;
 
 	MAYBE_UNUSED std::size_t oldsize = state_size();
-	detail::HopcroftResult res = detail::hopcroft(*this);
-	if (res.newSize != state_size())
-		compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
+	dynarray<state_type> res = detail::hopcroft(exp);
+	if (res.size())
+		//TODO: we could fuse this renumbering with the implode/this->operator=
+		detail::renumber(exp, res);
+		//If we needed to keep using the exploded automaton we'd have to unique
+		//the edge and accept lists, but we don't.
+	clear();
+	this->deterministic_ = false; //for speed when imploding
+	implode(*this, exp);
+
 	AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << state_size() << std::endl);
 #ifndef NDEBUG
 	//make sure hopcroft and/or compress didn't screw up

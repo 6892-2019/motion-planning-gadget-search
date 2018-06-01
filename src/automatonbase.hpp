@@ -412,6 +412,14 @@ struct Edge {
 	}
 };
 
+struct ExplodedAutomaton {
+	std::vector<Edge> edges;
+	std::vector<state_type> accept;
+	state_type state_size;
+	symbol_type alphabet_size;
+	//don't bother storing flags -- this is just a temporary representation
+};
+
 
 //std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
 //		const WorkingAutomaton& left, const WorkingAutomaton& right, unsigned int alphabet_size);

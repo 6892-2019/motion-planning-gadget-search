@@ -12,6 +12,7 @@ struct HopcroftResult {
 	dynarray<state_type> survivorsFrom, remap;
 };
 HopcroftResult hopcroft(WorkingAutomaton& a);
+dynarray<state_type> hopcroft(ExplodedAutomaton& a);
 
 } //namespace detail
 } //namespace automaton

@@ -32,6 +32,7 @@ protected:
 			move_(state_size_), moveSize_(), suspects_() {}
 
 	void coreLoop() {
+		initializeStateToPartition();
 		initializeWaitingSet();
 		while (!L_.empty()) {
 			auto pair = remove();
@@ -183,6 +184,39 @@ protected:
 		return pair;
 	}
 
+	void initializeStateToPartition() {
+		for (state_type p = 0; p < partitionBounds_.size(); ++p) {
+			auto bounds = partitionBounds_[p];
+			//Sort for locality when accessing stateToPartition_.
+			std::sort(partitions_.begin() + bounds.first, partitions_.begin() + bounds.second);
+			for (state_type i = bounds.first; i != bounds.second; ++i)
+				stateToPartition_[partitions_[i]] = {p, i};
+		}
+	}
+
+	/**
+	 * Initializes inv_ and invStart_.  This is *not* called from mainLoop; it's
+	 * provided purely for subclasses to call.
+	 */
+	void initializeInv(std::vector<Edge>& edgelist) {
+		//TODO: use a parallel sort (beyond a size threshold)
+		std::sort(edgelist.begin(), edgelist.end(), &Edge::backwards);
+		edgelist.push_back({std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max(), std::numeric_limits<state_type>::max()});
+		std::size_t invEltsIdx = 0;
+		for (state_type stateIdx = 0; stateIdx < state_size_; ++stateIdx) {
+			for (symbol_type symbolIdx = 0; symbolIdx < alphabet_size_; ++symbolIdx) {
+				invStart_[stateIdx * (alphabet_size_+1) + symbolIdx] = invEltsIdx;
+				while (edgelist[invEltsIdx].target == stateIdx &&
+						edgelist[invEltsIdx].symbol == symbolIdx) {
+					inv_[invEltsIdx] = edgelist[invEltsIdx].source;
+					++invEltsIdx;
+				}
+			}
+			invStart_[stateIdx * (alphabet_size_+1) + alphabet_size_] = invEltsIdx;
+		}
+		edgelist.pop_back();
+	}
+
 	void checkRep() const {
 #ifndef NDEBUG
 		//We exit early in the trivial empty/all cases, so we always have at
@@ -236,23 +270,6 @@ private:
 	 * already done
 	 */
 	bool buildInverseAndInitializePartitions() {
-		struct InverseEntry {
-			state_type source;
-			symbol_type symbol;
-			state_type target;
-			bool operator==(const InverseEntry& other) const {
-				return source == other.source &&
-						symbol == other.symbol &&
-						target == other.target;
-			}
-			bool operator!=(const InverseEntry& other) const {
-				return !(*this == other);
-			}
-			bool operator<(const InverseEntry& other) const {
-				return std::tie(target, symbol, source) < std::tie(other.target, other.symbol, other.source);
-			}
-		};
-
 		unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
 		//TODO: for_each_accept?
 		for (state_type s = 0; s < state_size_; ++s) {
@@ -267,10 +284,10 @@ private:
 			return false;
 		}
 
-		std::vector<InverseEntry> edgelist;
+		std::vector<Edge> edgelist;
 		edgelist.reserve(state_size_ * alphabet_size_ + 1);
 		a_.for_each_transition([&edgelist](state_type from, symbol_type on, state_type to) {
-			edgelist.push_back(InverseEntry{from, on, to});
+			edgelist.push_back({from, on, to});
 		});
 		bool crashed = edgelist.size() != state_size_ * alphabet_size_;
 		//We need to know if we crashed (equivalently, if we're not total), and
@@ -281,7 +298,6 @@ private:
 			make_all(a_);
 			return false;
 		}
-		edgelist.push_back(InverseEntry{std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max(), std::numeric_limits<state_type>::max()});
 
 		if (crashed) {
 			//Because we didn't totalize, we need to manually partition
@@ -313,28 +329,7 @@ private:
 			moveSize_.push_back(0);
 		}
 
-		for (state_type p = 0; p < partitionBounds_.size(); ++p) {
-			auto bounds = partitionBounds_[p];
-			//Sort for locality when accessing stateToPartition_.
-			std::sort(partitions_.begin() + bounds.first, partitions_.begin() + bounds.second);
-			for (state_type i = bounds.first; i != bounds.second; ++i)
-				stateToPartition_[partitions_[i]] = {p, i};
-		}
-
-		//TODO: use a parallel sort (beyond a size threshold)
-		std::sort(edgelist.begin(), edgelist.end());
-		std::size_t invEltsIdx = 0;
-		for (state_type stateIdx = 0; stateIdx < state_size_; ++stateIdx) {
-			for (symbol_type symbolIdx = 0; symbolIdx < alphabet_size_; ++symbolIdx) {
-				invStart_[stateIdx * (alphabet_size_+1) + symbolIdx] = invEltsIdx;
-				while (edgelist[invEltsIdx].target == stateIdx &&
-						edgelist[invEltsIdx].symbol == symbolIdx) {
-					inv_[invEltsIdx] = edgelist[invEltsIdx].source;
-					++invEltsIdx;
-				}
-			}
-			invStart_[stateIdx * (alphabet_size_+1) + alphabet_size_] = invEltsIdx;
-		}
+		initializeInv(edgelist);
 		//TODO: we can reassert this when inv_ is lazily sized
 //			assert(invEltsIdx == inv_.size());
 		return true;
@@ -409,8 +404,108 @@ private:
 	}
 };
 
+class ExplodedHopcroft final : protected HopcroftCore {
+public:
+	ExplodedHopcroft(ExplodedAutomaton& e) :
+			HopcroftCore(e.state_size, e.alphabet_size, static_cast<unsigned int>(e.edges.size())), a_(e) {
+		assert(!a_.accept.empty() && "you already know it's empty!");
+	}
+
+	dynarray<state_type> minimize() {
+		initialize();
+		coreLoop();
+		if (partitionBounds_.size() == state_size_) { //already minimal
+			move_.clear();
+			return std::move(move_);
+		}
+		return finish();
+	}
+private:
+	ExplodedAutomaton& a_;
+	void initialize() {
+		auto [nonfinalIdx, finalIdx] = initialPartitionOnAccept();
+
+		bool crashed = a_.edges.size() != state_size_ * alphabet_size_;
+		if (crashed)
+			partitionOnCrashing(nonfinalIdx);
+		else {
+			partitionBounds_.push_back({0, nonfinalIdx});
+			partitionBounds_.push_back({nonfinalIdx, static_cast<state_type>(partitions_.size())});
+			moveSize_.push_back(0);
+			moveSize_.push_back(0);
+		}
+
+		initializeInv(a_.edges);
+	}
+	std::pair<unsigned int, unsigned int> initialPartitionOnAccept() {
+		unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
+		std::sort(a_.accept.begin(), a_.accept.end());
+		auto it = a_.accept.begin();
+		state_type s = 0;
+		for (; s < state_size_ && it != a_.accept.end(); ++s) {
+			if (s == *it) {
+				partitions_[finalIdx--] = s;
+				++it;
+			} else
+				partitions_[nonfinalIdx++] = s;
+		}
+		while (s < state_size_)
+			partitions_[nonfinalIdx++] = s++;
+		assert(it == a_.accept.end() && "exhausted total states before exhausting accept states");
+		assert(nonfinalIdx == finalIdx+1 && "didn't partition all the states somehow");
+		return {nonfinalIdx, finalIdx};
+	}
+	void partitionOnCrashing(unsigned int nonfinalIdx) {
+		//Because we didn't totalize, we need to manually partition
+		//crashing vs. non-crashing on each symbol.
+		std::vector<typename decltype(partitions_)::iterator> bounds = {
+			partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
+		}, newbounds;
+		std::sort(a_.edges.begin(), a_.edges.end(),
+				[](const Edge& l, const Edge& r){return l.symbol < r.symbol;});
+		boost::dynamic_bitset<std::size_t> outgoing(state_size_);
+		auto edgeit = a_.edges.begin();
+		for (symbol_type s = 0; s < alphabet_size_; ++s) {
+			outgoing.reset();
+			while (edgeit != a_.edges.end() && edgeit->symbol == s)
+				outgoing.set(edgeit++->source);
+			newbounds.clear();
+			for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
+				newbounds.push_back(bounds[i]);
+				newbounds.push_back(std::partition(bounds[i], bounds[i+1], [&outgoing](state_type state) {
+					return outgoing.test(state);
+				}));
+				newbounds.push_back(bounds[i+1]);
+			}
+			newbounds.erase(std::unique(newbounds.begin(), newbounds.end()), newbounds.end());
+			bounds.swap(newbounds);
+		}
+		partitionBounds_.reserve(bounds.size()-1);
+		for (state_type p = 0; p < bounds.size()-1; ++p)
+			partitionBounds_.push_back({bounds[p] - partitions_.begin(), bounds[p+1] - partitions_.begin()});
+		moveSize_.resize(partitionBounds_.size(), 0);
+	}
+	dynarray<state_type> finish() {
+		auto& renumbering = move_; //reuse
+		state_type initialStatePart = stateToPartition_[0].first;
+		state_type new_state_size = numeric_cast<state_type>(partitionBounds_.size());
+		state_type newNumber = 1;
+		for (state_type i = 0; i < partitionBounds_.size(); ++i) {
+			state_type q = i == initialStatePart ? 0 : newNumber++;
+			for (state_type s : partition(i))
+				renumbering[s] = q;
+		}
+		assert(new_state_size == newNumber);
+		a_.state_size = new_state_size;
+		return std::move(renumbering);
+	}
+};
+
 HopcroftResult hopcroft(WorkingAutomaton& a) {
 	return WorkingAutomatonHopcroft(a).minimize();
+}
+dynarray<state_type> hopcroft(ExplodedAutomaton& a) {
+	return ExplodedHopcroft(a).minimize();
 }
 
 } //namespace detail
