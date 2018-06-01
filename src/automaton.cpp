@@ -323,9 +323,9 @@ void implode(AutomatonBase& dest, ExplodedAutomaton& source) {
 	//keep it updated on every addTrans.  We'd prefer to let the caller clear
 	//and/or reset it (if so privileged).
 	assert(dest.state_size() == 0);
-	//sort for locality when adding/setting
-	std::sort(source.edges.begin(), source.edges.end(), Edge::Forwards());
-	std::sort(source.accept.begin(), source.accept.end());
+	//We could sort for locality purposes here, but it's not worth it.
+//	std::sort(source.edges.begin(), source.edges.end(), Edge::Forwards());
+//	std::sort(source.accept.begin(), source.accept.end());
 	dest.reserve(source.state_size);
 	for (state_type i = 0; i < source.state_size; ++i)
 		dest.addState();
