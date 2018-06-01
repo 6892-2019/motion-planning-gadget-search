@@ -22,21 +22,16 @@ void make_all(AutomatonBase& a) {
 namespace automaton {
 namespace detail {
 
-class HopcroftMinimizer final {
-public:
-	HopcroftMinimizer(WorkingAutomaton& a) : a_(a), state_size_(a.state_size()), alphabet_size_(a.alphabet_size()),
+class HopcroftCore {
+protected:
+	HopcroftCore(state_type state_size, symbol_type alphabet_size, unsigned int inv_size) :
+			state_size_(state_size), alphabet_size_(alphabet_size),
 			partitions_(state_size_), partitionBounds_(),
-			//TODO: now that the automaton isn't total, inv_ should be
-			//allocated after building the inverse edge list, so that it can
-			//be sized just right.
-			stateToPartition_(state_size_), inv_(state_size_ * a.alphabet_size()),
-			invStart_(state_size_ * (a.alphabet_size()+1)), L_(), inL_(state_size_ * a.alphabet_size()),
+			stateToPartition_(state_size_), inv_(inv_size),
+			invStart_(state_size_ * (alphabet_size_+1)), L_(), inL_(state_size_ * alphabet_size_),
 			move_(state_size_), moveSize_(), suspects_() {}
 
-	HopcroftResult minimize() {
-		if (!buildInverseAndInitializePartitions())
-			//we've mutated a_, so must use actual size here
-			return {a_.state_size(), {}, {}};
+	void coreLoop() {
 		initializeWaitingSet();
 		while (!L_.empty()) {
 			auto pair = remove();
@@ -46,13 +41,10 @@ public:
 			//is cheap (because partitions are singletons), so it may not be
 			//worth checking in this loop.  If not, we definitely want to
 			//check in finish() to avoid copying a bunch for no reason.
-			if (partitionBounds_.size() == state_size_)
-				return {state_size_, {}, {}};
+			if (partitionBounds_.size() == state_size_) break;
 		}
-		return finish();
 	}
-private:
-	WorkingAutomaton& a_;
+
 	state_type state_size_;
 	symbol_type alphabet_size_;
 	//Every partition contains at least one state, so there can only be as
@@ -69,6 +61,175 @@ private:
 	std::vector<state_type> moveSize_;
 	std::vector<state_type> suspects_;
 
+	void initializeWaitingSet() {
+		//For each symbol, add all but the largest partition to the waiting set.
+		//TODO: factor this into max_element_transform algorithm
+		state_type maxPartition = 0, maxPartitionSize = partitionSize(0);
+		for (state_type p = 1; p < partitionBounds_.size(); ++p)
+			if (partitionSize(p) > maxPartitionSize) {
+				maxPartitionSize = partitionSize(p);
+				maxPartition = p;
+			}
+
+		for (symbol_type i = 0; i < alphabet_size_; ++i)
+			for (state_type p = 0; p < partitionBounds_.size(); ++p)
+				if (p != maxPartition)
+					add(p, i);
+	}
+
+	void collect(state_type part, symbol_type symbol) {
+		checkRep();
+		suspects_.clear();
+		for (state_type target : partition(part))
+			for (state_type source : inverseStep(target, symbol)) {
+				state_type invPart = stateToPartition_[source].first;
+				//TODO: if partitionSize(invPart) == 1, we shouldn't bother
+				//adding it to suspects (and checking it later).  This might
+				//be important for no-op re-minimization of large automata,
+				//to avoid unnecessarily growing suspects_.  (Test first.)
+				if (moveSize_[invPart] == 0) //only add to suspects if not already present
+					suspects_.push_back(invPart);
+				move_[partitionBounds_[invPart].first + (moveSize_[invPart]++)] = source;
+				assert(moveSize_[invPart] <= partitionSize(invPart));
+			}
+		checkRep();
+	}
+
+	void refine() {
+		checkRep();
+		for (state_type part : suspects_) {
+			if (moveSize_[part] < partitionSize(part)) {
+				state_type newPart = split(part);
+				//This is done unconditionally outside this if.
+//					moveSize_[part] = 0;
+				for (symbol_type symbol = 0; symbol < alphabet_size_; ++symbol)
+					if (contains(part, symbol))
+						add(newPart, symbol);
+					else
+						addBetter(part, newPart, symbol);
+			}
+			//In Knuutila's paper, cls_head[B].counter is only cleared when
+			//refinement actually happens.  I think that's wrong, because
+			//just because we couldn't refine with respect to one state-symbol
+			//pair doesn't mean we won't with another, but not clearing
+			//counter prevents this partition from entering suspects again.
+			moveSize_[part] = 0;
+		}
+		checkRep();
+	}
+
+	state_type split(state_type part) {
+		checkRep();
+		state_type newPart = static_cast<state_type>(partitionBounds_.size());
+		//swap states in move[part] into the front of partitions[part]
+		for (state_type i = 0; i < moveSize_[part]; ++i) {
+			state_type victimIdx = partitionBounds_[part].first + i;
+			state_type beneficiaryState = move_[victimIdx];
+			state_type beneficiaryIdx = stateToPartition_[beneficiaryState].second;
+			state_type victimState = partitions_[victimIdx];
+			assert(stateToPartition_[victimState].second == victimIdx);
+			std::swap(partitions_[victimIdx], partitions_[beneficiaryIdx]);
+			std::swap(stateToPartition_[victimState].second, stateToPartition_[beneficiaryState].second);
+			stateToPartition_[beneficiaryState].first = newPart;
+		}
+		state_type oldPartOldStart = partitionBounds_[part].first;
+		partitionBounds_[part].first += moveSize_[part];
+		partitionBounds_.push_back({oldPartOldStart, partitionBounds_[part].first});
+		//partitionBounds_[part].second stays where it is
+		moveSize_.push_back(0);
+		checkRep();
+		return newPart;
+	}
+
+	boost::iterator_range<const state_type*> partition(state_type partitionIdx) const {
+		assert(partitionIdx < partitionBounds_.size());
+		auto p = partitionBounds_[partitionIdx];
+		return boost::make_iterator_range(&partitions_[0] + p.first, &partitions_[0] + p.second);
+	}
+	boost::iterator_range<const state_type*> inverseStep(state_type target, symbol_type symbol) const {
+		assert(target <= state_size_);
+		assert(symbol <= alphabet_size_);
+		std::size_t start = target * (alphabet_size_+1) + symbol;
+		assert((start + 1) < invStart_.size());
+		return boost::make_iterator_range(&inv_[0] + invStart_[start], &inv_[0] + invStart_[start+1]);
+	}
+
+	state_type partitionSize(state_type partitionIdx) const {
+		assert(partitionIdx < partitionBounds_.size());
+		return partitionBounds_[partitionIdx].second - partitionBounds_[partitionIdx].first;
+	}
+
+	void addBetter(state_type partA, state_type partB, symbol_type symbol) {
+		//This is the |B| criterion.
+		int part = (partitionSize(partA) <= partitionSize(partB)) ? partA : partB;
+		add(part, symbol);
+	}
+	void add(state_type part, symbol_type symbol) {
+		checkRep();
+		assert(!contains(part, symbol));
+		L_.push_back({part, symbol});
+		inL_.set(part * alphabet_size_ + symbol);
+		checkRep();
+	}
+	bool contains(int part, int symbol) const {
+		checkRep();
+		return inL_.test(part * alphabet_size_ + symbol);
+	}
+	std::pair<state_type, symbol_type> remove() {
+		checkRep();
+		auto pair = L_.pop_front();
+		inL_.reset(pair.first * alphabet_size_ + pair.second);
+		checkRep();
+		return pair;
+	}
+
+	void checkRep() const {
+#ifndef NDEBUG
+		//We exit early in the trivial empty/all cases, so we always have at
+		//least accept/reject partitions.
+		assert(partitionBounds_.size() >= 2);
+		for (const auto& p : partitionBounds_)
+			assert(p.second - p.first > 0);
+		assert(moveSize_.size() == partitionBounds_.size());
+		assert(suspects_.size() <= partitionBounds_.size());
+
+		//All states in each partition should have the same accept status.
+		//(Established in the very first split.)
+		//TODO: we'd have to move this into subclasses somehow.  But we don't
+		//want virtuals or CRTP duplication, so shrug.
+//		for (state_type i = 0; i < partitionBounds_.size(); ++i)
+//			for (state_type j = partitionBounds_[i].first; j < partitionBounds_[i].second - 1; ++j)
+//				assert(a_.accept(partitions_[j]) == a_.accept(partitions_[j+1]));
+
+		//TODO: every element in partitions_ is within a parititionBounds_ element
+		//TODO: partitions_ is a permutation of [0..n) (is there a cheap way to check?)
+		//TODO: inL is true iff L contains the state-symbol pair (if is cheap, only-if is costly)
+
+		//It's a fixed invariant so maybe not worth checking constantly, but
+		//invStart_ should be nondecreasing and contain only valid indices
+		//into inv_.
+#endif //NDEBUG
+	}
+};
+
+class WorkingAutomatonHopcroft final : protected HopcroftCore {
+public:
+	WorkingAutomatonHopcroft(WorkingAutomaton& a) :
+			//If we really need to save memory, we can use a.transition_size() for inv
+			HopcroftCore(a.state_size(), a.alphabet_size(), a.state_size() * a.alphabet_size()),
+			a_(a) {}
+
+	HopcroftResult minimize() {
+		if (!buildInverseAndInitializePartitions())
+			//we've mutated a_, so must use actual size here
+			return {a_.state_size(), {}, {}};
+		coreLoop();
+		if (partitionBounds_.size() == state_size_) //already minimal
+			return {state_size_, {}, {}};
+		return finish();
+	}
+private:
+	WorkingAutomaton& a_;
 	/**
 	 * @return true if we should continue; flase if the automaton is the
 	 * trivial empty-language or all-strings automaton, in which case we're
@@ -179,86 +340,6 @@ private:
 		return true;
 	}
 
-	void initializeWaitingSet() {
-		//For each symbol, add all but the largest partition to the waiting set.
-		//TODO: factor this into max_element_transform algorithm
-		state_type maxPartition = 0, maxPartitionSize = partitionSize(0);
-		for (state_type p = 1; p < partitionBounds_.size(); ++p)
-			if (partitionSize(p) > maxPartitionSize) {
-				maxPartitionSize = partitionSize(p);
-				maxPartition = p;
-			}
-
-		for (symbol_type i = 0; i < alphabet_size_; ++i)
-			for (state_type p = 0; p < partitionBounds_.size(); ++p)
-				if (p != maxPartition)
-					add(p, i);
-	}
-
-	void collect(state_type part, symbol_type symbol) {
-		checkRep();
-		suspects_.clear();
-		for (state_type target : partition(part))
-			for (state_type source : inverseStep(target, symbol)) {
-				state_type invPart = stateToPartition_[source].first;
-				//TODO: if partitionSize(invPart) == 1, we shouldn't bother
-				//adding it to suspects (and checking it later).  This might
-				//be important for no-op re-minimization of large automata,
-				//to avoid unnecessarily growing suspects_.  (Test first.)
-				if (moveSize_[invPart] == 0) //only add to suspects if not already present
-					suspects_.push_back(invPart);
-				move_[partitionBounds_[invPart].first + (moveSize_[invPart]++)] = source;
-				assert(moveSize_[invPart] <= partitionSize(invPart));
-			}
-		checkRep();
-	}
-
-	void refine() {
-		checkRep();
-		for (state_type part : suspects_) {
-			if (moveSize_[part] < partitionSize(part)) {
-				state_type newPart = split(part);
-				//This is done unconditionally outside this if.
-//					moveSize_[part] = 0;
-				for (symbol_type symbol = 0; symbol < alphabet_size_; ++symbol)
-					if (contains(part, symbol))
-						add(newPart, symbol);
-					else
-						addBetter(part, newPart, symbol);
-			}
-			//In Knuutila's paper, cls_head[B].counter is only cleared when
-			//refinement actually happens.  I think that's wrong, because
-			//just because we couldn't refine with respect to one state-symbol
-			//pair doesn't mean we won't with another, but not clearing
-			//counter prevents this partition from entering suspects again.
-			moveSize_[part] = 0;
-		}
-		checkRep();
-	}
-
-	state_type split(state_type part) {
-		checkRep();
-		state_type newPart = static_cast<state_type>(partitionBounds_.size());
-		//swap states in move[part] into the front of partitions[part]
-		for (state_type i = 0; i < moveSize_[part]; ++i) {
-			state_type victimIdx = partitionBounds_[part].first + i;
-			state_type beneficiaryState = move_[victimIdx];
-			state_type beneficiaryIdx = stateToPartition_[beneficiaryState].second;
-			state_type victimState = partitions_[victimIdx];
-			assert(stateToPartition_[victimState].second == victimIdx);
-			std::swap(partitions_[victimIdx], partitions_[beneficiaryIdx]);
-			std::swap(stateToPartition_[victimState].second, stateToPartition_[beneficiaryState].second);
-			stateToPartition_[beneficiaryState].first = newPart;
-		}
-		state_type oldPartOldStart = partitionBounds_[part].first;
-		partitionBounds_[part].first += moveSize_[part];
-		partitionBounds_.push_back({oldPartOldStart, partitionBounds_[part].first});
-		//partitionBounds_[part].second stays where it is
-		moveSize_.push_back(0);
-		checkRep();
-		return newPart;
-	}
-
 	HopcroftResult finish() {
 		state_type initialStatePart = stateToPartition_[0].first;
 		//Free memory.
@@ -326,78 +407,10 @@ private:
 		}
 		return {new_state_size, std::move(comes_from), std::move(remap)};
 	}
-
-	boost::iterator_range<const state_type*> partition(state_type partitionIdx) const {
-		assert(partitionIdx < partitionBounds_.size());
-		auto p = partitionBounds_[partitionIdx];
-		return boost::make_iterator_range(&partitions_[0] + p.first, &partitions_[0] + p.second);
-	}
-	boost::iterator_range<const state_type*> inverseStep(state_type target, symbol_type symbol) const {
-		assert(target <= state_size_);
-		assert(symbol <= alphabet_size_);
-		std::size_t start = target * (alphabet_size_+1) + symbol;
-		assert((start + 1) < invStart_.size());
-		return boost::make_iterator_range(&inv_[0] + invStart_[start], &inv_[0] + invStart_[start+1]);
-	}
-
-	state_type partitionSize(state_type partitionIdx) const {
-		assert(partitionIdx < partitionBounds_.size());
-		return partitionBounds_[partitionIdx].second - partitionBounds_[partitionIdx].first;
-	}
-
-	void addBetter(state_type partA, state_type partB, symbol_type symbol) {
-		//This is the |B| criterion.
-		int part = (partitionSize(partA) <= partitionSize(partB)) ? partA : partB;
-		add(part, symbol);
-	}
-	void add(state_type part, symbol_type symbol) {
-		checkRep();
-		assert(!contains(part, symbol));
-		L_.push_back({part, symbol});
-		inL_.set(part * alphabet_size_ + symbol);
-		checkRep();
-	}
-	bool contains(int part, int symbol) const {
-		checkRep();
-		return inL_.test(part * alphabet_size_ + symbol);
-	}
-	std::pair<state_type, symbol_type> remove() {
-		checkRep();
-		auto pair = L_.pop_front();
-		inL_.reset(pair.first * alphabet_size_ + pair.second);
-		checkRep();
-		return pair;
-	}
-
-	void checkRep() const {
-#ifndef NDEBUG
-		//We exit early in the trivial empty/all cases, so we always have at
-		//least accept/reject partitions.
-		assert(partitionBounds_.size() >= 2);
-		for (const auto& p : partitionBounds_)
-			assert(p.second - p.first > 0);
-		assert(moveSize_.size() == partitionBounds_.size());
-		assert(suspects_.size() <= partitionBounds_.size());
-
-		//All states in each partition should have the same accept status.
-		//(Established in the very first split.)
-		for (state_type i = 0; i < partitionBounds_.size(); ++i)
-			for (state_type j = partitionBounds_[i].first; j < partitionBounds_[i].second - 1; ++j)
-				assert(a_.accept(partitions_[j]) == a_.accept(partitions_[j+1]));
-
-		//TODO: every element in partitions_ is within a parititionBounds_ element
-		//TODO: partitions_ is a permutation of [0..n) (is there a cheap way to check?)
-		//TODO: inL is true iff L contains the state-symbol pair (if is cheap, only-if is costly)
-
-		//It's a fixed invariant so maybe not worth checking constantly, but
-		//invStart_ should be nondecreasing and contain only valid indices
-		//into inv_.
-#endif //NDEBUG
-	}
 };
 
 HopcroftResult hopcroft(WorkingAutomaton& a) {
-	return HopcroftMinimizer(a).minimize();
+	return WorkingAutomatonHopcroft(a).minimize();
 }
 
 } //namespace detail
