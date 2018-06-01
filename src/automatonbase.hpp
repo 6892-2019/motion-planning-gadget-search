@@ -390,6 +390,29 @@ private:
 	google::dense_hash_map<key_type, state_type, boost::hash<key_type>> map_;
 };
 
+
+/**
+ * Despite the name, this represents what the Automaton interface calls a
+ * transition.  TODO: consider swapping the names of Edge and
+ * Automaton::Transition, then exposing transition-list methods, overloads of
+ * for_each_transition, etc.
+ */
+struct Edge {
+	state_type source;
+	symbol_type symbol;
+	state_type target;
+	//TODO: we sort with both of these.  If g++ doesn't const-prop the pointer,
+	//we should make these function objects to force separate code generation.
+	static bool forwards(const Edge& l, const Edge& r) {
+		//TODO: this is "memcmp" order if we want to do that
+		return std::tie(l.source, l.symbol, l.target) < std::tie(r.source, r.symbol, r.target);
+	}
+	static bool backwards(const Edge& l, const Edge& r) {
+		return std::tie(l.target, l.symbol, l.source) < std::tie(r.target, r.symbol, r.source);
+	}
+};
+
+
 //std::unique_ptr<WorkingAutomaton> shuffleAcceptDeterministic(
 //		const WorkingAutomaton& left, const WorkingAutomaton& right, unsigned int alphabet_size);
 } //namespace detail

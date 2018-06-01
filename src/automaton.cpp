@@ -238,6 +238,104 @@ std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumberin
 	return {std::move(survivorFrom), std::move(remap)};
 }
 
+void removeDeadStates(ExplodedAutomaton& a) {
+	//Assuming our exploded automaton came from determinize_explode, we know all
+	//states are reachable, so we only have to see if they're live, then apply
+	//any necessary renumbering.
+	google::dense_hash_set<state_type> live(a.accept.begin(), a.accept.end(),
+			std::numeric_limits<state_type>::max(), a.state_size);
+	circular_deque<state_type, 16> nexts;
+	nexts.reserve(static_cast<decltype(nexts)::size_type>(a.accept.size()));
+	for (auto state : a.accept)
+		nexts.push_back(state);
+
+	std::sort(a.edges.begin(), a.edges.end(), &Edge::backwards);
+	auto inverseOutgoing = [&](state_type s) {
+		return as_range_for_pair(std::equal_range(a.edges.begin(), a.edges.end(), s,overload(
+				[](state_type s, const Edge& e){return s < e.target;},
+				[](const Edge& e, state_type s){return e.target < s;})
+				));
+	};
+	while (!nexts.empty()) {
+		state_type n = nexts.pop_back();
+		for (detail::Edge outgoing : inverseOutgoing(n))
+			if (live.insert(outgoing.source).second)
+				nexts.push_back(outgoing.source);
+	}
+	if (live.empty()) {
+		a.edges.clear();
+		a.accept.clear();
+		return; //caller will deal with it
+	}
+
+	dynarray<state_type> renumbering(a.state_size);
+	std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
+	//renumber 0 to 0 to preserve the language
+	renumbering[0] = 0;
+	state_type newNumber = 1;
+	for (state_type survivor : live)
+		if (survivor != 0)
+			renumbering[survivor] = newNumber++;
+	renumber(a, renumbering);
+	a.state_size = newNumber;
+}
+
+void renumber(ExplodedAutomaton& a, const dynarray<state_type>& numbering) {
+	constexpr state_type dead = std::numeric_limits<state_type>::max();
+	//A hybrid of std::partition and std::for_each: we'll swap dead edges
+	//toward the end and transform live edges.
+	auto edgesEnd = a.edges.end();
+	for (auto i = a.edges.begin(); i != edgesEnd; ++i) {
+		state_type newSource = numbering[i->source], newTarget = numbering[i->target];
+		//If this shows up in the profile, consider making this a bitwise or and
+		//just a single branch.  (two loads/one branch vs. two-ish loads/two branches)
+		if (newSource == dead || newTarget == dead) {
+			//scan backwards to find a live state
+			while (--edgesEnd != i && (numbering[edgesEnd->source] == dead || numbering[edgesEnd->target] == dead));
+			if (edgesEnd == i) break;
+			std::iter_swap(i, edgesEnd);
+			//i changed so we have to reload these
+			newSource = numbering[i->source];
+			newTarget = numbering[i->target];
+		}
+		i->source = newSource;
+		i->target = newTarget;
+	}
+	a.edges.erase(edgesEnd, a.edges.end());
+	auto acceptEnd = a.accept.end();
+	for (auto i = a.accept.begin(); i != acceptEnd; ++i) {
+		state_type newNumber = numbering[*i];
+		if (newNumber == dead) {
+			while (--acceptEnd != i && numbering[*acceptEnd] == dead);
+			if (acceptEnd == i)
+				break;
+			std::iter_swap(i, acceptEnd);
+			newNumber = numbering[*i];
+		}
+		*i = newNumber;
+	}
+	a.accept.erase(acceptEnd, a.accept.end());
+}
+
+void implode(AutomatonBase& dest, ExplodedAutomaton& source) {
+	assert(dest.alphabet_size() == source.alphabet_size);
+	//We don't clear() ourselves because that would set deterministic_, then
+	//keep it updated on every addTrans.  We'd prefer to let the caller clear
+	//and/or reset it (if so privileged).
+	assert(dest.state_size() == 0);
+	//sort for locality when adding/setting
+	std::sort(source.edges.begin(), source.edges.end(), &Edge::forwards);
+	std::sort(source.accept.begin(), source.accept.end());
+	dest.reserve(source.state_size);
+	for (state_type i = 0; i < source.state_size; ++i)
+		dest.addState();
+
+	for (Edge e : source.edges)
+		dest.addTrans(e.source, e.symbol, e.target);
+	for (state_type accepting : source.accept)
+		dest.setAccept(accepting);
+}
+
 [[gnu::cold, noreturn]]
 void determinize_bailout(const AutomatonBase& source) {
 	auto filename = defaultFilename(source);
@@ -370,6 +468,17 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 		}, [&target](auto state, auto b){
 			target.setAccept(state, b);
 		});
+}
+
+ExplodedAutomaton determinize_explode(const AutomatonBase& source) {
+	std::vector<Edge> edges;
+	std::vector<state_type> accept;
+	state_type maxState = 0;
+	determinize(source, [&edges, &maxState](auto from, auto on, auto to){
+			edges.push_back({from, on, to});
+			maxState = std::max(maxState, to);
+		}, [&accept](auto state, auto b){if (b) accept.push_back(state);});
+	return {edges, accept, maxState+1, source.alphabet_size()};
 }
 
 struct Tarjan {

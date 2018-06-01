@@ -304,9 +304,8 @@ template<unsigned int AlphabetSize>
 void Automaton<AlphabetSize>::determinize() {
 	if (deterministic()) return;
 	//TODO: I can't see any way to do this in-place, but it might be better
-	//to store an edge list instead, clear, and commit back into *this.
-	//If we're going to minimize, we might be able to pass that edge list
-	//directly to HopcroftMinimizer, too.
+	//to store an edge list instead, clear, and commit back into *this, or pass
+	//*this but build an edge list, then clear and replay the edge list into *this.
 	Automaton a;
 	detail::determinize_into(*this, a);
 	MAYBE_UNUSED std::size_t oldsize = state_size();
@@ -357,7 +356,7 @@ void Automaton<AlphabetSize>::minimize() {
 		assert(deterministic());
 		return;
 	}
-	determinize();
+	detail::ExplodedAutomaton exp = detail::determinize_explode(*this);
 	//The Java library explicitly checks for the all-strings automaton here,
 	//but it doesn't seem to be necessary.
 	//Java totalizes the automaton here (then removes the added state in
@@ -367,7 +366,18 @@ void Automaton<AlphabetSize>::minimize() {
 	//Instead, we remove dead states before minimizing, to prevent
 	//transitions to dead states from distinguishing states that are
 	//otherwise equivalent.
-	removeDeadStates();
+	detail::removeDeadStates(exp);
+	//The standalone removeDeadStates checks if there are no live states and
+	//empties the automaton, but the exploded version can't, so we do it now.
+	if (exp.state_size == 0) {
+		*this = empty<AlphabetSize>();
+		return;
+	}
+	clear();
+	this->deterministic_ = false; //for speed when imploding
+	implode(*this, exp); //TODO: carry exploded form forward into hopcroft
+	this->deterministic_ = true;
+
 	MAYBE_UNUSED std::size_t oldsize = state_size();
 	detail::HopcroftResult res = detail::hopcroft(*this);
 	if (res.newSize != state_size())

@@ -200,5 +200,21 @@ template<typename T>
 	if (!present) return std::nullopt;
 	return std::make_optional(std::forward<T>(value));
 }
+
+
+//https://stackoverflow.com/q/42987144/3614835 by Vittorio Romeo
+template <typename... Ts>
+struct overloader : Ts... {
+	//TODO: ?
+//    template <typename... TArgs>
+//    overload(TArgs&&... xs) : Ts(std::forward<TArgs>(xs))... {}
+    using Ts::operator()...;
+};
+//template<typename... Ts> overload(Ts...) -> overload<Ts...>;
+template <typename... Ts>
+auto overload(Ts&&... xs) {
+    return overloader<std::decay_t<Ts>...>{std::forward<Ts>(xs)...};
+}
+
 #endif /* ALGOUTILS_HPP */
 

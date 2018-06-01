@@ -215,6 +215,18 @@ std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumberin
 		const decltype(live_states(a))& live);
 
 void determinize_into(const AutomatonBase& source, AutomatonBase& target);
+
+struct ExplodedAutomaton {
+	std::vector<Edge> edges;
+	std::vector<state_type> accept;
+	state_type state_size;
+	symbol_type alphabet_size;
+	//don't bother storing flags -- this is just a temporary representation
+};
+ExplodedAutomaton determinize_explode(const AutomatonBase& source);
+void removeDeadStates(ExplodedAutomaton& a);
+void renumber(ExplodedAutomaton& a, const dynarray<state_type>& numbering);
+void implode(AutomatonBase& dest, ExplodedAutomaton& source);
 } //namespace detail
 
 
