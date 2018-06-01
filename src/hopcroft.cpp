@@ -200,7 +200,7 @@ protected:
 	 */
 	void initializeInv(std::vector<Edge>& edgelist) {
 		//TODO: use a parallel sort (beyond a size threshold)
-		std::sort(edgelist.begin(), edgelist.end(), &Edge::backwards);
+		std::sort(edgelist.begin(), edgelist.end(), Edge::Backwards());
 		edgelist.push_back({std::numeric_limits<state_type>::max(), std::numeric_limits<symbol_type>::max(), std::numeric_limits<state_type>::max()});
 		std::size_t invEltsIdx = 0;
 		for (state_type stateIdx = 0; stateIdx < state_size_; ++stateIdx) {

@@ -401,15 +401,17 @@ struct Edge {
 	state_type source;
 	symbol_type symbol;
 	state_type target;
-	//TODO: we sort with both of these.  If g++ doesn't const-prop the pointer,
-	//we should make these function objects to force separate code generation.
-	static bool forwards(const Edge& l, const Edge& r) {
-		//TODO: this is "memcmp" order if we want to do that
-		return std::tie(l.source, l.symbol, l.target) < std::tie(r.source, r.symbol, r.target);
-	}
-	static bool backwards(const Edge& l, const Edge& r) {
-		return std::tie(l.target, l.symbol, l.source) < std::tie(r.target, r.symbol, r.source);
-	}
+	struct Forwards final {
+		bool operator()(const Edge& l, const Edge& r) const {
+			//TODO: this is "memcmp" order if we want to do that
+			return std::tie(l.source, l.symbol, l.target) < std::tie(r.source, r.symbol, r.target);
+		}
+	};
+	struct Backwards final {
+		bool operator()(const Edge& l, const Edge& r) const {
+			return std::tie(l.target, l.symbol, l.source) < std::tie(r.target, r.symbol, r.source);
+		}
+	};
 };
 
 struct ExplodedAutomaton {

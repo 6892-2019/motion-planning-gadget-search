@@ -249,7 +249,7 @@ void removeDeadStates(ExplodedAutomaton& a) {
 	for (auto state : a.accept)
 		nexts.push_back(state);
 
-	std::sort(a.edges.begin(), a.edges.end(), &Edge::backwards);
+	std::sort(a.edges.begin(), a.edges.end(), Edge::Backwards());
 	auto inverseOutgoing = [&](state_type s) {
 		return as_range_for_pair(std::equal_range(a.edges.begin(), a.edges.end(), s,overload(
 				[](state_type s, const Edge& e){return s < e.target;},
@@ -324,7 +324,7 @@ void implode(AutomatonBase& dest, ExplodedAutomaton& source) {
 	//and/or reset it (if so privileged).
 	assert(dest.state_size() == 0);
 	//sort for locality when adding/setting
-	std::sort(source.edges.begin(), source.edges.end(), &Edge::forwards);
+	std::sort(source.edges.begin(), source.edges.end(), Edge::Forwards());
 	std::sort(source.accept.begin(), source.accept.end());
 	dest.reserve(source.state_size);
 	for (state_type i = 0; i < source.state_size; ++i)
