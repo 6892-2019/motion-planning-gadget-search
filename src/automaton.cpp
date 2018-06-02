@@ -269,8 +269,13 @@ void removeDeadStates(ExplodedAutomaton& a) {
 		return; //caller will deal with it
 	}
 
-	dynarray<state_type> renumbering(a.state_size);
+	auto& renumbering = inverseIndex;
 	std::fill(renumbering.begin(), renumbering.end(), std::numeric_limits<state_type>::max());
+#ifndef NDEBUG
+	//inverseIndex is one larger than it needs to be.  Write a wild value there
+	//to catch any accidental usages.
+	renumbering[renumbering.size()-1] = std::numeric_limits<state_type>::max() - 42;
+#endif
 	//renumber 0 to 0 to preserve the language
 	renumbering[0] = 0;
 	state_type newNumber = 1;
