@@ -322,23 +322,31 @@ void renumber(ExplodedAutomaton& a, const dynarray<state_type>& numbering) {
 	a.accept.erase(acceptEnd, a.accept.end());
 }
 
-void implode(AutomatonBase& dest, ExplodedAutomaton& source) {
+namespace {
+template<class Renumbering>
+void implode(AutomatonBase& dest, const ExplodedAutomaton& source, Renumbering&& map) {
 	assert(dest.alphabet_size() == source.alphabet_size);
 	//We don't clear() ourselves because that would set deterministic_, then
 	//keep it updated on every addTrans.  We'd prefer to let the caller clear
 	//and/or reset it (if so privileged).
 	assert(dest.state_size() == 0);
-	//We could sort for locality purposes here, but it's not worth it.
-//	std::sort(source.edges.begin(), source.edges.end(), Edge::Forwards());
-//	std::sort(source.accept.begin(), source.accept.end());
+
 	dest.reserve(source.state_size);
 	for (state_type i = 0; i < source.state_size; ++i)
 		dest.addState();
-
 	for (Edge e : source.edges)
-		dest.addTrans(e.source, e.symbol, e.target);
+		dest.addTrans(map[e.source], e.symbol, map[e.target]);
 	for (state_type accepting : source.accept)
-		dest.setAccept(accepting);
+		dest.setAccept(map[accepting]);
+}
+}
+
+void implode(AutomatonBase& dest, const ExplodedAutomaton& source) {
+	implode(dest, source, identity_permutation());
+}
+
+void implodeRenumber(AutomatonBase& dest, const ExplodedAutomaton& source, const dynarray<state_type>& renumbering) {
+	implode(dest, source, renumbering);
 }
 
 [[gnu::cold, noreturn]]

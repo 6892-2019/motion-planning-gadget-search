@@ -218,7 +218,8 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target);
 ExplodedAutomaton determinize_explode(const AutomatonBase& source);
 void removeDeadStates(ExplodedAutomaton& a);
 void renumber(ExplodedAutomaton& a, const dynarray<state_type>& numbering);
-void implode(AutomatonBase& dest, ExplodedAutomaton& source);
+void implode(AutomatonBase& dest, const ExplodedAutomaton& source);
+void implodeRenumber(AutomatonBase& dest, const ExplodedAutomaton& source, const dynarray<state_type>& renumbering);
 } //namespace detail
 
 

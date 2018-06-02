@@ -383,22 +383,20 @@ void Automaton<AlphabetSize>::minimize() {
 
 	MAYBE_UNUSED std::size_t oldsize = state_size();
 	dynarray<state_type> res = detail::hopcroft(exp);
-	if (res.size())
-		//TODO: we could fuse this renumbering with the implode/this->operator=
-		detail::renumber(exp, res);
-		//If we needed to keep using the exploded automaton we'd have to unique
-		//the edge and accept lists, but we don't.
 	clear();
-	this->deterministic_ = false; //for speed when imploding
-	implode(*this, exp);
+	this->deterministic_ = false; //for speed when imploding; we set it below
+	if (res.size())
+		detail::implodeRenumber(*this, exp, res);
+	else
+		implode(*this, exp);
+	deterministic_ = minimal_ = true;
 
 	AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << state_size() << std::endl);
 #ifndef NDEBUG
-	//make sure hopcroft and/or compress didn't screw up
+	//make sure hopcroft didn't screw up
 	for (state_type s = 0; s < state_size(); ++s)
 		assert(isStateDeterministic(s));
 #endif
-	deterministic_ = minimal_ = true;
 }
 
 template<unsigned int AlphabetSize>
