@@ -257,6 +257,9 @@ TEST_CASE("AutomatonTest_Minimize19") {
 	auto twoAccept2M = minimizePreservesLanguage(twoAccept2);
 	CHECK_EQ(twoAccept2M.state_size(), 2);
 }
+TEST_CASE("AutomatonTest_Minimize20") {
+	minimizePreservesLanguage(epsilon<2>());
+}
 
 TEST_CASE("AutomatonTest_CatAltMinimize") {
 	auto a = alt<2>({lit<2>(0), lit<2>(1)});
