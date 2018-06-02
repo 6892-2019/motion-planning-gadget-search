@@ -250,21 +250,18 @@ void removeDeadStates(ExplodedAutomaton& a) {
 		nexts.push_back(state);
 
 	std::sort(a.edges.begin(), a.edges.end(), [](const Edge& l, const Edge& r){return l.target < r.target;});
-	dynarray<state_type> index(a.state_size+1);
+	dynarray<state_type> inverseIndex(a.state_size+1);
 	auto indexBuildingPos = a.edges.begin();
-	index[0] = 0;
+	inverseIndex[0] = 0;
 	for (state_type s = 0; s < a.state_size; ++s) {
 		indexBuildingPos = std::find_if_not(indexBuildingPos, a.edges.end(), [s](const Edge& e){return e.target == s;});
-		index[s+1] = std::distance(a.edges.begin(), indexBuildingPos);
+		inverseIndex[s+1] = numeric_cast<state_type>(std::distance(a.edges.begin(), indexBuildingPos));
 	}
-	auto inverseOutgoing = [&](state_type s) {
-		return make_range_for_pair(a.edges.begin()+index[s], a.edges.begin()+index[s+1]);
-	};
 	while (!nexts.empty()) {
 		state_type n = nexts.pop_back();
-		for (detail::Edge outgoing : inverseOutgoing(n))
-			if (live.insert(outgoing.source).second)
-				nexts.push_back(outgoing.source);
+		for (auto start = inverseIndex[n], end = inverseIndex[n+1]; start < end; ++start)
+			if (live.insert(a.edges[start].source).second)
+				nexts.push_back(a.edges[start].source);
 	}
 	if (live.empty()) {
 		a.edges.clear();
