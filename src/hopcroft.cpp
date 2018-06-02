@@ -462,9 +462,15 @@ private:
 			partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
 		}, newbounds;
 		boost::dynamic_bitset<std::size_t> outgoing(state_size_ * alphabet_size_);
-		for (const Edge& e : a_.edges)
+		automaton::impl::bitset<unsigned int, 16> activeAlphabet;
+		for (const Edge& e : a_.edges) {
 			outgoing.set(e.symbol * state_size_ + e.source);
+			//TODO: for small alphabet sizes, doing a write per-edge is likely
+			//not worth it.
+			activeAlphabet.set(e.symbol);
+		}
 		for (symbol_type s = 0; s < alphabet_size_; ++s) {
+			if (!activeAlphabet[s]) continue;
 			newbounds.clear();
 			auto outgoingBase = s * state_size_;
 			for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
