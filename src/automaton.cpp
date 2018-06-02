@@ -242,12 +242,15 @@ void removeDeadStates(ExplodedAutomaton& a) {
 	//Assuming our exploded automaton came from determinize_explode, we know all
 	//states are reachable, so we only have to see if they're live, then apply
 	//any necessary renumbering.
-	google::dense_hash_set<state_type> live(a.accept.begin(), a.accept.end(),
-			std::numeric_limits<state_type>::max(), a.state_size);
+//	google::dense_hash_set<state_type> live(a.accept.begin(), a.accept.end(),
+//			std::numeric_limits<state_type>::max(), a.state_size);
+	boost::dynamic_bitset<std::size_t> live(a.state_size);
 	circular_deque<state_type, 16> nexts;
 	nexts.reserve(static_cast<decltype(nexts)::size_type>(a.accept.size()));
-	for (auto state : a.accept)
+	for (auto state : a.accept) {
+		live.set(state);
 		nexts.push_back(state);
+	}
 
 	std::sort(a.edges.begin(), a.edges.end(), [](const Edge& l, const Edge& r){return l.target < r.target;});
 	dynarray<state_type> inverseIndex(a.state_size+1);
@@ -260,10 +263,12 @@ void removeDeadStates(ExplodedAutomaton& a) {
 	while (!nexts.empty()) {
 		state_type n = nexts.pop_back();
 		for (auto start = inverseIndex[n], end = inverseIndex[n+1]; start < end; ++start)
-			if (live.insert(a.edges[start].source).second)
+//			if (live.insert(a.edges[start].source).second)
+			if (!live.test_set(a.edges[start].source)) //if not already set, it was newly inserted
 				nexts.push_back(a.edges[start].source);
 	}
-	if (live.empty()) {
+//	if (live.empty()) {
+	if (live.none()) {
 		a.edges.clear();
 		a.accept.clear();
 		return; //caller will deal with it
@@ -276,11 +281,16 @@ void removeDeadStates(ExplodedAutomaton& a) {
 	//to catch any accidental usages.
 	renumbering[renumbering.size()-1] = std::numeric_limits<state_type>::max() - 42;
 #endif
-	//renumber 0 to 0 to preserve the language
-	renumbering[0] = 0;
-	state_type newNumber = 1;
-	for (state_type survivor : live)
-		if (survivor != 0)
+//	//renumber 0 to 0 to preserve the language
+//	renumbering[0] = 0;
+//	state_type newNumber = 1;
+	state_type newNumber = 0;
+//	for (state_type survivor : live)
+	//We know 0 will be live because live was initialized to the set of reachable
+	//states and the initial state is always reachable.  Then this loop always
+	//maps 0 to 0.
+	for (decltype(live)::size_type survivor = 0; survivor != decltype(live)::npos; survivor = live.find_next(survivor))
+//		if (survivor != 0)
 			renumbering[survivor] = newNumber++;
 	renumber(a, renumbering);
 	a.state_size = newNumber;
