@@ -359,6 +359,12 @@ void Automaton<AlphabetSize>::minimize() {
 		return;
 	}
 	detail::ExplodedAutomaton exp = detail::determinize_explode(*this);
+	//All states in the result of determinize_explode are reachable.  If none of
+	//them are accepting, we're done.
+	if (exp.accept.empty()) {
+		*this = empty<AlphabetSize>();
+		return;
+	}
 	//The Java library explicitly checks for the all-strings automaton here,
 	//but it doesn't seem to be necessary.
 	//Java totalizes the automaton here (then removes the added state in
@@ -369,10 +375,9 @@ void Automaton<AlphabetSize>::minimize() {
 	//transitions to dead states from distinguishing states that are
 	//otherwise equivalent.
 	detail::removeDeadStates(exp);
-	//The standalone removeDeadStates checks if there are no live states and
-	//empties the automaton, but the exploded version can't, so we do it now.
-	if (exp.state_size == 0) {
-		*this = empty<AlphabetSize>();
+	if (exp.edges.empty()) {
+		assert(std::find(exp.accept.begin(), exp.accept.end(), 0) != exp.accept.end());
+		*this = epsilon<AlphabetSize>();
 		return;
 	}
 

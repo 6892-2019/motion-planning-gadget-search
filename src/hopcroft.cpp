@@ -32,6 +32,7 @@ protected:
 			move_(state_size_), moveSize_(), suspects_() {}
 
 	void coreLoop() {
+		checkRep();
 		initializeStateToPartition();
 		initializeWaitingSet();
 		while (!L_.empty()) {
@@ -412,7 +413,10 @@ public:
 	}
 
 	dynarray<state_type> minimize() {
-		initialize();
+		if (!initialize()) {
+			move_.clear();
+			return std::move(move_);
+		}
 		coreLoop();
 		if (partitionBounds_.size() == state_size_) { //already minimal
 			move_.clear();
@@ -422,10 +426,17 @@ public:
 	}
 private:
 	ExplodedAutomaton& a_;
-	void initialize() {
+	bool initialize() {
 		auto [nonfinalIdx, finalIdx] = initialPartitionOnAccept();
 
 		bool crashed = a_.edges.size() != state_size_ * alphabet_size_;
+		if ((finalIdx+1) == 0U && !crashed) {
+			//all states are accepting
+			a_.edges.clear();
+			a_.accept.clear();
+			a_.accept.push_back(0);
+			return false;
+		}
 		if (crashed)
 			partitionOnCrashing(nonfinalIdx);
 		else {
@@ -436,6 +447,7 @@ private:
 		}
 
 		initializeInv(a_.edges);
+		return true;
 	}
 	std::pair<unsigned int, unsigned int> initialPartitionOnAccept() {
 		unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);

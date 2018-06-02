@@ -239,15 +239,7 @@ std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumberin
 }
 
 void removeDeadStates(ExplodedAutomaton& a) {
-	//Assuming our exploded automaton came from determinize_explode, we know all
-	//states are reachable, so we only have to see if they're live.  If there
-	//are no accept states among them, all states are dead.
-	if (a.accept.empty()) {
-		a.edges.clear();
-		a.accept.clear();
-		return; //caller will deal with it
-	}
-
+	assert(!a.accept.empty());
 	//Instead of
 	//using a hash set or bitset to track liveness, we just go ahead and build
 	//the renumbering during our backward search.  (This does have the downside
