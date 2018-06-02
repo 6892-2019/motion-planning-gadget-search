@@ -461,19 +461,16 @@ private:
 		std::vector<typename decltype(partitions_)::iterator> bounds = {
 			partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
 		}, newbounds;
-		std::sort(a_.edges.begin(), a_.edges.end(),
-				[](const Edge& l, const Edge& r){return l.symbol < r.symbol;});
-		boost::dynamic_bitset<std::size_t> outgoing(state_size_);
-		auto edgeit = a_.edges.begin();
+		boost::dynamic_bitset<std::size_t> outgoing(state_size_ * alphabet_size_);
+		for (const Edge& e : a_.edges)
+			outgoing.set(e.symbol * state_size_ + e.source);
 		for (symbol_type s = 0; s < alphabet_size_; ++s) {
-			outgoing.reset();
-			while (edgeit != a_.edges.end() && edgeit->symbol == s)
-				outgoing.set(edgeit++->source);
 			newbounds.clear();
+			auto outgoingBase = s * state_size_;
 			for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
 				newbounds.push_back(bounds[i]);
-				newbounds.push_back(std::partition(bounds[i], bounds[i+1], [&outgoing](state_type state) {
-					return outgoing.test(state);
+				newbounds.push_back(std::partition(bounds[i], bounds[i+1], [&outgoing, outgoingBase](state_type state) {
+					return outgoing.test(outgoingBase + state);
 				}));
 				newbounds.push_back(bounds[i+1]);
 			}
