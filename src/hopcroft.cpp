@@ -473,14 +473,15 @@ private:
 			if (!activeAlphabet[s]) continue;
 			newbounds.clear();
 			auto outgoingBase = s * state_size_;
+			newbounds.push_back(bounds[0]);
 			for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
-				newbounds.push_back(bounds[i]);
-				newbounds.push_back(std::partition(bounds[i], bounds[i+1], [&outgoing, outgoingBase](state_type state) {
+				auto divider = std::partition(bounds[i], bounds[i+1], [&outgoing, outgoingBase](state_type state) {
 					return outgoing.test(outgoingBase + state);
-				}));
+				});
+				if (divider != bounds[i] && divider != bounds[i+1])
+					newbounds.push_back(divider);
 				newbounds.push_back(bounds[i+1]);
 			}
-			newbounds.erase(std::unique(newbounds.begin(), newbounds.end()), newbounds.end());
 			bounds.swap(newbounds);
 		}
 		partitionBounds_.reserve(bounds.size()-1);
