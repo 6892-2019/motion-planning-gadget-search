@@ -250,15 +250,15 @@ void removeDeadStates(ExplodedAutomaton& a) {
 		nexts.push_back(state);
 
 	std::sort(a.edges.begin(), a.edges.end(), [](const Edge& l, const Edge& r){return l.target < r.target;});
-	dynarray<decltype(a.edges)::iterator> index(a.state_size+1);
+	dynarray<state_type> index(a.state_size+1);
 	auto indexBuildingPos = a.edges.begin();
-	index[0] = indexBuildingPos;
+	index[0] = 0;
 	for (state_type s = 0; s < a.state_size; ++s) {
 		indexBuildingPos = std::find_if_not(indexBuildingPos, a.edges.end(), [s](const Edge& e){return e.target == s;});
-		index[s+1] = indexBuildingPos;
+		index[s+1] = std::distance(a.edges.begin(), indexBuildingPos);
 	}
 	auto inverseOutgoing = [&](state_type s) {
-		return make_range_for_pair(index[s], index[s+1]);
+		return make_range_for_pair(a.edges.begin()+index[s], a.edges.begin()+index[s+1]);
 	};
 	while (!nexts.empty()) {
 		state_type n = nexts.pop_back();
