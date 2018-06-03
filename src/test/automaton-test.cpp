@@ -77,6 +77,21 @@ TEST_CASE("AutomatonTest_Determinize07") {
 	auto posMultOf3 = plus<2>(nCopies<2>(any<2>(), 3));
 	determinizePreservesLanguage(conj<2>(posMultOf3, nCopies<2>(any<2>(), 6))); //finitePosMultOf3
 }
+TEST_CASE("AutomatonTest_Determinize08") {
+	//An automaton with pathologically many alternatives of 0, 0, to stress the
+	//set-paging stuff in determinize.
+	Automaton<2> a;
+	a.reserve(1500);
+	a.addState();
+	a.addState();
+	a.setAccept(1);
+	for (int i = 0; a.state_size() < 1500; ++i) {
+		auto s = a.addState();
+		a.addTrans(0, 0, s);
+		a.addTrans(s, 0, 1);
+	}
+	determinizePreservesLanguage(a);
+}
 
 TEST_CASE("AutomatonTest_Totalize") {
 	auto a = range<2>(lit<2>(0), 2, 6);

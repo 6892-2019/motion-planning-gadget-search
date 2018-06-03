@@ -2,6 +2,7 @@
 #include "automaton.hpp"
 #include "packedautomaton.hpp"
 #include "automaton-io.hpp"
+#include <jemalloc/jemalloc.h>
 
 using namespace automaton;
 
@@ -349,69 +350,159 @@ void implodeRenumber(AutomatonBase& dest, const ExplodedAutomaton& source, const
 	implode(dest, source, renumbering);
 }
 
-[[gnu::cold, noreturn]]
-void determinize_bailout(const AutomatonBase& source) {
-	auto filename = defaultFilename(source);
-	serialize(source, filename);
-	std::cout << "bailing out of determinize; automaton written to " << filename << std::endl;
-	std::terminate();
-}
+//The only complete/good implementation of monotonic_buffer_resource is in
+//Boost.Container, and it has a clownshoes problem due to block_slist.  Instead
+//we'll write our own "resource", which isn't actually a memory_resource, but
+//easily could be if I wanted to use it with an old-style allocator (hopefully
+//Boost.Container's allocator is good enough).
+class monotonic_buffer_resource {
+private:
+	void* buf_;
+	std::size_t remaining_, nextSize_;
+	//We might do extra allocations here, but it's much easier to avoid freeing
+	//future pointers and avoid clownshoes by keeping metadata separate (instead
+	//of a singly-linked header list).
+	boost::container::small_vector<std::unique_ptr<void, free_deleter>, 16> pages_;
+public:
+	//We don't bother with an upstream resource.
+	explicit monotonic_buffer_resource(std::size_t initial_size) :
+			buf_(nullptr), remaining_(0), nextSize_(initial_size) {}
+	//This constructor takes an existing buffer and doesn't free it.  This might
+	//be a std::array, for example.  We avoid freeing by just not remembering it.
+	monotonic_buffer_resource(void* buffer, std::size_t buffer_size) :
+			buf_(buffer), remaining_(buffer_size), nextSize_(buffer_size*2) {}
+
+	void* allocate(std::size_t bytes, std::size_t alignment = alignof(std::max_align_t)) {
+		return do_allocate(bytes, alignment);
+	}
+	void deallocate(void* p, std::size_t bytes, std::size_t alignment = alignof(std::max_align_t)) {
+		return do_deallocate(p, bytes, alignment);
+	}
+
+	//extension
+	template<typename T>
+	T* allocate(std::size_t count, std::size_t alignment = alignof(T)) {
+		std::size_t bytes = count*sizeof(T); //TODO: overflow
+		return static_cast<T*>(allocate(bytes, alignment));
+	}
+protected: //private after a DR, but they'd be protected if we used Boost.Container's impls
+	void* do_allocate(std::size_t bytes, std::size_t alignment = alignof(std::max_align_t)) {
+		if (void* p = attempt(bytes, alignment))
+			return p;
+
+		nextSize_ = std::max(nextSize_, bytes);
+#ifdef __SANITIZE_ADDRESS__
+		std::size_t actual = nextSize_;
+#else
+		std::size_t actual = nallocx(nextSize_, 0);
+#endif
+		pages_.emplace_back(std::malloc(actual));
+		buf_ = pages_.back().get();
+		remaining_ = actual;
+		nextSize_ = actual * 2; //TODO: tune growth factor
+
+		void* p = attempt(bytes, alignment);
+		assert(p && "we just made space for this");
+		return p;
+	}
+	void do_deallocate(void*, std::size_t, std::size_t) {}
+private:
+	void* attempt(std::size_t bytes, std::size_t alignment) {
+		void* r = std::align(alignment, bytes, buf_, remaining_);
+		if (r) {
+			//Why does std::align use void* anyway?
+			buf_ = static_cast<void*>(static_cast<std::byte*>(r) + bytes);
+			remaining_ -= bytes;
+		}
+		return r; //nullptr if we failed
+	}
+};
+
+class vectorish {
+	constexpr static std::size_t minimum_alloc_size = 16;
+	monotonic_buffer_resource& alloc_;
+	//begin_ points 1 ahead of the start of the memory block to allow space for
+	//the size in the data()/raw representation.
+	state_type* begin_;
+	state_type* end_;
+	state_type* capacity_;
+public:
+	vectorish(monotonic_buffer_resource& alloc) : alloc_(alloc) {
+		state_type* p = alloc_.allocate<state_type>(minimum_alloc_size);
+		begin_ = p + 1; //leave space for size in data() representation
+		end_ = begin_;
+		capacity_ = p + minimum_alloc_size;
+	}
+	state_type size() {
+		return static_cast<state_type>(end_ - begin_);
+	}
+	bool empty() {
+		return size() == 0;
+	}
+	state_type* begin() {
+		return begin_;
+	}
+	state_type* end() {
+		return end_;
+	}
+	state_type* data() {
+		*(begin_ - 1) = size();
+		return begin_ - 1;
+	}
+	void push_back(state_type state) {
+		if (end_ == capacity_) {
+			std::size_t cap = capacity_ - (begin_-1);
+			std::size_t newcap = std::max(cap * 2, minimum_alloc_size);
+			state_type* p = alloc_.allocate<state_type>(newcap);
+			end_ = std::copy(begin(), end(), p+1);
+			//Just futureproofing in case we change to, e.g., a pool resource.
+			alloc_.deallocate(begin_ - 1, cap * sizeof(state_type));
+			begin_ = p + 1;
+			capacity_ = p + newcap;
+		}
+		*end_++ = state;
+	}
+	//for erase-unique idiom, that's it
+	void eraseAfter(state_type* newEnd) {
+		end_ = newEnd;
+	}
+	void clear() {
+		end_ = begin_;
+	}
+	/**
+	 * Stop managing the memory; create a new vector in any remaining capacity.
+	 */
+	void release() {
+		assert((*(begin_-1) == size()) && "releasing without setting size; shouldn't you have called data() first?");
+		if (end_ == capacity_) {
+			state_type* p = alloc_.allocate<state_type>(minimum_alloc_size);
+			begin_ = p + 1; //leave space for size in data() representation
+			end_ = begin_;
+			capacity_ = p + minimum_alloc_size;
+		} else {
+			begin_ = end_ + 1;
+			end_ = begin_;
+			//capacity_ unchanged
+			//In particular, if there's just one unit of capacity left, we get a
+			//0-capacity vector, but push_back handles that fine.
+		}
+	}
+};
 
 template<class AddTransAction, class SetAcceptAction>
 void determinize(const AutomatonBase& source, AddTransAction addTrans, SetAcceptAction setAccept) {
 	const state_type state_size = source.state_size();
 	const symbol_type alphabet_size = source.alphabet_size();
-	const int DETERMINIZE_PAGE_SIZE = 4096, DETERMINIZE_PAGE_UNITS = DETERMINIZE_PAGE_SIZE/sizeof(state_type);
-	//manages page lifetime: free them all at the end
-	boost::container::small_vector<std::unique_ptr<state_type, free_deleter>, 8> page_handles;
-	page_handles.emplace_back(static_cast<state_type*>(std::malloc(DETERMINIZE_PAGE_SIZE)));
-	//points to the start of the current set
-	state_type* alloc_next = page_handles.front().get();
-	//points past the end of the current set (next append slot)
-	state_type* alloc_cur = alloc_next;
-	//points to the end of the current page
-	state_type* alloc_page_end = page_handles.front().get()+DETERMINIZE_PAGE_UNITS;
-	auto set_append = [&](state_type state) {
-		if (alloc_cur == alloc_page_end) {
-			if (alloc_next == page_handles.back().get()) {
-				//TODO: realloc this set into a double-sized page (then skip the below new-page alloc)
-				determinize_bailout(source);
-			}
-			//TODO: if we're allocating lots of pages, may want to start doubling size
-			page_handles.emplace_back(static_cast<state_type*>(std::malloc(DETERMINIZE_PAGE_SIZE)));
-			//copy the current partial set into the new page
-			state_type* next_next = page_handles.back().get();
-			state_type* next_cur = std::copy(alloc_next, alloc_cur, next_next);
-			alloc_next = next_next;
-			alloc_cur = next_cur;
-			alloc_page_end = alloc_next + DETERMINIZE_PAGE_UNITS;
-		}
-		++(*alloc_next); //increment size first
-		//If we're appending the 0 size of a new set, this write clobbers
-		//the previous increment (on purpose).
-		*alloc_cur++ = state;
-	};
-	set_append(0); //each set begins with a size
-	auto commit_set = [&]() -> state_type* {
-		state_type* set_start = alloc_next;
-		alloc_next = alloc_cur;
-		set_append(0); //size of the next set
-		return set_start;
-	};
-	auto clear_set = [&]() {
-		*alloc_next = 0; //reset the size
-		alloc_cur = alloc_next+1;
-	};
+	const int DETERMINIZE_INITIAL_SIZE = 4096;
+	monotonic_buffer_resource alloc(DETERMINIZE_INITIAL_SIZE);
 
+	//A set is a sorted sequence of state_type, with a preceding state_type
+	//storing the set's size.
 	auto set_begin = [](state_type* set) {
 		return set+1;
 	};
 	auto set_end = [&](state_type* set) {
 		return set_begin(set) + *set;
-	};
-	auto set_size = [&](state_type* set) {
-		assert(*set == numeric_cast<state_type>(set_end(set) - set_begin(set)));
-		return *set;
 	};
 
 	auto set_equal = [&](state_type* left, state_type* right) {
@@ -430,14 +521,18 @@ void determinize(const AutomatonBase& source, AddTransAction addTrans, SetAccept
 	newstate.set_empty_key(&empty_set);
 	circular_deque<std::pair<state_type*, state_type>, 16> worklist;
 
-	state_type newStates = 1; //start with an initial state
-	set_append(0);
-	state_type* first_set = commit_set();
-	newstate.insert({first_set, 0});
-	worklist.push_back({first_set, 0});
+	vectorish next(alloc);
+	state_type newStates = 0; //start with an initial state
+	next.push_back(0);
+	state_type* first_set = next.data();
+	newstate.insert({first_set, newStates});
+	worklist.push_back({first_set, newStates++});
+	next.release();
 
 	while (!worklist.empty()) {
 		auto [current_set, current_state] = worklist.pop_back();
+		//TODO: we could set this after committing instead, while the set is
+		//still in cache.
 		setAccept(current_state, std::any_of(set_begin(current_set), set_end(current_set),
 				[&source](state_type s) {return source.accept(s);}));
 
@@ -446,19 +541,18 @@ void determinize(const AutomatonBase& source, AddTransAction addTrans, SetAccept
 		for (symbol_type s = 0; s < alphabet_size; ++s) {
 			for (state_type f : make_range_for_pair(set_begin(current_set), set_end(current_set)))
 				for (state_type t : source.step(f, s))
-					set_append(t);
-			std::sort(set_begin(alloc_next), set_end(alloc_next));
-			state_type* new_set_end = std::unique(set_begin(alloc_next), set_end(alloc_next));
-			*alloc_next = numeric_cast<state_type>(new_set_end - set_begin(alloc_next));
-			alloc_cur = new_set_end;
-			if (!set_size(alloc_next))
+					next.push_back(t); //TODO: range-append all of the return value?
+			std::sort(next.begin(), next.end());
+			next.eraseAfter(std::unique(next.begin(), next.end()));
+			if (next.empty())
 				continue; //all NFA states crashed
-			auto it = newstate.find(alloc_next);
+			auto it = newstate.find(next.data());
 			if (it == newstate.end()) {
-				it = newstate.insert({commit_set(), newStates++}).first;
+				it = newstate.insert({next.data(), newStates++}).first;
+				next.release();
 				worklist.push_back(*it);
 			} else
-				clear_set();
+				next.clear();
 			addTrans(current_state, s, it->second);
 		}
 	}
