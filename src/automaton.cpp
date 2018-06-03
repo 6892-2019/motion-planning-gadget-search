@@ -521,32 +521,37 @@ void determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 	newstate.set_empty_key(&empty_set);
 	circular_deque<std::pair<state_type*, state_type>, 16> worklist;
 
-	vectorish next(alloc);
-	state_type newStates = 0; //start with an initial state
-	next.push_back(0);
-	state_type* first_set = next.data();
+	//We have one open/pending set of next states per symbol.
+	vectorish* nexts = alloc.allocate<vectorish>(alphabet_size);
+	for (symbol_type i = 0; i < alphabet_size; ++i)
+		::new (nexts+i) vectorish(alloc);
+
+	//Insert the initial state.
+	state_type newStates = 0;
+	nexts[0].push_back(0);
+	state_type* first_set = nexts[0].data();
 	newstate.insert({first_set, newStates});
 	worklist.push_back({first_set, newStates++});
 	addState(source.accept(0));
-	next.release();
+	nexts[0].release();
 
 	while (!worklist.empty()) {
 		auto [current_set, current_state] = worklist.pop_back();
-		//TODO: it may be better to build one set per symbol in parallel here,
-		//so we can use for_each_transition, avoiding repeated scans over the edges
+		for (state_type f : make_range_for_pair(set_begin(current_set), set_end(current_set)))
+			source.for_each_transition(f, [nexts](symbol_type symbol, state_type dest) {
+				nexts[symbol].push_back(dest);
+			});
 		for (symbol_type s = 0; s < alphabet_size; ++s) {
-			for (state_type f : make_range_for_pair(set_begin(current_set), set_end(current_set)))
-				for (state_type t : source.step(f, s))
-					next.push_back(t); //TODO: range-append all of the return value?
-			std::sort(next.begin(), next.end());
-			next.eraseAfter(std::unique(next.begin(), next.end()));
+			vectorish& next = nexts[s];
 			if (next.empty())
 				continue; //all NFA states crashed
+			std::sort(next.begin(), next.end());
+			next.eraseAfter(std::unique(next.begin(), next.end()));
 			auto it = newstate.find(next.data());
 			if (it == newstate.end()) {
 				it = newstate.insert({next.data(), newStates++}).first;
 				bool accepting = std::any_of(next.begin(), next.end(),
-						[&source](state_type s) {return source.accept(s);});
+						[&source](state_type state) {return source.accept(state);});
 				addState(accepting);
 				next.release();
 				worklist.push_back(*it);
