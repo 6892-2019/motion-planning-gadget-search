@@ -7,6 +7,25 @@
 using namespace automaton;
 using namespace automaton::impl;
 
+template<unsigned int N>
+Automaton<N> determinizePreservesLanguage(const Automaton<N>& p) {
+	auto q = p;
+	q.determinize();
+	auto cmp = compare_languages(p, q);
+	CHECK_UNARY(cmp.equal());
+	//TODO: generate and print witnesses
+	return q;
+}
+template<unsigned int N>
+Automaton<N> minimizePreservesLanguage(const Automaton<N>& p) {
+	auto q = p;
+	q.minimize();
+	auto cmp = compare_languages(p, q);
+	CHECK_UNARY(cmp.equal());
+	//TODO: generate and print witnesses
+	return q;
+}
+
 TEST_CASE("AutomatonTest_Clone") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone
@@ -21,41 +40,42 @@ TEST_CASE("AutomatonTest_Clone") {
 	equivalentOnAllStrings<2>(g, gc, 8);
 }
 
-TEST_CASE("AutomatonTest_Determinize") {
-	auto a = range<2>(lit<2>(0), 2, 6);
-	auto b = a; //clone
-	b.determinize();
-	equivalentOnAllStrings<2>(a, b, 8);
+TEST_CASE("AutomatonTest_Determinize00") {
+	determinizePreservesLanguage(range<2>(lit<2>(0), 2, 6));
+}
+TEST_CASE("AutomatonTest_Determinize01") {
 	auto d = cat<2>({lit<2>(0), lit<2>(1)});
 	auto e = cat<2>({lit<2>(1), lit<2>(0)});
 	auto f = alt<2>({d, e});
-	auto fc = f; //clone
-	fc.determinize();
-	equivalentOnAllStrings<2>(f, fc, 8);
+	determinizePreservesLanguage(f);
+}
+TEST_CASE("AutomatonTest_Determinize02") {
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
 	auto g = conj<2>(f, d);
-	auto gc = g; //clone
-	gc.determinize();
-	equivalentOnAllStrings<2>(g, gc, 8);
-
+	determinizePreservesLanguage(g);
+}
+TEST_CASE("AutomatonTest_Determinize03") {
+	auto d = cat<2>({lit<2>(0), lit<2>(1)});
+	auto e = cat<2>({lit<2>(1), lit<2>(0)});
+	auto f = alt<2>({d, e});
+	auto g = conj<2>(f, d);
+	determinizePreservesLanguage(g);
+}
+TEST_CASE("AutomatonTest_Determinize04") {
+	determinizePreservesLanguage(star<2>(nCopies<2>(any<2>(), 3))); //multOf3
+}
+TEST_CASE("AutomatonTest_Determinize05") {
 	auto multOf3 = star<2>(nCopies<2>(any<2>(), 3));
-	auto multOf3Clone = multOf3; //clone
-	multOf3Clone.determinize();
-	equivalentOnAllStrings<2>(multOf3, multOf3Clone, 8, __LINE__);
-
-	auto finiteMultOf3 = conj<2>(multOf3, nCopies<2>(any<2>(), 6));
-	auto finiteMultOf3Clone = finiteMultOf3; //clone
-	finiteMultOf3Clone.determinize();
-	equivalentOnAllStrings<2>(finiteMultOf3, finiteMultOf3Clone, 8, __LINE__);
-
+	determinizePreservesLanguage(conj<2>(multOf3, nCopies<2>(any<2>(), 6))); //finiteMultOf3
+}
+TEST_CASE("AutomatonTest_Determinize06") {
+	determinizePreservesLanguage(plus<2>(nCopies<2>(any<2>(), 3))); //posMultOf3
+}
+TEST_CASE("AutomatonTest_Determinize07") {
 	auto posMultOf3 = plus<2>(nCopies<2>(any<2>(), 3));
-	auto posMultOf3Clone = posMultOf3; //clone
-	posMultOf3Clone.determinize();
-	equivalentOnAllStrings<2>(posMultOf3, posMultOf3Clone, 8, __LINE__);
-
-	auto finitePosMultOf3 = conj<2>(posMultOf3, nCopies<2>(any<2>(), 6));
-	auto finitePosMultOf3Clone = finitePosMultOf3; //clone
-	finitePosMultOf3Clone.determinize();
-	equivalentOnAllStrings<2>(finitePosMultOf3, finitePosMultOf3Clone, 8, __LINE__);
+	determinizePreservesLanguage(conj<2>(posMultOf3, nCopies<2>(any<2>(), 6))); //finitePosMultOf3
 }
 
 TEST_CASE("AutomatonTest_Totalize") {
@@ -162,16 +182,6 @@ TEST_CASE("AutomatonTest_DeterminizeRemoveDeadStates") {
 	gc.determinize();
 	gc.removeDeadStates();
 	equivalentOnAllStrings<2>(g, gc, 8, __LINE__);
-}
-
-template<unsigned int N>
-Automaton<N> minimizePreservesLanguage(const Automaton<N>& p) {
-	auto q = p;
-	q.minimize();
-	auto cmp = compare_languages(p, q);
-	CHECK_UNARY(cmp.equal());
-	//TODO: generate and print witnesses
-	return q;
 }
 
 TEST_CASE("AutomatonTest_Minimize00") {
