@@ -489,8 +489,8 @@ public:
 	}
 };
 
-template<class AddTransAction, class SetAcceptAction>
-void determinize(const AutomatonBase& source, AddTransAction addTrans, SetAcceptAction setAccept) {
+template<class AddStateAction, class AddTransAction>
+void determinize(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans) {
 	const state_type state_size = source.state_size();
 	const symbol_type alphabet_size = source.alphabet_size();
 	const int DETERMINIZE_INITIAL_SIZE = 4096;
@@ -527,15 +527,11 @@ void determinize(const AutomatonBase& source, AddTransAction addTrans, SetAccept
 	state_type* first_set = next.data();
 	newstate.insert({first_set, newStates});
 	worklist.push_back({first_set, newStates++});
+	addState(source.accept(0));
 	next.release();
 
 	while (!worklist.empty()) {
 		auto [current_set, current_state] = worklist.pop_back();
-		//TODO: we could set this after committing instead, while the set is
-		//still in cache.
-		setAccept(current_state, std::any_of(set_begin(current_set), set_end(current_set),
-				[&source](state_type s) {return source.accept(s);}));
-
 		//TODO: it may be better to build one set per symbol in parallel here,
 		//so we can use for_each_transition, avoiding repeated scans over the edges
 		for (symbol_type s = 0; s < alphabet_size; ++s) {
@@ -549,6 +545,9 @@ void determinize(const AutomatonBase& source, AddTransAction addTrans, SetAccept
 			auto it = newstate.find(next.data());
 			if (it == newstate.end()) {
 				it = newstate.insert({next.data(), newStates++}).first;
+				bool accepting = std::any_of(next.begin(), next.end(),
+						[&source](state_type s) {return source.accept(s);});
+				addState(accepting);
 				next.release();
 				worklist.push_back(*it);
 			} else
@@ -562,30 +561,27 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 	assert(source.alphabet_size() == target.alphabet_size());
 	assert(target.state_size() == 0);
 	target.reserve(source.state_size()); //a reasonable lower bound for connected automata
-	target.addState();
-	determinize(source, [&target](auto from, auto on, auto to) {
-			//There's no addState lambda parameter, so we add a state the first
-			//time we see a transition to it.  (determinize won't add a state
-			//unless it's about to add a transition to it.)
-			assert(to <= target.state_size());
-			if (to == target.state_size())
-				target.addState();
+	determinize(source, [&target](bool b){
+			state_type newState = target.addState();
+			if (b) target.setAccept(newState);
+		}, [&target](auto from, auto on, auto to) {
 			target.addTrans(from, on, to);
 			assert(target.deterministic());
-		}, [&target](auto state, auto b){
-			target.setAccept(state, b);
 		});
 }
 
 ExplodedAutomaton determinize_explode(const AutomatonBase& source) {
 	std::vector<Edge> edges;
 	std::vector<state_type> accept;
-	state_type maxState = 0;
-	determinize(source, [&edges, &maxState](auto from, auto on, auto to){
+	state_type stateSize = 0;
+	determinize(source, [&accept, &stateSize](bool b) {
+			if (b) accept.push_back(stateSize);
+			++stateSize;
+		},
+		[&edges](auto from, auto on, auto to){
 			edges.push_back({from, on, to});
-			maxState = std::max(maxState, to);
-		}, [&accept](auto state, auto b){if (b) accept.push_back(state);});
-	return {edges, accept, maxState+1, source.alphabet_size()};
+		});
+	return {edges, accept, stateSize, source.alphabet_size()};
 }
 
 struct Tarjan {
