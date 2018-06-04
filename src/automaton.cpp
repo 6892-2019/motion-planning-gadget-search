@@ -2,6 +2,7 @@
 #include "automaton.hpp"
 #include "packedautomaton.hpp"
 #include "automaton-io.hpp"
+#include "hopscotch/hopscotch_map.h"
 #include <jemalloc/jemalloc.h>
 
 using namespace automaton;
@@ -514,11 +515,11 @@ void determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 		//this includes the size of the set as the first element of the hash
 		return farmhash::Hash(reinterpret_cast<char*>(set), (*set + 1) * sizeof(*set));
 	};
-	state_type empty_set = 0; //a "set" with just a size 0; empty sets represent crashes, so we'll never insert one
-	google::dense_hash_map<state_type*, state_type,
-			decltype(std::ref(set_hash)), decltype(std::ref(set_equal))> newstate(state_size,
+	tsl::hopscotch_map<state_type*, state_type,
+			decltype(std::ref(set_hash)), decltype(std::ref(set_equal)),
+			std::allocator<std::pair<state_type*, state_type>>, //TODO: pmr?
+			30, true /* store the hash */> newstate(state_size,
 			std::ref(set_hash), std::ref(set_equal));
-	newstate.set_empty_key(&empty_set);
 	circular_deque<std::pair<state_type*, state_type>, 16> worklist;
 
 	//We have one open/pending set of next states per symbol.
