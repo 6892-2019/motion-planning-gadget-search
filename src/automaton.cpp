@@ -548,9 +548,9 @@ void determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 				continue; //all NFA states crashed
 			std::sort(next.begin(), next.end());
 			next.eraseAfter(std::unique(next.begin(), next.end()));
-			auto it = newstate.find(next.data());
-			if (it == newstate.end()) {
-				it = newstate.insert({next.data(), newStates++}).first;
+			auto [it, inserted] = newstate.insert({next.data(), newStates});
+			if (inserted) {
+				newStates++;
 				bool accepting = std::any_of(next.begin(), next.end(),
 						[&source](state_type state) {return source.accept(state);});
 				addState(accepting);
