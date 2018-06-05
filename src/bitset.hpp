@@ -9,7 +9,6 @@
 #define BITSET_HPP
 
 #include <iostream>
-#include <exception>
 #include <cassert>
 #include <boost/integer.hpp>
 
@@ -28,46 +27,18 @@ struct bitset_promote {
 template<typename Integral>
 using bitset_promote_t = typename bitset_promote<Integral>::type;
 
-inline unsigned int ctz(unsigned int x) {
-	if (!x)
-		//this is what x86-64 tzcnt returns, so should help GCC fold it
-		return std::numeric_limits<unsigned int>::digits;
-	return __builtin_ctz(x);
-}
-inline unsigned int ctz(unsigned long x) {
-	if (!x)
-		//this is what x86-64 tzcnt returns, so should help GCC fold it
-		return std::numeric_limits<unsigned long>::digits;
-	return __builtin_ctzl(x);
-}
-inline unsigned int ctz(unsigned long long x) {
-	if (!x)
-		//this is what x86-64 tzcnt returns, so should help GCC fold it
-		return std::numeric_limits<unsigned long long>::digits;
-	return __builtin_ctzll(x);
-}
-inline unsigned int ctz(unsigned char x) {
-	return ctz(static_cast<unsigned int>(x));
-}
-inline unsigned int ctz(unsigned short x) {
-	return ctz(static_cast<unsigned int>(x));
-}
+unsigned int ctz(unsigned int x);
+unsigned int ctz(unsigned long x);
+unsigned int ctz(unsigned long long x);
+unsigned int ctz(unsigned char x);
+unsigned int ctz(unsigned short x);
+unsigned int popcount(unsigned int x);
+unsigned int popcount(unsigned long x);
+unsigned int popcount(unsigned long long x);
+unsigned int popcount(unsigned char x);
+unsigned int popcount(unsigned short x);
 
-inline unsigned int popcount(unsigned int x) {
-	return __builtin_popcount(x);
-}
-inline unsigned int popcount(unsigned long x) {
-	return __builtin_popcountl(x);
-}
-inline unsigned int popcount(unsigned long long x) {
-	return __builtin_popcountll(x);
-}
-inline unsigned int popcount(unsigned char x) {
-	return popcount(static_cast<unsigned int>(x));
-}
-inline unsigned int popcount(unsigned short x) {
-	return popcount(static_cast<unsigned int>(x));
-}
+[[noreturn, gnu::cold]] void bitset_throw_out_of_range(unsigned int index, unsigned int size);
 
 
 
@@ -102,125 +73,36 @@ public:
 	bitset() : bits_(0) {}
 	bitset(const bitset&) = default;
 
-	size_type size() const {
-		return N;
-	}
+	size_type size() const;
 
-	reference operator[](size_type pos) {
-		assert(pos < size());
-		return reference(*this, pos);
-	}
-	bool operator[](size_type pos) const {
-		assert(pos < size());
-		return bits_ & posmask(pos);
-	}
-	reference at(size_type pos) {
-		if (pos < size())
-			throw std::out_of_range("TODO: informative message");
-		return (*this)[pos];
-	}
-	bool at(size_type pos) const {
-		if (pos < size())
-			throw std::out_of_range("TODO: informative message");
-		return (*this)[pos];
-	}
+	reference operator[](size_type pos);
+	bool operator[](size_type pos) const;
+	reference at(size_type pos);
+	bool at(size_type pos) const;
 
-	size_type count() const {
-		return popcount(bits_);
-	}
-	bool any() const {
-		return !none();
-	}
-	bool none() const {
-		return bits_ == static_cast<storage_type>(0ULL);
-	}
-	bool all() const {
-		//(~bits & (N 1s)) == 0 may be faster
-		return count() == size();
-	}
+	size_type count() const;
+	bool any() const;
+	bool none() const;
+	bool all() const;
 
-	bool operator==(const bitset& other) const {
-		return bits_ == other.bits_;
-	}
-	bool operator!=(const bitset& other) const {
-		return !(*this == other);
-	}
+	bool operator==(const bitset& other) const;
 
-	bitset& set() {
-		bits_ = lowmask(N);
-		return *this;
-	}
-	bitset& set(size_type pos) {
-		assert(pos < size());
-//		bits_ = static_cast<storage_type>(bits_ | posmask(pos));
-		do_or(posmask(pos));
-		return *this;
-	}
-	bitset& set(size_type startInclusive, size_type endExclusive) {
-		assert(startInclusive < N);
-		assert(endExclusive <= N);
-		assert(startInclusive <= endExclusive);
-//		bits_ |= midmask(startInclusive, endExclusive);
-		do_or(midmask(startInclusive, endExclusive));
-		return *this;
-	}
-	bitset& reset() {
-		bits_ = static_cast<storage_type>(0U);
-		return *this;
-	}
-	bitset& reset(size_type pos) {
-		assert(pos < size());
-//		bits_ = static_cast<storage_type>(bits_ & ~posmask(pos));
-		do_and(static_cast<storage_type>(~posmask(pos)));
-		return *this;
-	}
-	bitset& reset(size_type startInclusive, size_type endExclusive) {
-		assert(startInclusive < N);
-		assert(endExclusive <= N);
-		assert(startInclusive <= endExclusive);
-//		bits_ = static_cast<storage_type>(bits_ & ~midmask(startInclusive, endExclusive));
-		do_and_comp(midmask(startInclusive, endExclusive));
-		return *this;
-	}
-	bitset& flip() {
-//		bits_ ^= lowmask(N);
-		do_xor(lowmask(N));
-		return *this;
-	}
-	bitset& flip(size_type pos) {
-		assert(pos < size());
-//		bits_ ^= posmask(pos);
-		do_xor(posmask(pos));
-		return *this;
-	}
-	bitset& flip(size_type startInclusive, size_type endExclusive) {
-		assert(startInclusive < N);
-		assert(endExclusive <= N);
-		assert(startInclusive <= endExclusive);
-//		bits_ ^= midmask(startInclusive, endExclusive);
-		do_xor(midmask(startInclusive, endExclusive));
-		return *this;
-	}
+	bitset& set();
+	bitset& set(size_type pos);
+	bitset& set(size_type startInclusive, size_type endExclusive);
+	bitset& reset();
+	bitset& reset(size_type pos);
+	bitset& reset(size_type startInclusive, size_type endExclusive);
+	bitset& flip();
+	bitset& flip(size_type pos);
+	bitset& flip(size_type startInclusive, size_type endExclusive);
 	//This overload is ambiguous with set(size_type) when calling set(int)
-//	bitset& set(bool value) {
-//		return value ? set() : reset();
-//	}
-	bitset& set(size_type pos, bool value) {
-		return value ? set(pos) : reset(pos);
-	}
-	bitset& set(size_type startInclusive, size_type endExclusive, bool value) {
-		return value ? set(startInclusive, endExclusive) : reset(startInclusive, endExclusive);
-	}
+//	bitset& set(bool value);
+	bitset& set(size_type pos, bool value);
+	bitset& set(size_type startInclusive, size_type endExclusive, bool value);
 
-	bool test_set(size_type pos, bool value = true) {
-		assert(pos < size());
-		bool old = (*this)[pos];
-		(*this)[pos] = value;
-		return old;
-	}
-	bool test_reset(size_type pos) {
-		return test_set(pos, false);
-	}
+	bool test_set(size_type pos, bool value = true);
+	bool test_reset(size_type pos);
 
 	//TODO: these methods have unclear preconditions and untested implementations
 //	/**
@@ -276,88 +158,244 @@ public:
 	 * @return the index of the first set bit in this bitset, or > size() if
 	 * this set is empty
 	 */
-	size_type find_first() const {
-		return ctz(bits_);
-	}
-
+	size_type find_first() const;
 	/**
 	 * @return the index of the next set bit following the bit at index prev,
 	 * or > size() if this set is empty
 	 */
-	size_type find_next(size_type prev) const {
-		assert(prev < size());
-//		bitset_promote_t<storage_type> q = bits_ & ~(prev == std::numeric_limits<storage_type>::digits ? ~storage_type(0u) : (storage_type(1u) << (prev+1)) - 1);
-		return ctz(bitset_promote_t<storage_type>(bits_) >> (prev+1)) + prev + 1;
-	}
+	size_type find_next(size_type prev) const;
 
-	bitset& operator&=(const bitset& other) {
-//		bits_ &= other.bits_;
-		do_and(other.bits_);
-		return *this;
-	}
-	bitset& operator|=(const bitset& other) {
-//		bits_ |= other.bits_;
-		do_or(other.bits_);
-		return *this;
-	}
-	bitset& operator^=(const bitset& other) {
-//		bits_ ^= other.bits_;
-		do_xor(other.bits_);
-		return *this;
-	}
-	bitset operator~() const {
-		return bitset(*this).flip();
-	}
-	bitset& operator>>=(int distance) {
-		bits_ = static_cast<storage_type>(distance >= 0 ? bits_ >> distance : bits_ << -distance);
-		return *this;
-	}
-	bitset& operator<<=(int distance) {
-		bits_ = static_cast<storage_type>(distance >= 0 ? bits_ << distance : bits_ >> -distance);
-		return *this;
-	}
+	bitset& operator&=(const bitset& other);
+	bitset& operator|=(const bitset& other);
+	bitset& operator^=(const bitset& other);
+	bitset operator~() const;
+	bitset& operator>>=(int distance);
+	bitset& operator<<=(int distance);
 private:
 	storage_type bits_;
 
 	//centralize warning avoidance
-	void do_and(storage_type x) {
-		bits_ = static_cast<storage_type>(bits_ & x);
-	}
-	void do_or(storage_type x) {
-		bits_ = static_cast<storage_type>(bits_ | x);
-	}
-	void do_xor(storage_type x) {
-		bits_ = static_cast<storage_type>(bits_ ^ x);
-	}
-	void do_and_comp(storage_type x) {
-		bits_ = static_cast<storage_type>(bits_ & ~x);
-	}
+	void do_and(storage_type x);
+	void do_or(storage_type x);
+	void do_xor(storage_type x);
+	void do_and_comp(storage_type x);
 
-	static constexpr storage_type posmask(size_type pos) noexcept {
-		assert(pos < N);
-		return static_cast<storage_type>(storage_type(1u) << pos);
-	}
-	static constexpr storage_type lowmask(size_type n) noexcept {
-		assert(n <= N);
-		storage_type s = 0;
-		while (n-- > 0)
-			s = static_cast<storage_type>((s << 1U) | 1U);
-		return s;
-	}
-	static constexpr storage_type midmask(size_type startInclusive, size_type endExclusive) noexcept {
-		assert(startInclusive < N);
-		assert(endExclusive <= N);
-		assert(startInclusive <= endExclusive);
-		return static_cast<storage_type>(lowmask(endExclusive) & ~lowmask(startInclusive));
-	}
+	static constexpr storage_type posmask(size_type pos) noexcept;
+	static constexpr storage_type lowmask(size_type n) noexcept;
+	static constexpr storage_type midmask(size_type startInclusive, size_type endExclusive) noexcept;
 
-	friend std::ostream& operator<<(std::ostream& o, const bitset& b) {
-		for (size_type i = b.size(); i-- > 0;)
-			o << (b[i] ? '1' : '0');
-		return o;
-	}
 	friend class std::hash<bitset<storage_type, N>>;
 };
+
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::size() const -> size_type {
+	return N;
+}
+
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::operator[](size_type pos) -> reference {
+	assert(pos < size());
+	return reference(*this, pos);
+}
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::operator[](size_type pos) const {
+	assert(pos < size());
+	return bits_ & posmask(pos);
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::at(size_type pos) -> reference {
+	if (pos < size()) bitset_throw_out_of_range(pos, size());
+	return (*this)[pos];
+}
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::at(size_type pos) const {
+	if (pos < size()) bitset_throw_out_of_range(pos, size());
+	return (*this)[pos];
+}
+
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::count() const -> size_type {
+	return popcount(bits_);
+}
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::any() const {
+	return !none();
+}
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::none() const {
+	return bits_ == static_cast<storage_type>(0ULL);
+}
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::all() const {
+	//(~bits & (N 1s)) == 0 may be faster
+	return count() == size();
+}
+
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::operator==(const bitset& other) const {
+	return bits_ == other.bits_;
+}
+
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::set() -> bitset& {
+	bits_ = lowmask(N);
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::set(size_type pos) -> bitset& {
+	assert(pos < size());
+	do_or(posmask(pos));
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::set(size_type startInclusive, size_type endExclusive) -> bitset& {
+	assert(startInclusive < N);
+	assert(endExclusive <= N);
+	assert(startInclusive <= endExclusive);
+	do_or(midmask(startInclusive, endExclusive));
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::reset() -> bitset& {
+	bits_ = static_cast<storage_type>(0U);
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::reset(size_type pos) -> bitset& {
+	assert(pos < size());
+	do_and(static_cast<storage_type>(~posmask(pos)));
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::reset(size_type startInclusive, size_type endExclusive) -> bitset& {
+	assert(startInclusive < N);
+	assert(endExclusive <= N);
+	assert(startInclusive <= endExclusive);
+	do_and_comp(midmask(startInclusive, endExclusive));
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::flip() -> bitset& {
+	do_xor(lowmask(N));
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::flip(size_type pos) -> bitset& {
+	assert(pos < size());
+	do_xor(posmask(pos));
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::flip(size_type startInclusive, size_type endExclusive) -> bitset& {
+	assert(startInclusive < N);
+	assert(endExclusive <= N);
+	assert(startInclusive <= endExclusive);
+	do_xor(midmask(startInclusive, endExclusive));
+	return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::set(size_type pos, bool value) -> bitset& {
+	return value ? set(pos) : reset(pos);
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::set(size_type startInclusive, size_type endExclusive, bool value) -> bitset& {
+	return value ? set(startInclusive, endExclusive) : reset(startInclusive, endExclusive);
+}
+
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::test_set(size_type pos, bool value) {
+	assert(pos < size());
+	bool old = (*this)[pos];
+	(*this)[pos] = value;
+	return old;
+}
+template<typename storage_type, unsigned int N>
+bool bitset<storage_type, N>::test_reset(size_type pos) {
+	return test_set(pos, false);
+}
+
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::find_first() const -> size_type {
+   return ctz(bits_);
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::find_next(size_type prev) const -> size_type {
+   assert(prev < size());
+   return ctz(bitset_promote_t<storage_type>(bits_) >> (prev+1)) + prev + 1;
+}
+
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::operator&=(const bitset& other) -> bitset& {
+   do_and(other.bits_);
+   return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::operator|=(const bitset& other) -> bitset& {
+   do_or(other.bits_);
+   return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::operator^=(const bitset& other) -> bitset& {
+   do_xor(other.bits_);
+   return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::operator~() const -> bitset {
+   return bitset(*this).flip();
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::operator>>=(int distance) -> bitset& {
+   bits_ = static_cast<storage_type>(distance >= 0 ? bits_ >> distance : bits_ << -distance);
+   return *this;
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::operator<<=(int distance) -> bitset& {
+   bits_ = static_cast<storage_type>(distance >= 0 ? bits_ << distance : bits_ >> -distance);
+   return *this;
+}
+
+template<typename storage_type, unsigned int N>
+void bitset<storage_type, N>::do_and(storage_type x) {
+	bits_ = static_cast<storage_type>(bits_ & x);
+}
+template<typename storage_type, unsigned int N>
+void bitset<storage_type, N>::do_or(storage_type x) {
+	bits_ = static_cast<storage_type>(bits_ | x);
+}
+template<typename storage_type, unsigned int N>
+void bitset<storage_type, N>::do_xor(storage_type x) {
+	bits_ = static_cast<storage_type>(bits_ ^ x);
+}
+template<typename storage_type, unsigned int N>
+void bitset<storage_type, N>::do_and_comp(storage_type x) {
+	bits_ = static_cast<storage_type>(bits_ & ~x);
+}
+
+template<typename storage_type, unsigned int N>
+constexpr storage_type bitset<storage_type, N>::posmask(size_type pos) noexcept {
+	assert(pos < N);
+	return static_cast<storage_type>(storage_type(1u) << pos);
+}
+template<typename storage_type, unsigned int N>
+constexpr storage_type bitset<storage_type, N>::lowmask(size_type n) noexcept {
+	assert(n <= N);
+	storage_type s = 0;
+	while (n-- > 0)
+		s = static_cast<storage_type>((s << 1U) | 1U);
+	return s;
+}
+template<typename storage_type, unsigned int N>
+constexpr storage_type bitset<storage_type, N>::midmask(size_type startInclusive, size_type endExclusive) noexcept {
+	assert(startInclusive < N);
+	assert(endExclusive <= N);
+	assert(startInclusive <= endExclusive);
+	return static_cast<storage_type>(lowmask(endExclusive) & ~lowmask(startInclusive));
+}
+
+template<typename storage_type, unsigned int N>
+bool operator!=(const bitset<storage_type, N>& left, const bitset<storage_type, N>& right) {
+	return !(left == right);
+}
 
 template<typename storage_type, unsigned int N>
 auto operator&(const bitset<storage_type, N>& left, const bitset<storage_type, N>& right) {
@@ -392,6 +430,13 @@ auto operator<<(const bitset<storage_type, N>& left, int distance) {
 	bitset<storage_type, N> ret(left);
 	ret <<= distance;
 	return ret;
+}
+
+template<typename storage_type, unsigned int N>
+std::ostream& operator<<(std::ostream& o, const bitset<storage_type, N>& b) {
+	for (auto i = b.size(); i-- > 0;)
+		o << (b[i] ? '1' : '0');
+	return o;
 }
 
 } //end namespace impl
