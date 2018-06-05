@@ -14,7 +14,6 @@
 #include <sparsehash/dense_hash_set>
 #include <sparsehash/sparse_hash_set>
 #include <sparsehash/sparse_hash_map>
-#include "bitset.hpp"
 #include "natural_map.hpp"
 #include "dynarray.hpp"
 #include "linear_set.hpp"

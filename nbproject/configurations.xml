@@ -168,6 +168,10 @@
       </item>
       <item path="src/benchmark/benchmark-pack.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/bitset-instantiations.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/bitset.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="src/bitset.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/circular_deque.hpp" ex="false" tool="3" flavor2="0">

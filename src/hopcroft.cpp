@@ -1,4 +1,5 @@
 #include "precompiled.hpp"
+#include "bitset.hpp"
 #include "automatonbase.hpp"
 #include "hopcroft.hpp"
 

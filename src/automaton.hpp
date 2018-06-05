@@ -10,6 +10,7 @@
 
 #include "precompiled.hpp"
 #include "automatonbase.hpp"
+#include "bitset.hpp"
 
 //uncomment the line below to enable debugging logging expressions
 //#define AUTOMATON_DEBUG(expr) do {expr;} while(0);

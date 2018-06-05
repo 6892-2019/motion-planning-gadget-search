@@ -410,5 +410,8 @@ struct hash<automaton::bitset<N>> {
 };
 }
 
+#define BITSET_EXTERN_TEMPLATE extern
+#include "bitset-instantiations.hpp"
+
 #endif /* BITSET_HPP */
 

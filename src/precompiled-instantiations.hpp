@@ -29,13 +29,6 @@ AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_set<unsigned int>;
 
 AUTOMATA_EXTERN_TEMPLATE template class google::sparse_hash_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
 
-#include <boost/preprocessor/repetition/repeat_from_to.hpp>
-#define INSTANTIATE_BITSET(z, size, unused_data_parameter) \
-	AUTOMATA_EXTERN_TEMPLATE template class automaton::impl::bitset<typename boost::uint_t<size>::least, size>;
-// ^ we can't use the alias template in an explicit instantiation
-BOOST_PP_REPEAT_FROM_TO(2, 17, INSTANTIATE_BITSET, unused_data_parameter)
-#undef INSTANTIATE_BITSET
-
 AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned char, unsigned char>;
 AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned short, unsigned short>;
 AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned int, unsigned int>;
