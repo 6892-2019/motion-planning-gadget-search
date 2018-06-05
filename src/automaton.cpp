@@ -351,6 +351,52 @@ void implodeRenumber(AutomatonBase& dest, const ExplodedAutomaton& source, const
 	implode(dest, source, renumbering);
 }
 
+//A fastpath for automata with 64 or fewer states, based on bitsets stored
+//directly in the hash map.
+template<class AddStateAction, class AddTransAction>
+void determinize_64_fastpath(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans) {
+	const state_type state_size = source.state_size();
+	const symbol_type alphabet_size = source.alphabet_size();
+	using state_bitset = automaton::bitset<64>;
+	//TODO: maybe use a pmr allocator
+	tsl::hopscotch_map<state_bitset, state_type> newstate(state_size);
+	circular_deque<std::pair<state_bitset, state_type>, 16> worklist;
+	//TODO: can pmr this as well, if we pmr dynarray
+	dynarray<state_bitset> nexts(alphabet_size);
+
+	//Insert the initial state.
+	state_bitset initial_only;
+	initial_only.set(0);
+	newstate.insert({initial_only, 0});
+	worklist.push_back({initial_only, 0});
+	addState(source.accept(0));
+	state_type newStates = 1;
+
+	while (!worklist.empty()) {
+		auto [current_set, current_state] = worklist.pop_back();
+		for (state_type f = current_set.find_first(); f < current_set.size(); f = current_set.find_next(f))
+			source.for_each_transition(f, [&nexts](symbol_type symbol, state_type dest) {
+				nexts[symbol].set(dest);
+			});
+		for (symbol_type s = 0; s < alphabet_size; ++s) {
+			state_bitset& next = nexts[s];
+			if (next.none())
+				continue; //all NFA states crashed
+			auto [it, inserted] = newstate.insert({next, newStates});
+			if (inserted) {
+				++newStates;
+				bool accepting = false;
+				for (auto q = next.find_first(); !accepting && q < next.size(); q = next.find_next(q))
+					accepting |= source.accept(q);
+				addState(accepting);
+				worklist.push_back(*it);
+			}
+			next.reset();
+			addTrans(current_state, s, it->second);
+		}
+	}
+}
+
 //The only complete/good implementation of monotonic_buffer_resource is in
 //Boost.Container, and it has a clownshoes problem due to block_slist.  Instead
 //we'll write our own "resource", which isn't actually a memory_resource, but
@@ -492,6 +538,8 @@ public:
 
 template<class AddStateAction, class AddTransAction>
 void determinize(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans) {
+	if (source.state_size() <= 64)
+		return determinize_64_fastpath(source, addState, addTrans);
 	const state_type state_size = source.state_size();
 	const symbol_type alphabet_size = source.alphabet_size();
 	const int DETERMINIZE_INITIAL_SIZE = 4096;
