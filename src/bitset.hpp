@@ -70,7 +70,7 @@ public:
 		friend class bitset;
 	};
 
-	bitset() : bits_(0) {}
+	bitset();
 	bitset(const bitset&) = default;
 
 	size_type size() const;
@@ -136,6 +136,12 @@ private:
 
 	friend class std::hash<bitset<storage_type, N>>;
 };
+
+template<typename storage_type, unsigned int N>
+bitset<storage_type, N>::bitset() : bits_(0) {}
+//Outlining this constructor increases the size of the final executables by a lot.
+//template<typename storage_type, unsigned int N>
+//bitset<storage_type, N>::bitset(const bitset&) = default;
 
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::size() const -> size_type {
