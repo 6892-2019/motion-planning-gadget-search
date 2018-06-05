@@ -268,7 +268,7 @@ void removeDeadStates(ExplodedAutomaton& a) {
 		indexBuildingPos = std::find_if_not(indexBuildingPos, a.edges.end(), [s](const Edge& e){return e.target == s;});
 		inverseIndex[s+1] = numeric_cast<state_type>(std::distance(a.edges.begin(), indexBuildingPos));
 	}
-	while (!nexts.empty()) {
+	while (!nexts.empty() && newNumber < a.state_size) {
 		state_type n = nexts.pop_back();
 		for (auto start = inverseIndex[n], end = inverseIndex[n+1]; start < end; ++start) {
 			state_type source = a.edges[start].source;
@@ -279,12 +279,14 @@ void removeDeadStates(ExplodedAutomaton& a) {
 		}
 	}
 
-	//Ensure we renumber 0 to 0.  (If the automaton has any reachable accept
-	//states, 0 is live, so it always has a number here.)
-	assert(renumbering[assignedFirst] == 0);
-	std::swap(renumbering[0], renumbering[assignedFirst]);
-	renumber(a, renumbering);
-	a.state_size = newNumber;
+	if (newNumber != a.state_size) {
+		//Ensure we renumber 0 to 0.  (If the automaton has any reachable accept
+		//states, 0 is live, so it always has a number here.)
+		assert(renumbering[assignedFirst] == 0);
+		std::swap(renumbering[0], renumbering[assignedFirst]);
+		renumber(a, renumbering);
+		a.state_size = newNumber;
+	}
 }
 
 void renumber(ExplodedAutomaton& a, const dynarray<state_type>& numbering) {
