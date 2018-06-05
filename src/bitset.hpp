@@ -16,6 +16,61 @@
 namespace automaton {
 namespace impl {
 
+//unsigned int if T is smaller, else T
+template<typename Integral>
+struct bitset_promote {
+	static_assert(std::is_unsigned_v<Integral>, "");
+	using type = std::conditional_t<
+			(std::numeric_limits<Integral>::digits > std::numeric_limits<unsigned int>::digits),
+			Integral,
+			unsigned int>;
+};
+template<typename Integral>
+using bitset_promote_t = typename bitset_promote<Integral>::type;
+
+inline unsigned int ctz(unsigned int x) {
+	if (!x)
+		//this is what x86-64 tzcnt returns, so should help GCC fold it
+		return std::numeric_limits<unsigned int>::digits;
+	return __builtin_ctz(x);
+}
+inline unsigned int ctz(unsigned long x) {
+	if (!x)
+		//this is what x86-64 tzcnt returns, so should help GCC fold it
+		return std::numeric_limits<unsigned long>::digits;
+	return __builtin_ctzl(x);
+}
+inline unsigned int ctz(unsigned long long x) {
+	if (!x)
+		//this is what x86-64 tzcnt returns, so should help GCC fold it
+		return std::numeric_limits<unsigned long long>::digits;
+	return __builtin_ctzll(x);
+}
+inline unsigned int ctz(unsigned char x) {
+	return ctz(static_cast<unsigned int>(x));
+}
+inline unsigned int ctz(unsigned short x) {
+	return ctz(static_cast<unsigned int>(x));
+}
+
+inline unsigned int popcount(unsigned int x) {
+	return __builtin_popcount(x);
+}
+inline unsigned int popcount(unsigned long x) {
+	return __builtin_popcountl(x);
+}
+inline unsigned int popcount(unsigned long long x) {
+	return __builtin_popcountll(x);
+}
+inline unsigned int popcount(unsigned char x) {
+	return popcount(static_cast<unsigned int>(x));
+}
+inline unsigned int popcount(unsigned short x) {
+	return popcount(static_cast<unsigned int>(x));
+}
+
+
+
 template<typename storage_type, unsigned int N>
 class bitset {
 public:
@@ -71,13 +126,13 @@ public:
 	}
 
 	size_type count() const {
-		return __builtin_popcount(bits_);
+		return popcount(bits_);
 	}
 	bool any() const {
 		return !none();
 	}
 	bool none() const {
-		return bits_ == static_cast<storage_type>(0);
+		return bits_ == static_cast<storage_type>(0ULL);
 	}
 	bool all() const {
 		//(~bits & (N 1s)) == 0 may be faster
@@ -222,10 +277,7 @@ public:
 	 * this set is empty
 	 */
 	size_type find_first() const {
-		if (!bits_)
-			//this is what x86-64 tzcnt returns, so should help GCC fold it
-			return std::numeric_limits<decltype(__builtin_ctz(bits_))>::digits;
-		return __builtin_ctz(bits_);
+		return ctz(bits_);
 	}
 
 	/**
@@ -234,11 +286,8 @@ public:
 	 */
 	size_type find_next(size_type prev) const {
 		assert(prev < size());
-		unsigned int q = bits_ & ~(prev == 32 ? ~0u : (1u << (prev+1)) - 1);
-		if (!q)
-			//this is what x86-64 tzcnt returns, so should help GCC fold it
-			return std::numeric_limits<decltype(__builtin_ctz(q))>::digits;
-		return __builtin_ctz(q);
+//		bitset_promote_t<storage_type> q = bits_ & ~(prev == std::numeric_limits<storage_type>::digits ? ~storage_type(0u) : (storage_type(1u) << (prev+1)) - 1);
+		return ctz(bitset_promote_t<storage_type>(bits_) >> (prev+1)) + prev + 1;
 	}
 
 	bitset& operator&=(const bitset& other) {
@@ -286,7 +335,7 @@ private:
 
 	static constexpr storage_type posmask(size_type pos) noexcept {
 		assert(pos < N);
-		return static_cast<storage_type>(1U << pos);
+		return static_cast<storage_type>(storage_type(1u) << pos);
 	}
 	static constexpr storage_type lowmask(size_type n) noexcept {
 		assert(n <= N);

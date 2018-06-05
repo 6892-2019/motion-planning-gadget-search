@@ -80,3 +80,81 @@ TEST_CASE("BitsetTest_FindNext16") {
 	CHECK_EQ(a.find_next(4), 15);
 	CHECK_GT(a.find_next(15), a.size());
 }
+
+TEST_CASE("BitsetTest_DefaultConstruct64") {
+	bitset<64> a;
+	for (int i = 0; i < 64; ++i)
+		CHECK_UNARY_FALSE(a[i]);
+	CHECK_UNARY(a.none());
+	CHECK_UNARY_FALSE(a.any());
+	CHECK_UNARY_FALSE(a.all());
+	CHECK_EQ(a.count(), 0);
+}
+
+TEST_CASE("BitsetTest_Equality64") {
+	bitset<64> a, b;
+	CHECK_EQ(a, b);
+	for (int i = 0; i < 64; ++i) {
+		a.reset();
+		a.set(i);
+		for (int j = 0; j < 64; ++j) {
+			b.reset();
+			b.set(j);
+			CHECK_EQ(a == b, i == j);
+			CHECK_EQ(a != b, i != j);
+		}
+	}
+}
+
+TEST_CASE("BitsetTest_SetResetOne64") {
+	for (int i = 0; i < 64; ++i) {
+		bitset<64> a;
+		a.set(i);
+		CHECK_UNARY(a[i]);
+	}
+	for (int i = 0; i < 64; ++i) {
+		bitset<64> a;
+		a.reset(i);
+		CHECK_UNARY_FALSE(a[i]);
+	}
+}
+
+TEST_CASE("BitsetTest_SetResetAll64") {
+	bitset<64> a;
+	for (int i = 0; i < 64; ++i)
+		a.set(i);
+	for (int i = 0; i < 64; ++i)
+		CHECK_UNARY(a[i]);
+	for (int i = 0; i < 64; ++i)
+		a.reset(i);
+	for (int i = 0; i < 64; ++i)
+		CHECK_UNARY_FALSE(a[i]);
+}
+
+TEST_CASE("BitsetTest_FindFirst64") {
+	for (int i = 0; i < 64; ++i) {
+		bitset<64> a;
+		a.set(i);
+		CHECK_MESSAGE(a.find_first() == i, i);
+	}
+}
+
+TEST_CASE("BitsetTest_FindNext64_00") {
+	for (int i = 1; i < 64; ++i) {
+		bitset<64> a;
+		a.set(i);
+		for (int j = 0; j < i; ++j)
+			CHECK_EQ(a.find_next(j), i);
+		for (int j = i; j < 64; ++j)
+			CHECK_GE(a.find_next(j), a.size());
+	}
+}
+
+TEST_CASE("BitsetTest_FindNext64_01") {
+	for (int i = 1; i < 63; ++i) {
+		bitset<64> a;
+		a.set(i);
+		a.set(i+1);
+		CHECK_EQ(a.find_next(i), i+1);
+	}
+}
