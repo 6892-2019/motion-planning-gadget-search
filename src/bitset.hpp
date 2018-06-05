@@ -50,21 +50,11 @@ public:
 	class reference {
 	public:
 		reference(const reference&) = default;
-
-		operator bool() const {
-			//select the overload returning bool to avoid infinite recursion
-			return static_cast<const bitset&>(bitset_)[i_];
-		}
-
-		reference& operator=(bool value) {
-			bitset_.set(i_, value);
-			return *this;
-		}
+		operator bool() const;
+		reference& operator=(bool value);
 	private:
 		reference() = delete;
-		reference(bitset& bitset, size_type i) : bitset_(bitset), i_(i) {
-			assert(i < bitset.size());
-		}
+		reference(bitset& bitset, size_type i);
 		bitset& bitset_;
 		size_type i_;
 		friend class bitset;
@@ -136,6 +126,21 @@ private:
 
 	friend class std::hash<bitset<storage_type, N>>;
 };
+
+template<typename storage_type, unsigned int N>
+bitset<storage_type, N>::reference::reference(bitset& bitset, size_type i) : bitset_(bitset), i_(i) {
+	assert(i < bitset.size());
+}
+template<typename storage_type, unsigned int N>
+bitset<storage_type, N>::reference::operator bool() const {
+	//select the overload returning bool to avoid infinite recursion
+	return static_cast<const bitset&>(bitset_)[i_];
+}
+template<typename storage_type, unsigned int N>
+auto bitset<storage_type, N>::reference::operator=(bool value) -> reference& {
+	bitset_.set(i_, value);
+	return *this;
+}
 
 template<typename storage_type, unsigned int N>
 bitset<storage_type, N>::bitset() : bits_(0) {}
