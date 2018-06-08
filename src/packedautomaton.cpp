@@ -13,6 +13,10 @@ using limits = std::numeric_limits<T>;
 
 namespace automaton {
 
+bool PackedAutomaton::deterministic() const {return true;}
+bool PackedAutomaton::minimal() const {return true;}
+bool PackedAutomaton::canonical() const {return true;}
+
 bool operator==(const PackedAutomaton& left, const PackedAutomaton& right) {
 	auto lb = left.storage_begin(), le = left.storage_end(), rb = right.storage_begin(), re = right.storage_end();
 	return (le - lb) == (re - rb) && std::memcmp(lb, rb, le - lb) == 0;

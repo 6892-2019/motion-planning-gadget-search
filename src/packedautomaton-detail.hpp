@@ -133,9 +133,6 @@ public:
 			count += __builtin_popcount(load(p));
 		return count;
 	}
-	bool deterministic() const override {return true;}
-	bool minimal() const override {return true;}
-	bool canonical() const override {return true;}
 	bool accept(state_type state) const override {
 		return offset(state) & (1 << (limits<OffsetType>::digits - 1));
 	}
@@ -307,9 +304,6 @@ public:
 			count += __builtin_popcount(load(p) & ~(1 << (limits<OutgoingMaskType>::digits - 1)));
 		return count;
 	}
-	bool deterministic() const override {return true;}
-	bool minimal() const override {return true;}
-	bool canonical() const override {return true;}
 	bool accept(state_type state) const override {
 		return load(outgoing_begin() + state) & (1 << (limits<OutgoingMaskType>::digits - 1));
 	}
@@ -493,9 +487,6 @@ public:
 			count += __builtin_popcount(load(p));
 		return count;
 	}
-	bool deterministic() const override {return true;}
-	bool minimal() const override {return true;}
-	bool canonical() const override {return true;}
 	bool accept(state_type state) const override {
 		return accepts_begin()[state / 8] & (1u << (state % 8));
 	}

@@ -63,6 +63,9 @@ class PackedAutomaton : public ImmutableAutomaton {
 	friend struct std::hash<PackedAutomaton>;
 	friend bool operator==(const PackedAutomaton& left, const PackedAutomaton& right);
 public:
+	bool deterministic() const override final;
+	bool minimal() const override final;
+	bool canonical() const override final;
 	std::size_t packed_hash() const;
 	// automaton::pack allocates variable-sized storage for PackedAutomaton
 	// subclasses.  We need to explicitly declare a non-sized operator delete
