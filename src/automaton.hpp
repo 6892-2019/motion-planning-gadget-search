@@ -919,10 +919,7 @@ template<unsigned int N, typename... Automata>
 Automaton<N> cat(Automata&&... rest) {
 	Automaton<N> a;
 	a.reserve((0u + ... + rest.state_size()));
-	vta::map([&a](auto&& v){
-		assert(v.alphabet_size() == N);
-		detail::cat_once(a, std::forward<decltype(v)>(v));
-	})(std::forward<Automata>(rest)...);
+	(detail::cat_once(a, std::forward<Automata>(rest)), ...);
 	return a;
 }
 
@@ -957,10 +954,7 @@ template<unsigned int N, typename... Automata>
 Automaton<N> alt(Automata&&... rest) {
 	Automaton<N> a;
 	a.reserve((0u + ... + rest.state_size()));
-	vta::map([&a](auto&& v){
-		assert(v.alphabet_size() == N);
-		detail::alt_once(a, std::forward<decltype(v)>(v));
-	})(std::forward<Automata>(rest)...);
+	(detail::alt_once(a, std::forward<Automata>(rest)), ...);
 	return a;
 }
 
