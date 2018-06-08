@@ -11,10 +11,10 @@ using state_type = AutomatonBase::state_type;
 using symbol_type = AutomatonBase::symbol_type;
 
 namespace {
-template<class PackImpl>
-void pack_impl_test(const AutomatonBase& a) {
+using MakePackPtr = std::unique_ptr<const PackedAutomaton>(*)(const AutomatonBase& a);
+void pack_impl_test(const AutomatonBase& a, MakePackPtr make) {
 	assert(a.canonical());
-	std::unique_ptr<const PackedAutomaton> packed = detail::make_pack<PackImpl>(a);
+	std::unique_ptr<const PackedAutomaton> packed = make(a);
 	CHECK_EQ(packed->state_size(), a.state_size());
 	CHECK_EQ(packed->alphabet_size(), a.alphabet_size());
 	CHECK_EQ(packed->accept_size(), a.accept_size());
@@ -36,7 +36,7 @@ void pack_impl_test(const AutomatonBase& a) {
 	CHECK_EQ(packed->hash(), a.hash());
 	CHECK_EQ(*packed, a);
 
-	std::unique_ptr<const PackedAutomaton> repacked = detail::make_pack<PackImpl>(*packed);
+	std::unique_ptr<const PackedAutomaton> repacked = make(*packed);
 	CHECK_EQ(*repacked, *packed);
 	CHECK_EQ(repacked->packed_hash(), packed->packed_hash());
 
@@ -46,48 +46,53 @@ void pack_impl_test(const AutomatonBase& a) {
 	CHECK_EQ(repacked->packed_hash(), packed->packed_hash());
 }
 
-template<unsigned int N>
-void test_pack(Automaton<N> a) {
+void test_pack(WorkingAutomaton& a) {
 	a.canonicalize();
-	pack_impl_test<detail::Diminutive8OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Tiny8OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Small8OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Medium8OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Large8OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Diminutive8OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Tiny8OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Small8OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Medium8OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Large8OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Diminutive8BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Tiny8BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Small8BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Medium8BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Large8BitmaskPackedAutomaton>(a);
+#define TEST_PACK(IMPL) pack_impl_test(a, &detail::make_pack<IMPL>);
+	TEST_PACK(detail::Diminutive8OffsetPackedAutomaton)
+	TEST_PACK(detail::Tiny8OffsetPackedAutomaton)
+	TEST_PACK(detail::Small8OffsetPackedAutomaton)
+	TEST_PACK(detail::Medium8OffsetPackedAutomaton)
+	TEST_PACK(detail::Large8OffsetPackedAutomaton)
+	TEST_PACK(detail::Diminutive8OutgoingPackedAutomaton)
+	TEST_PACK(detail::Tiny8OutgoingPackedAutomaton)
+	TEST_PACK(detail::Small8OutgoingPackedAutomaton)
+	TEST_PACK(detail::Medium8OutgoingPackedAutomaton)
+	TEST_PACK(detail::Large8OutgoingPackedAutomaton)
+	TEST_PACK(detail::Diminutive8BitmaskPackedAutomaton)
+	TEST_PACK(detail::Tiny8BitmaskPackedAutomaton)
+	TEST_PACK(detail::Small8BitmaskPackedAutomaton)
+	TEST_PACK(detail::Medium8BitmaskPackedAutomaton)
+	TEST_PACK(detail::Large8BitmaskPackedAutomaton)
 
-	pack_impl_test<detail::Diminutive16OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Tiny16OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Small16OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Medium16OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Large16OffsetPackedAutomaton>(a);
-	pack_impl_test<detail::Diminutive16OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Tiny16OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Small16OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Medium16OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Large16OutgoingPackedAutomaton>(a);
-	pack_impl_test<detail::Diminutive16BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Tiny16BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Small16BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Medium16BitmaskPackedAutomaton>(a);
-	pack_impl_test<detail::Large16BitmaskPackedAutomaton>(a);
+	TEST_PACK(detail::Diminutive16OffsetPackedAutomaton)
+	TEST_PACK(detail::Tiny16OffsetPackedAutomaton)
+	TEST_PACK(detail::Small16OffsetPackedAutomaton)
+	TEST_PACK(detail::Medium16OffsetPackedAutomaton)
+	TEST_PACK(detail::Large16OffsetPackedAutomaton)
+	TEST_PACK(detail::Diminutive16OutgoingPackedAutomaton)
+	TEST_PACK(detail::Tiny16OutgoingPackedAutomaton)
+	TEST_PACK(detail::Small16OutgoingPackedAutomaton)
+	TEST_PACK(detail::Medium16OutgoingPackedAutomaton)
+	TEST_PACK(detail::Large16OutgoingPackedAutomaton)
+	TEST_PACK(detail::Diminutive16BitmaskPackedAutomaton)
+	TEST_PACK(detail::Tiny16BitmaskPackedAutomaton)
+	TEST_PACK(detail::Small16BitmaskPackedAutomaton)
+	TEST_PACK(detail::Medium16BitmaskPackedAutomaton)
+	TEST_PACK(detail::Large16BitmaskPackedAutomaton)
+}
+void test_pack(WorkingAutomaton&& a) {
+	//Only const lvalue refs can bind rvalues, but in this case we really do
+	//want to mutate temporaries (to canonicalize them), so this overload binds
+	//them and delegates to the lvalue ref overload.
+	return test_pack(a);
 }
 
-template<unsigned int N>
-void test_pack_if_representable(Automaton<N> a) {
+void test_pack_if_representable(WorkingAutomaton& a) {
 	a.canonicalize();
 	detail::PackStats stats{a};
 #define TEST_PACK_IF_REPRESENTABLE(IMPL) if (IMPL::can_represent(a, stats)) \
-											pack_impl_test<IMPL>(a);
+											TEST_PACK(IMPL)
 	TEST_PACK_IF_REPRESENTABLE(detail::Diminutive8OffsetPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Tiny8OffsetPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Small8OffsetPackedAutomaton)
@@ -120,6 +125,11 @@ void test_pack_if_representable(Automaton<N> a) {
 	TEST_PACK_IF_REPRESENTABLE(detail::Medium16BitmaskPackedAutomaton)
 	TEST_PACK_IF_REPRESENTABLE(detail::Large16BitmaskPackedAutomaton)
 #undef TEST_PACK_IF_REPRESENTABLE
+#undef TEST_PACK
+}
+MAYBE_UNUSED void test_pack_if_representable(WorkingAutomaton&& a) {
+	//See comment in test_pack overload above.
+	return test_pack_if_representable(a);
 }
 } //anonymous namespace
 
