@@ -862,11 +862,6 @@ template<class ForwardIterator, class = std::void_t<typename std::iterator_trait
 AutomatonBase::state_type total_states(ForwardIterator begin, ForwardIterator end) {
 	return std::accumulate(begin, end, 0u, [](auto x, auto a){return x + a.state_size();});
 }
-template<class... AB>
-AutomatonBase::state_type total_states(const AB&... automata) {
-	static_assert((... && std::is_same_v<AutomatonBase, AB>), "cast to const AutomatonBase& before calling");
-	return (0u + ... + automata.state_size());
-}
 
 template<unsigned int N, class Source, class = std::enable_if_t<std::is_base_of<AutomatonBase, std::decay_t<Source>>::value>>
 void cat_once(Automaton<N>& target, Source&& source) {
@@ -920,7 +915,7 @@ auto cat(Automata&&... rest) {
 template<unsigned int N, typename... Automata>
 Automaton<N> cat(Automata&&... rest) {
 	Automaton<N> a;
-	a.reserve(detail::total_states(static_cast<const AutomatonBase&>(rest)...));
+	a.reserve((0u + ... + rest.state_size()));
 	vta::map([&a](auto&& v){
 		assert(v.alphabet_size() == N);
 		detail::cat_once(a, std::forward<decltype(v)>(v));
@@ -958,7 +953,7 @@ auto alt(Automata&&... rest) {
 template<unsigned int N, typename... Automata>
 Automaton<N> alt(Automata&&... rest) {
 	Automaton<N> a;
-	a.reserve(detail::total_states(static_cast<const AutomatonBase&>(rest)...));
+	a.reserve((0u + ... + rest.state_size()));
 	vta::map([&a](auto&& v){
 		assert(v.alphabet_size() == N);
 		detail::alt_once(a, std::forward<decltype(v)>(v));
