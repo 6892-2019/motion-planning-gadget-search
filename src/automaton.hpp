@@ -860,7 +860,10 @@ constexpr unsigned int deduce_size() {
 
 template<class ForwardIterator, class = std::void_t<typename std::iterator_traits<ForwardIterator>::iterator_category>>
 AutomatonBase::state_type total_states(ForwardIterator begin, ForwardIterator end) {
-	return std::accumulate(begin, end, 0u, [](auto x, auto a){return x + a.state_size();});
+	return std::accumulate(begin, end, 0u,
+			[](AutomatonBase::state_type x, const AutomatonBase& a) {
+				return x + a.state_size();
+			});
 }
 
 template<unsigned int N, class Source, class = std::enable_if_t<std::is_base_of<AutomatonBase, std::decay_t<Source>>::value>>
