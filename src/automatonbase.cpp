@@ -141,10 +141,18 @@ AutomatonBase::SymbolSet AutomatonBase::activeAlphabet() const {
 	return ret;
 }
 
-bool AutomatonBase::run(std::initializer_list<unsigned int> string) const {
-	//This overload exists because the compiler won't deduce initializer_list
-	//for the IteratorRange overload.
-	return run(string.begin(), string.end());
+bool AutomatonBase::run(std::initializer_list<symbol_type> string) const {
+	//Breadth-first search.
+	std::unordered_set<state_type> current, next;
+	current.insert(0); //TODO: assuming 0 is the initial state
+	for (unsigned int symbol : string) {
+		for (state_type c : current)
+			for (state_type n : step(c, symbol))
+				next.insert(n);
+		std::swap(current, next);
+		next.clear();
+	}
+	return std::any_of(current.begin(), current.end(), [this](state_type s){return accept(s);});
 }
 
 std::size_t AutomatonBase::hash() const {
