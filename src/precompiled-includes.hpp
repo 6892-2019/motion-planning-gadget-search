@@ -43,7 +43,6 @@
 #include <boost/intrusive_ptr.hpp>
 #include <utility>
 #include <type_traits>
-#include <vta/algorithms.hpp>
 #include <boost/integer.hpp>
 #include "numutils.hpp"
 #include <boost/functional/hash.hpp> //for std::pair/std::tuple hashing
