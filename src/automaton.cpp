@@ -735,4 +735,17 @@ std::unique_ptr<WorkingAutomaton> make_working(unsigned int size) {
 	}
 }
 
+namespace detail {
+void do_lit(AutomatonBase& a, std::initializer_list<symbol_type> symbols) {
+	a.reserve(static_cast<state_type>(symbols.size() + 1));
+	state_type last = a.addState(), next;
+	for (unsigned int symbol : symbols) {
+		next = a.addState();
+		a.addTrans(last, symbol, next);
+		last = next;
+	}
+	a.setAccept(last);
+}
+}
+
 } //namespace automaton

@@ -698,8 +698,8 @@ private:
 	friend Automaton<N> epsilon();
 	template<unsigned int N>
 	friend Automaton<N> any();
-	template<unsigned int N, typename... Symbols>
-	friend Automaton<N> lit(Symbols... symbols);
+	template<unsigned int N>
+	friend Automaton<N> lit(std::initializer_list<typename Automaton<N>::symbol_type> symbols);
 };
 
 #define AUTOMATON_EXTERN_TEMPLATE extern
@@ -787,25 +787,31 @@ Automaton<N> any() {
 	return a;
 }
 
+namespace detail {
+void do_lit(AutomatonBase& a, std::initializer_list<symbol_type> symbols);
+}
+
+/**
+ * Returns an Automaton that accepts only the string containing just the given
+ * symbol(s).
+ */
+template<unsigned int N>
+Automaton<N> lit(std::initializer_list<typename Automaton<N>::symbol_type> symbols) {
+	Automaton<N> a;
+	detail::do_lit(a, symbols);
+	a.minimal_ = true;
+	if (a.state_size() <= 2)
+		a.canonical_ = true;
+	return a;
+}
+
 /**
  * Returns an Automaton that accepts only the string containing just the given
  * symbol(s).
  */
 template<unsigned int N, typename... Symbols>
 Automaton<N> lit(Symbols... symbols) {
-	Automaton<N> a;
-	a.reserve(static_cast<typename Automaton<N>::state_type>(sizeof...(symbols) + 1));
-	a.addState();
-	vta::map([&a](auto s) {
-		auto symbol = numeric_cast<typename Automaton<N>::symbol_type>(s);
-		a.addState();
-		a.addTrans(a.state_size()-2, symbol, a.state_size()-1);
-	})(symbols...);
-	a.setAccept(a.state_size()-1);
-	a.minimal_ = true;
-	if (a.state_size() <= 2)
-		a.canonical_ = true;
-	return a;
+	return lit<N>({numeric_cast<typename Automaton<N>::symbol_type>(symbols)...});
 }
 
 namespace detail {
