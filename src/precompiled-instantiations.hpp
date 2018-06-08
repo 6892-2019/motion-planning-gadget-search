@@ -29,13 +29,6 @@ AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_set<unsigned int>;
 
 AUTOMATA_EXTERN_TEMPLATE template class google::sparse_hash_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
 
-AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned char, unsigned char>;
-AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned short, unsigned short>;
-AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned int, unsigned int>;
-AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned long, unsigned long>;
-AUTOMATA_EXTERN_TEMPLATE template class natural_map<unsigned long long, unsigned long long>;
-AUTOMATA_EXTERN_TEMPLATE template class natural_map<std::pair<unsigned int, unsigned int>, unsigned int>;
-
 AUTOMATA_EXTERN_TEMPLATE template class dynarray<int>;
 AUTOMATA_EXTERN_TEMPLATE template class dynarray<unsigned int>;
 AUTOMATA_EXTERN_TEMPLATE template class dynarray<std::size_t>;
