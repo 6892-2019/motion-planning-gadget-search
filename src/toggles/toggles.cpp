@@ -97,7 +97,8 @@ public:
 		automaton_type unpacked(*source_);
 		automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
 		automaton_type mirrored = mirror(unpacked);
-		bool shouldmirror = unpacked == mirrored;
+		//TODO: update from generational search to do less work
+		bool shouldmirror = unpacked != mirrored;
 		auto finishAction = [&](automaton_type&& a, Provenance p) {
 			finish(std::move(a), p, result);
 		};

@@ -67,16 +67,15 @@ void combine_once(const PackedAutomaton* left, const PackedAutomaton* rightA, Fi
 	automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
 	automaton_type::symbol_type rightLocations = right.active_alphabet_size();
 	if (leftLocations + rightLocations > automaton_type::alphabet_size_v) return;
+	//TODO: should only mirror(unpacked) if !rightMir
 	automaton_type mirrored = mirror(unpacked), rightMir = mirror(right);
-	bool shouldmirror = unpacked == mirrored;
+	bool mirrorRight = right != rightMir;
+	bool mirrorLeft = !mirrorRight && unpacked != mirrored;
 	combine(unpacked, 0, false, leftLocations, right, 0, false, rightLocations, finishAction);
-	if (right != rightMir)
+	if (mirrorRight)
 		combine(unpacked, 0, false, leftLocations, rightMir, 0, true, rightLocations, finishAction);
-	if (shouldmirror) {
+	if (mirrorLeft)
 		combine(mirrored, 0, true, leftLocations, right, 0, false, rightLocations, finishAction);
-		if (right != rightMir) //TODO: the both-mirrored combine may be redundant
-			combine(mirrored, 0, true, leftLocations, rightMir, 0, true, rightLocations, finishAction);
-	}
 }
 
 int benchmark_combine(int argc, const char* argv[]) {
@@ -98,10 +97,8 @@ int benchmark_combine(int argc, const char* argv[]) {
 	std::size_t hash = 0;
 	//Print the hash a) to prevent the benchmark from being optimized out and
 	//b) so we can tell if our optimizations changed the result or not.
-	for (auto& pa : finisher.nextgen) {
+	for (auto& pa : finisher.nextgen)
 		hash += pa->packed_hash();
-		std::cout << pa->accept_size() << std::endl;
-	}
 	std::cout << elapsed << " microseconds, "
 			<< finisher.nextgen.size() << " results, "
 			<< finisher.pruned << " pruned, "

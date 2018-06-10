@@ -277,17 +277,23 @@ private:
 		//from toggles.cpp's Combine::operator(); TODO: may want to reunify
 		automaton_type unpacked(*source);
 		automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
-		automaton_type mirrored = mirror(unpacked);
-		bool shouldmirror = unpacked == mirrored;
+		//We only mirror once we have to.  Once we've mirrored, we check if we're
+		//chiral so we can skip the == after the first time.  mirrored continues
+		//to live until the end of the function even if we're achiral, but that's good enough.
+		std::optional<automaton_type> mirrored;
+		bool chiral;
 		for (const Input& i : inputs_) {
 			if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
 			combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 			if (i.mirror.state_size())
 				combine(unpacked, sourceIndex, false, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
-			if (shouldmirror) {
-				combine(mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
-				if (i.mirror.state_size()) //TODO: the both-mirrored combine may be redundant
-					combine(mirrored, sourceIndex, true, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
+			else {
+				if (!mirrored) {
+					mirrored.emplace(mirror(unpacked));
+					chiral = *mirrored != unpacked;
+				}
+				if (chiral)
+					combine(*mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 			}
 		}
 	}
