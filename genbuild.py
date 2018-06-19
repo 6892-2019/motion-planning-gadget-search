@@ -40,7 +40,10 @@ fastdebug_cfg = {
 }
 release_cfg = {
   'config': 'release',
-  'optflags': '-g -O2 -march=native -flto -fvisibility=hidden -DNDEBUG',
+  'optflags': '-g -O2 -march=native -flto=$hardware_concurrency -fvisibility=hidden -DNDEBUG',
+  'pools': {
+    'ld': 'multithreaded',
+  }
 }
 configs = [debug_cfg, sanitize_cfg, fastdebug_cfg, release_cfg]
 
@@ -51,15 +54,22 @@ configs = [debug_cfg, sanitize_cfg, fastdebug_cfg, release_cfg]
 # stuff below here shouldn't need editing/customization
 
 rules = OrderedDict()
-rules['{config}_cxx'] = [
+rules['cxx'] = [
   'command = g++ -MMD -MT $out -MF $out.d ${config}_modeflags ${config}_optflags ${config}_warnflags ${config}_includeflags -c $in -o $out',
   'depfile = $out.d',
   'deps = gcc',
 ]
-rules['{config}_ld'] = [
+rules['ld'] = [
   'command = g++ ${config}_modeflags ${config}_optflags -o $out $in ${config}_ldflags',
 ]
 
+import multiprocessing
+global_flags['hardware_concurrency'] = str(multiprocessing.cpu_count())
+pools = {
+  # For tasks that use all the hardware threads.  Unfortunately other tasks may
+  # still run in parallel if they don't depend on any task in this pool.
+  'multithreaded': '1',
+}
 
 
 Thing = namedtuple('Thing', ['source', 'object', 'is_entrypoint'])
@@ -106,6 +116,11 @@ for k, v in thing_groups.iteritems():
 with open('build.ninja', 'wb') as buildfile:
   for k, v in global_flags.iteritems():
     buildfile.write('{} = {}\n'.format(k, v))
+  buildfile.write('\n')
+  
+  for name, depth in pools.iteritems():
+    buildfile.write('pool {}\n  depth = {}\n'.format(name, depth))
+  buildfile.write('\n')
   
   for config in configs:
     buildfile.write('\n\n\n')
@@ -114,9 +129,11 @@ with open('build.ninja', 'wb') as buildfile:
     buildfile.write('\n')
     
     for k, v in rules.iteritems():
-      buildfile.write('rule {}\n'.format(k.format(**config)))
+      buildfile.write('rule {}_{}\n'.format(config['config'], k))
       for q in v:
         buildfile.write('  {}\n'.format(q.format(**config)))
+      if 'pools' in config and k in config['pools']:
+        buildfile.write('  pool = {}\n'.format(config['pools'][k]))
     buildfile.write('\n')
     
     buildfile.write('build ${config}_pchtarget: {config}_cxx src/precompiled.hpp\n'.format(**config))
