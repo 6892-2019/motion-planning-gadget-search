@@ -40,7 +40,7 @@ fastdebug_cfg = {
 }
 release_cfg = {
   'config': 'release',
-  'optflags': '-O2 -march=native -flto -fvisibility=hidden -DNDEBUG',
+  'optflags': '-g -O2 -march=native -flto -fvisibility=hidden -DNDEBUG',
 }
 configs = [debug_cfg, sanitize_cfg, fastdebug_cfg, release_cfg]
 
