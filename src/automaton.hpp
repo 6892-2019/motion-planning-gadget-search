@@ -816,46 +816,26 @@ Automaton<N> lit(Symbols... symbols) {
 
 namespace detail {
 
-template<class A>
-struct not_an_automaton {}; //doesn't define value
-
-template<class A>
-struct alphabet_size_if_known : std::conditional_t<
-	std::is_base_of_v<AutomatonBase, A>, std::integral_constant<unsigned int, 0>, not_an_automaton<A>> {};
+template<class A, typename enabled = std::enable_if_t<std::is_base_of_v<AutomatonBase, A>>>
+struct alphabet_size_trait : std::integral_constant<unsigned int, 0> {};
 template<unsigned int N>
-struct alphabet_size_if_known<Automaton<N>> : std::integral_constant<unsigned int, N> {};
+struct alphabet_size_trait<Automaton<N>> : std::integral_constant<unsigned int, Automaton<N>::alphabet_size_v> {};
 
-template<unsigned int Current, unsigned int Size, unsigned int... Rest>
-constexpr unsigned int deduce_size_recurse_check();
-template<unsigned int Current>
-constexpr unsigned int deduce_size_recurse_check();
-
-template<unsigned int Size, unsigned int... Rest>
-constexpr unsigned int deduce_size_recurse() {
-	if constexpr (Size != 0)
-		return deduce_size_recurse_check<Size, Rest...>();
-	else if constexpr (sizeof...(Rest) > 0)
-		return deduce_size_recurse<Rest...>();
-	else
-		//trigger SFINAE if this branch is taken (break constexpr)
-		//static_assert is a hard error
-		throw 0;
-}
-template<unsigned int Current, unsigned int Size, unsigned int... Rest>
-constexpr unsigned int deduce_size_recurse_check() {
-	if constexpr (Size == 0 || Size == Current)
-		return deduce_size_recurse<Current, Rest...>();
-	else
-		throw "size mismatch";
-}
-template<unsigned int Current>
-constexpr unsigned int deduce_size_recurse_check() {
-	return Current;
-}
-
-template<class... Automata, unsigned int N = deduce_size_recurse<alphabet_size_if_known<std::decay_t<Automata>>::value...>()>
+template<class ...Automata>
 constexpr unsigned int deduce_size() {
-	return N;
+	if constexpr (!sizeof...(Automata))
+		throw "cannot deduce from empty pack";
+	unsigned int sizes[sizeof...(Automata)] = {alphabet_size_trait<Automata>::value...};
+	unsigned int current = 0;
+	for (unsigned int i : sizes) {
+		if (current == 0)
+			current = i; //i may be 0, but that's a no-op
+		if (current != 0 && i != 0 && i != current)
+			throw "size mismatch";
+	}
+	if (current == 0)
+		throw "no size provided";
+	return current;
 }
 
 template<class ForwardIterator, class = std::void_t<typename std::iterator_traits<ForwardIterator>::iterator_category>>
@@ -912,7 +892,7 @@ Automaton<N> cat() {
 
 template<typename... Automata>
 auto cat(Automata&&... rest) {
-	constexpr unsigned int N = detail::deduce_size<Automata...>();
+	constexpr unsigned int N = detail::deduce_size<std::decay_t<Automata>...>();
 	return cat<N, Automata...>(std::forward<Automata>(rest)...);
 }
 template<unsigned int N, typename... Automata>
@@ -947,7 +927,7 @@ Automaton<N> alt() {
 
 template<typename... Automata>
 auto alt(Automata&&... rest) {
-	constexpr unsigned int N = detail::deduce_size<Automata...>();
+	constexpr unsigned int N = detail::deduce_size<std::decay_t<Automata>...>();
 	return alt<N, Automata...>(std::forward<Automata>(rest)...);
 }
 template<unsigned int N, typename... Automata>
