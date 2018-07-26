@@ -135,6 +135,8 @@ struct Finisher {
 			else
 				++localClosedPruned;
 		}
+		globalClosedPruned += rhs.globalClosedPruned;
+		localClosedPruned += rhs.localClosedPruned;
 	}
 };
 
