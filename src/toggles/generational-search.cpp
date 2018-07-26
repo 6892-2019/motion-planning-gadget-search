@@ -252,6 +252,7 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 						maybe_owning_ptr<Finisher>(finisher_.get(), false),
 						[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
 						[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
+							std::array<automaton_type::symbol_type, automaton_type::alphabet_size_v> compression;
 							for (unsigned int c = r.begin(); c != r.end(); ++c) {
 								automaton_type op = connected;
 								setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
@@ -261,9 +262,9 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 								if (active.size() != (locations - 2)) {
 									//compress the alphabet
 									active.sort();
-									std::copy(active.begin(), active.end(), alphamap.begin());
-									std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
-									op.renumberAlphabet(alphamap.begin());
+									std::copy(active.begin(), active.end(), compression.begin());
+									std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<symbol_type>::max());
+									op.renumberAlphabet(compression.begin());
 									//Because we're deleting unused symbols, we don't need to
 									//minimize again; any two equivalent states would differ only in
 									//the symbols we deleted, but those symbols were inactive.
