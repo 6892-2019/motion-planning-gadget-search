@@ -372,21 +372,36 @@ public:
 		auto newStart = append(nextgen);
 		while (curgen_.size() != newStart) {
 			nextgen.clear();
-			futures.clear();
-			for (index_type i = numeric_cast<index_type>(newStart), sourceIndex = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
-					i < curgen_.size();
-					i += connect_batch_size, sourceIndex += connect_batch_size) {
-				auto first = curgen_.data()+i, last = curgen_.data() + std::min<std::size_t>(i+connect_batch_size, curgen_.size());
-				futures.push_back(pool_.submit(&GenerationalSearch::connect_range, this, first, last, sourceIndex));
-			}
+//			futures.clear();
+//			for (index_type i = numeric_cast<index_type>(newStart), sourceIndex = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
+//					i < curgen_.size();
+//					i += connect_batch_size, sourceIndex += connect_batch_size) {
+//				auto first = curgen_.data()+i, last = curgen_.data() + std::min<std::size_t>(i+connect_batch_size, curgen_.size());
+//				futures.push_back(pool_.submit(&GenerationalSearch::connect_range, this, first, last, sourceIndex));
+//			}
+
+			Finisher finisher(&closed_);
+			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
+			parallel_reduce(tbb::blocked_range<std::size_t>(newStart, curgen_.size()),
+					maybe_owning_ptr<Finisher>(&finisher, false),
+					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
+						for (std::size_t i = r.begin(); i < r.end(); ++i) {
+							index_type sourceIndex = sourceIndexBase + (i-newStart);
+							automaton_type inflated(*curgen_[i]);
+							automaton_type::symbol_type locations = inflated.active_alphabet_size();
+							connect(inflated, sourceIndex, false, locations, *finish);
+						}
+					},
+					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
+						lhs->join(*rhs);
+					});
+
 			//TODO: this finish-merging is copied from above
 			unsigned int localClosedPruned = 0, globalClosedPruned = 0;
-			for (auto& future : futures) {
-				Finisher f = future.get();
-				nextgen.insert(nextgen.end(), std::move_iterator(f.nextgen.begin()), std::move_iterator(f.nextgen.end()));
-				localClosedPruned += f.localClosedPruned;
-				globalClosedPruned += f.globalClosedPruned;
-			}
+			nextgen.insert(nextgen.end(), std::move_iterator(finisher.nextgen.begin()), std::move_iterator(finisher.nextgen.end()));
+			localClosedPruned += finisher.localClosedPruned;
+			globalClosedPruned += finisher.globalClosedPruned;
 			std::cout << "connect: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned\n";
 //			for (index_type i = numeric_cast<index_type>(newStart), sourceIndex = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
 //					i < curgen_.size();
