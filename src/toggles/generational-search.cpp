@@ -6,6 +6,7 @@
 #include "packedautomaton.hpp"
 #include "hopscotch/hopscotch_set.h"
 #include "stringutils.hpp"
+#include "maybe_owning_ptr.hpp"
 
 using namespace automaton;
 using std::vector;
@@ -82,6 +83,12 @@ private:
 typedef Automaton<8u> automaton_type;
 typedef pair<automaton_type, Provenance> AutoProv;
 typedef pair<unique_ptr<const PackedAutomaton>, Provenance> PackProv;
+template<class PackPointer>
+using ClosedSet = tsl::hopscotch_set<PackPointer,
+		indirect_hash, indirect_equal, std::allocator<PackPointer>,
+		30, true /* store the hash */>;
+using OwningClosedSet = ClosedSet<std::unique_ptr<const PackedAutomaton>>;
+using NonowningClosedSet = ClosedSet<const PackedAutomaton*>;
 typedef unsigned int index_type;
 
 struct Input {
@@ -94,6 +101,189 @@ struct Target {
 	std::size_t packed_hash, mirror_packed_hash;
 	std::unique_ptr<const PackedAutomaton> normal, mirror;
 };
+
+struct Finisher {
+	Finisher(const OwningClosedSet* closed) : globalClosed(closed) {}
+	Finisher(const Finisher& f, tbb::split) : globalClosed(f.globalClosed) {}
+	vector<PackProv> nextgen;
+	NonowningClosedSet localClosed;
+	const OwningClosedSet* globalClosed;
+	unsigned int globalClosedPruned = 0, localClosedPruned = 0;
+	void operator()(automaton_type&& a, Provenance p) {
+		canonicalize(a, a.active_alphabet_size());
+		auto packed = pack(a);
+		auto hash = packed->packed_hash();
+		//Check the closed set to deduplicate early.
+		if (globalClosed && globalClosed->find(packed, hash) != globalClosed->end()) {
+			++globalClosedPruned;
+			return;
+		}
+		if (localClosed.insert(packed.get()).second) { //TODO: insert overload taking the hash
+			//We could check targets here, but we can't easily report a finding
+			//and, once we go parallel, we want to ensure we get a deterministic
+			//finding, so we'd have to check that an earlier thread hadn't yet.
+			nextgen.emplace_back(std::move(packed), p);
+		} else
+			++localClosedPruned;
+	}
+	void join(Finisher& rhs) {
+		//If we're globally pruning, we did it already.
+		assert(((bool)globalClosed) && ((bool)rhs.globalClosed));
+		for (PackProv& p : rhs.nextgen) {
+			if (localClosed.insert(p.first.get()).second) //TODO: if we save the hash, use it here
+				nextgen.push_back(std::move(p));
+			else
+				++localClosedPruned;
+		}
+	}
+};
+
+template<class Iter>
+void setInitialStatesToAcceptingStatesInRange(automaton_type& a, Iter first, Iter last) {
+	using state_type = automaton_type::state_type;
+	state_type s = a.addState();
+	for (state_type t : make_range_for_pair(first, last))
+		if (a.accept(t))
+			a.addEpsilon(s, t);
+	a.swapStateNumbers(0, s);
+}
+
+bool enjoin(automaton_type& a, automaton_type::symbol_type l, automaton_type::symbol_type m) {
+	using state_type = automaton_type::state_type;
+	bool progress, changed = false;
+	//TODO: instead of fixpoint iteration, we should put the changed state s
+	//on a worklist and iterate until it's empty
+	do {
+		progress = false;
+		for (state_type s = 0; s < a.state_size(); ++s) {
+			if (a.accept(s)) continue;
+			auto dests = a.step(s, l);
+			for (state_type d : dests) {
+				assert(a.accept(d));
+				for (state_type e : a.step(d, m))
+					progress |= a.addEpsilon(s, e);
+			}
+
+			dests = a.step(s, m);
+			for (state_type d : dests) {
+				assert(a.accept(d));
+				for (state_type e : a.step(d, l))
+					progress |= a.addEpsilon(s, e);
+			}
+		}
+		changed |= progress;
+	} while (progress);
+	return changed;
+}
+
+template<class State, typename SplitFunc, typename EvalFunc, typename JoinFunc>
+struct MutableReduce {
+	const SplitFunc* split_;
+	const EvalFunc* eval_;
+	const JoinFunc* join_;
+	State state_;
+	template<class S>
+	MutableReduce(S&& initialState, SplitFunc& split, EvalFunc& eval, JoinFunc& join) :
+			split_(&split), eval_(&eval), join_(&join), state_(std::forward<S>(initialState)) {}
+	MutableReduce(MutableReduce& lhs, tbb::split) : split_(lhs.split_), eval_(lhs.eval_),
+			join_(lhs.join_), state_((*split_)(lhs.state_)) {}
+	template<class Range>
+	void operator()(const Range& r) {
+		(*eval_)(r, state_);
+	}
+	void join(MutableReduce& rhs) {
+		(*join_)(state_, rhs.state_);
+	}
+};
+
+template<class Range, class State, typename SplitFunc, typename EvalFunc, typename JoinFunc>
+auto parallel_reduce(Range range, State&& initialState, SplitFunc splitter, EvalFunc eval, JoinFunc joiner) {
+	MutableReduce<State, SplitFunc, EvalFunc, JoinFunc> body(std::forward<State>(initialState), splitter, eval, joiner);
+	tbb::parallel_reduce(range, body);
+	return std::move(body.state_);
+}
+
+void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
+		unsigned int locations, Finisher& finish) {
+	using state_type = typename automaton_type::state_type;
+	using symbol_type = typename automaton_type::symbol_type;
+
+	struct ConnectReduceBody {
+		const automaton_type* a_;
+		std::uint32_t gadgetIndex_;
+		bool mirrored_;
+		unsigned int locations_;
+		maybe_owning_ptr<Finisher> finisher_;
+		ConnectReduceBody(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored, unsigned int locations, Finisher& finisher) :
+				a_(&a), gadgetIndex_(gadgetIndex), mirrored_(mirrored), locations_(locations), finisher_(&finisher, false) {}
+		ConnectReduceBody(ConnectReduceBody& lhs, tbb::split) : a_(lhs.a_), gadgetIndex_(lhs.gadgetIndex_),
+				mirrored_(lhs.mirrored_), locations_(lhs.locations_), finisher_(new Finisher(*lhs.finisher_, tbb::split{}), true) {}
+		void operator()(const tbb::blocked_range<unsigned int> locationRange) {
+			const automaton_type& a = *a_;
+			std::uint32_t gadgetIndex = gadgetIndex_;
+			bool mirrored = mirrored_;
+			unsigned int locations = locations_;
+			Finisher& finish = *finisher_;
+
+			//TODO: these alphamap manipulations could all be precomputed
+			std::vector<symbol_type> alphamap(automaton_type::alphabet_size_v);
+			for (unsigned int l = locationRange.begin(); l < locationRange.end(); ++l) {
+				unsigned int m = (l+1) % locations;
+				automaton_type connected = a;
+				enjoin(connected, l, m);
+				acceptingClosure(connected, locations);
+
+				std::iota(alphamap.begin(), alphamap.begin() + locations, 0);
+				std::fill(alphamap.begin() + locations, alphamap.end(), std::numeric_limits<symbol_type>::max());
+				//remove larger first to avoid off-by-one
+				alphamap.erase(alphamap.begin()+std::max(l, m));
+				alphamap.erase(alphamap.begin()+std::min(l, m));
+				//pad with 0
+				alphamap.push_back(std::numeric_limits<symbol_type>::max());
+				alphamap.push_back(std::numeric_limits<symbol_type>::max());
+				connected.renumberAlphabet(0, connected.state_size(), alphamap.begin());
+
+				//We may have disconnected the automaton (disconnecting the
+				//configuration graph of the gadget it represents).
+				automaton::SCCs sccs = automaton::find_components(connected);
+				//TODO: don't reduce if just one; don't reduce over singleton components (?)
+
+				maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
+						maybe_owning_ptr<Finisher>(finisher_.get(), false),
+						[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+						[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
+							for (unsigned int c = r.begin(); c != r.end(); ++c) {
+								automaton_type op = connected;
+								setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
+								op.minimize();
+								automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
+								if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
+								if (active.size() != (locations - 2)) {
+									//compress the alphabet
+									active.sort();
+									std::copy(active.begin(), active.end(), alphamap.begin());
+									std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
+									op.renumberAlphabet(alphamap.begin());
+									//Because we're deleting unused symbols, we don't need to
+									//minimize again; any two equivalent states would differ only in
+									//the symbols we deleted, but those symbols were inactive.
+								}
+								(*finish)(std::move(op), Provenance(gadgetIndex, l, c, mirrored));
+							}
+						},
+						[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
+							lhs->join(*rhs);
+						});
+			}
+		}
+		void join(ConnectReduceBody& rhs) {
+			finisher_->join(*rhs.finisher_);
+		}
+	};
+
+	ConnectReduceBody body{a, gadgetIndex, mirrored, locations, finish};
+	tbb::parallel_reduce(tbb::blocked_range<unsigned int>(0, locations), body);
+}
 
 constexpr index_type combine_batch_size = 500, connect_batch_size = 500;
 class GenerationalSearch {
@@ -212,12 +402,6 @@ public:
 		}
 	}
 private:
-	template<class PackPointer>
-	using ClosedSet = tsl::hopscotch_set<PackPointer,
-			indirect_hash, indirect_equal, std::allocator<PackPointer>,
-			30, true /* store the hash */>;
-	using OwningClosedSet = ClosedSet<std::unique_ptr<const PackedAutomaton>>;
-	using NonowningClosedSet = ClosedSet<const PackedAutomaton*>;
 	vector<const PackedAutomaton*> curgen_; //non-owning, owned by closed_'s elements
 	vector<Provenance> provenance_;
 	OwningClosedSet closed_;
@@ -248,30 +432,7 @@ private:
 		return newStart;
 	}
 
-	struct Finisher {
-		Finisher(const OwningClosedSet* closed) : globalClosed(closed), globalClosedPruned(0), localClosedPruned(0) {}
-		vector<PackProv> nextgen;
-		NonowningClosedSet localClosed;
-		const OwningClosedSet* globalClosed;
-		unsigned int globalClosedPruned, localClosedPruned;
-		void operator()(automaton_type&& a, Provenance p) {
-			canonicalize(a, a.active_alphabet_size());
-			auto packed = pack(a);
-			auto hash = packed->packed_hash();
-			//Check the closed set to deduplicate early.
-			if (globalClosed->find(packed, hash) != globalClosed->end()) {
-				++globalClosedPruned;
-				return;
-			}
-			if (localClosed.insert(packed.get()).second) { //TODO: insert overload taking the hash
-				//We could check targets here, but we can't easily report a finding
-				//and, once we go parallel, we want to ensure we get a deterministic
-				//finding, so we'd have to check that an earlier thread hadn't yet.
-				nextgen.emplace_back(std::move(packed), p);
-			} else
-				++localClosedPruned;
-		}
-	};
+
 
 	void combine_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
 		//from toggles.cpp's Combine::operator(); TODO: may want to reunify
