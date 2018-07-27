@@ -13,6 +13,131 @@ using std::vector;
 using std::pair;
 using std::string;
 using std::unique_ptr;
+using std::chrono::duration_cast;
+
+class Stopwatch {
+private:
+	//https://stackoverflow.com/a/37440647/3614835
+	using best_clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady,
+			std::chrono::high_resolution_clock,
+			std::chrono::steady_clock>;
+	struct StopwatchData {
+		StopwatchData() : time(best_clock::now()) {
+			usage = {};
+			getrusage(RUSAGE_SELF, &usage);
+		}
+		best_clock::time_point time;
+		rusage usage;
+	};
+public:
+	class Result {
+	public:
+		Result(StopwatchData start, StopwatchData end) : start_(start), end_(end) {}
+		template<class Duration>
+		Duration elapsed() {
+			return duration_cast<Duration>(end_.time - start_.time);
+		}
+		unsigned long seconds() {
+			return elapsed<std::chrono::seconds>().count();
+		}
+		unsigned long millis() {
+			return elapsed<std::chrono::milliseconds>().count();
+		}
+		unsigned long micros() {
+			return elapsed<std::chrono::microseconds>().count();
+		}
+		unsigned long nanos() {
+			return elapsed<std::chrono::nanoseconds>().count();
+		}
+		std::string hms() {
+			auto diff = end_.time - start_.time;
+			auto hours = duration_cast<std::chrono::hours>(diff);
+			auto minutes = duration_cast<std::chrono::minutes>(diff) - hours;
+			auto seconds = duration_cast<std::chrono::seconds>(diff) - hours - minutes;
+			return std::to_string(hours.count()) + "h" + std::to_string(minutes.count()) + "m" + std::to_string(seconds.count()) + "s";
+		}
+
+		template<class Duration>
+		Duration userTime() {
+			return duration_cast<Duration>(from_timeval(end_.usage.ru_utime) - from_timeval(start_.usage.ru_utime));
+		}
+		unsigned long userSeconds() {
+			return userTime<std::chrono::seconds>().count();
+		}
+		unsigned long userMillis() {
+			return userTime<std::chrono::milliseconds>().count();
+		}
+		unsigned long userMicros() {
+			return userTime<std::chrono::microseconds>().count();
+		}
+		unsigned long userNanos() {
+			return userTime<std::chrono::nanoseconds>().count();
+		}
+		template<class Duration>
+		Duration systemTime() {
+			return duration_cast<Duration>(from_timeval(end_.usage.ru_stime) - from_timeval(start_.usage.ru_stime));
+		}
+		unsigned long systemSeconds() {
+			return systemTime<std::chrono::seconds>().count();
+		}
+		unsigned long systemMillis() {
+			return systemTime<std::chrono::milliseconds>().count();
+		}
+		unsigned long systemMicros() {
+			return systemTime<std::chrono::microseconds>().count();
+		}
+		unsigned long systemNanos() {
+			return systemTime<std::chrono::nanoseconds>().count();
+		}
+		template<class Duration>
+		Duration cpuTime() {
+			return userTime<Duration>() + systemTime<Duration>();
+		}
+		unsigned long cpuSeconds() {
+			return cpuTime<std::chrono::seconds>().count();
+		}
+		unsigned long cpuMillis() {
+			return cpuTime<std::chrono::milliseconds>().count();
+		}
+		unsigned long cpuMicros() {
+			return cpuTime<std::chrono::microseconds>().count();
+		}
+		unsigned long cpuNanos() {
+			return cpuTime<std::chrono::nanoseconds>().count();
+		}
+
+		double utilization() {
+			//We can tolerate the potential loss of precision here.
+			return static_cast<double>(cpuNanos()) / static_cast<double>(nanos());
+		}
+	private:
+		StopwatchData start_, end_;
+	};
+
+	Stopwatch() : data_() {}
+	/**
+	 * Resets the start point.
+	 */
+	void reset() {
+		data_ = StopwatchData();
+	}
+	/**
+	 * Returns a Result describing the elapsed time and other metrics.  Doesn't
+	 * modify this Stopwatch, so can be called repeatedly to measure from the
+	 * same start point.
+	 */
+	Result elapsed() const {
+		//Imply to the compiler that it should make the system calls ASAP.
+		auto end = StopwatchData();
+		return {data_, end};
+	}
+private:
+	StopwatchData data_;
+
+	static std::chrono::microseconds from_timeval(timeval& tv) {
+		return std::chrono::seconds(tv.tv_sec) + std::chrono::microseconds(tv.tv_usec);
+	}
+};
 
 struct Runnable {
 	virtual void operator()() = 0;
@@ -331,6 +456,7 @@ public:
 				finishAction(automaton_type{i.normal}, Provenance(i.index));
 		} else {
 			futures.clear();
+			Stopwatch stopwatch;
 			for (index_type i = 0, sourceIndex = numeric_cast<index_type>(provenance_.size()-curgen_.size());
 					i < curgen_.size();
 					i += combine_batch_size, sourceIndex += combine_batch_size) {
@@ -344,7 +470,9 @@ public:
 				localClosedPruned += f.localClosedPruned;
 				globalClosedPruned += f.globalClosedPruned;
 			}
-			std::cout << "combine: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned\n";
+			Stopwatch::Result timing = stopwatch.elapsed();
+			std::cout << "combine: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned, " << timing.utilization() << "\n";
+
 //			index_type firstSourceIndex = numeric_cast<index_type>(provenance_.size()-curgen_.size());
 //			Finisher result = pool_.submit(&GenerationalSearch::combine_range, this,
 //					curgen_.data(), curgen_.data()+curgen_.size(), firstSourceIndex).get();
