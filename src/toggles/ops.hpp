@@ -4,6 +4,8 @@
 #include "automaton.hpp"
 #include "provenance.hpp"
 #include "canonicalize.hpp"
+#include <tbb/parallel_reduce.h>
+#include <tbb/blocked_range.h>
 
 bool acceptingClosure(automaton::WorkingAutomaton& connected, unsigned int locations);
 
@@ -98,7 +100,7 @@ void connect(AutomatonType a, std::uint32_t gadgetIndex, bool mirrored,
 		//configuration graph of the gadget it represents).
 		automaton::SCCs sccs = automaton::find_components(connected);
 		for (unsigned int c = 0; c < sccs.size(); ++c) {
-			//last one can move, others have to copy
+//			last one can move, others have to copy
 			AutomatonType op = (c == sccs.size()-1) ? std::move(connected) : connected;
 			setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
 			op.minimize();

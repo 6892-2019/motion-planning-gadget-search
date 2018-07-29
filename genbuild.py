@@ -14,7 +14,7 @@ global_flags = OrderedDict()
 global_flags['builddir'] = 'build' # significant to Ninja
 global_flags['modeflags'] = '-std=c++1z'
 global_flags['warnflags'] = '-pedantic -Wall -Wextra -Wuninitialized -Winit-self -Wconversion -Wuseless-cast -Wlogical-op -Waggressive-loop-optimizations -Winvalid-pch -Wno-unused-parameter -Wduplicated-cond -Wnull-dereference -Wno-dangling-else -Wsuggest-override -fdiagnostics-color=always'
-global_flags['ldflags'] = '-u malloc -ljemalloc_pic -lc -lpthread -ldl -Wl,--gc-sections'
+global_flags['ldflags'] = '-u malloc -ljemalloc_pic -lc -lpthread -ltbb -ldl -Wl,--gc-sections'
 
 # configuration-specific flag *templates*
 config_flags = OrderedDict()
