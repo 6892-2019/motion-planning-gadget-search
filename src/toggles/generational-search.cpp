@@ -200,6 +200,13 @@ struct Finisher {
 	}
 };
 
+maybe_owning_ptr<Finisher> indirect_split(const maybe_owning_ptr<Finisher>& f){
+	return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);
+}
+void indirect_join(const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
+	lhs->join(*rhs);
+}
+
 template<class Iter>
 void setInitialStatesToAcceptingStatesInRange(automaton_type& a, Iter first, Iter last) {
 	using state_type = automaton_type::state_type;
@@ -312,7 +319,7 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 
 				maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
 						maybe_owning_ptr<Finisher>(finisher_.get(), false),
-						[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+						indirect_split,
 						[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
 							std::array<automaton_type::symbol_type, automaton_type::alphabet_size_v> compression;
 							for (unsigned int c = r.begin(); c != r.end(); ++c) {
@@ -334,9 +341,7 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 								(*finish)(std::move(op), Provenance(gadgetIndex, l, c, mirrored));
 							}
 						},
-						[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
-							lhs->join(*rhs);
-						});
+						indirect_join);
 			}
 		}
 		void join(ConnectReduceBody& rhs) {
@@ -397,15 +402,12 @@ private:
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-curgen_.size());
 			parallel_reduce(tbb::blocked_range<std::size_t>(0, curgen_.size()),
 					maybe_owning_ptr<Finisher>(&finisher, false),
-					//TODO: common-ize repeated lambdas
-					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+					indirect_split,
 					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
 						for (std::size_t i = r.begin(); i < r.end(); ++i)
 							combine_once(curgen_[i], sourceIndexBase + i, *finish);
 					},
-					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
-						lhs->join(*rhs);
-					});
+					indirect_join);
 		}
 		curgen_.clear();
 		append(finisher.nextgen);
