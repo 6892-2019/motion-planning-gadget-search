@@ -99,57 +99,25 @@ void connect(AutomatonType a, std::uint32_t gadgetIndex, bool mirrored,
 		//We may have disconnected the automaton (disconnecting the
 		//configuration graph of the gadget it represents).
 		automaton::SCCs sccs = automaton::find_components(connected);
-//		for (unsigned int c = 0; c < sccs.size(); ++c) {
-			//last one can move, others have to copy
-//			AutomatonType op = (c == sccs.size()-1) ? std::move(connected) : connected;
-//			setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
-//			op.minimize();
-//			automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
-//			if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
-//			if (active.size() != (locations - 2)) {
-//				//compress the alphabet
-//				active.sort();
-//				std::copy(active.begin(), active.end(), alphamap.begin());
-//				std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
-//				op.renumberAlphabet(alphamap.begin());
-//				//Because we're deleting unused symbols, we don't need to
-//				//minimize again; any two equivalent states would differ only in
-//				//the symbols we deleted, but those symbols were inactive.
-//			}
-//			finish(std::move(op), Provenance(gadgetIndex, l, c, mirrored));
-//		}
-
-		auto resultvec = tbb::parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
-				std::vector<std::pair<AutomatonType, Provenance>>(),
-				[&](const tbb::blocked_range<unsigned int> r, const std::vector<std::pair<AutomatonType, Provenance>>& accum) {
-					auto result = accum;
-					for (unsigned int c = r.begin(); c != r.end(); ++c) {
-						AutomatonType op = connected;
-						setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
-						op.minimize();
-						automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
-						if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
-						if (active.size() != (locations - 2)) {
-							//compress the alphabet
-							active.sort();
-							std::copy(active.begin(), active.end(), alphamap.begin());
-							std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
-							op.renumberAlphabet(alphamap.begin());
-							//Because we're deleting unused symbols, we don't need to
-							//minimize again; any two equivalent states would differ only in
-							//the symbols we deleted, but those symbols were inactive.
-						}
-						result.emplace_back(std::move(op), Provenance(gadgetIndex, l, c, mirrored));
-					}
-					return result;
-				},
-				[](const std::vector<std::pair<AutomatonType, Provenance>>& l, const std::vector<std::pair<AutomatonType, Provenance>>& r) {
-					auto result = l;
-					result.insert(result.end(), r.begin(), r.end()); //ugh copy
-					return l;
-				});
-		for (auto& p : resultvec)
-			finish(std::move(p.first), p.second);
+		for (unsigned int c = 0; c < sccs.size(); ++c) {
+//			last one can move, others have to copy
+			AutomatonType op = (c == sccs.size()-1) ? std::move(connected) : connected;
+			setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
+			op.minimize();
+			automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
+			if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
+			if (active.size() != (locations - 2)) {
+				//compress the alphabet
+				active.sort();
+				std::copy(active.begin(), active.end(), alphamap.begin());
+				std::fill(alphamap.begin()+active.size(), alphamap.end(), std::numeric_limits<symbol_type>::max());
+				op.renumberAlphabet(alphamap.begin());
+				//Because we're deleting unused symbols, we don't need to
+				//minimize again; any two equivalent states would differ only in
+				//the symbols we deleted, but those symbols were inactive.
+			}
+			finish(std::move(op), Provenance(gadgetIndex, l, c, mirrored));
+		}
 	}
 }
 
