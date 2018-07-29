@@ -7,6 +7,7 @@
 #include "hopscotch/hopscotch_set.h"
 #include "stringutils.hpp"
 #include "maybe_owning_ptr.hpp"
+#include <fmt/core.h>
 
 using namespace automaton;
 using std::vector;
@@ -367,29 +368,33 @@ public:
 		}
 	}
 	void advance() {
-		vector<PackProv> nextgen;
-		auto finishAction = [&](automaton_type&& a, Provenance p) {
-			a.minimize();
-			canonicalize(a, a.active_alphabet_size());
-			auto packed = pack(a);
-			auto hash = packed->packed_hash();
-			//Check the closed set to deduplicate early.
-			if (closed_.find(packed, hash) != closed_.end()) return;
-			//We could check targets here, but we can't easily report a finding
-			//and, once we go parallel, we want to ensure we get a deterministic
-			//finding, so we'd have to check that an earlier thread hadn't yet.
-			//TODO: local deduplication in our Expansion struct
-			nextgen.emplace_back(std::move(packed), p);
-		};
-		if (curgen_.empty()) {
+		Stopwatch stopwatch;
+		do_combine();
+		do_connect();
+		Stopwatch::Result timing = stopwatch.elapsed();
+		fmt::print("Finished generation {} in {} ({}); produced {}, closed size {}.\n",
+				generation_, timing.hms(), timing.utilization(), curgen_.size(), closed_.size());
+		++generation_;
+	}
+private:
+	vector<const PackedAutomaton*> curgen_; //non-owning, owned by closed_'s elements
+	vector<Provenance> provenance_;
+	OwningClosedSet closed_;
+	vector<Input> inputs_;
+	vector<Target> targets_;
+	unsigned int generation_ = 0;
+
+	void do_combine() {
+		Stopwatch stopwatch;
+		Finisher finisher(nullptr); //We'll never hit in closed_ when combining.
+		if (generation_ == 0) {
 			assert(closed_.empty());
 			//"combine against nothing" to get started
 			for (auto& i : inputs_)
-				finishAction(automaton_type{i.normal}, Provenance(i.index));
+				finisher(automaton_type{i.normal}, Provenance(i.index));
+				//TODO: i.mirror if nonempty?
 		} else {
-			Finisher finisher(&closed_); //TODO: don't actually check global closed set, we never hit
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-curgen_.size());
-			Stopwatch stopwatch;
 			parallel_reduce(tbb::blocked_range<std::size_t>(0, curgen_.size()),
 					maybe_owning_ptr<Finisher>(&finisher, false),
 					//TODO: common-ize repeated lambdas
@@ -401,72 +406,14 @@ public:
 					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
 						lhs->join(*rhs);
 					});
-			unsigned int localClosedPruned = 0, globalClosedPruned = 0;
-			nextgen.insert(nextgen.end(), std::move_iterator(finisher.nextgen.begin()), std::move_iterator(finisher.nextgen.end()));
-			localClosedPruned += finisher.localClosedPruned;
-			globalClosedPruned += finisher.globalClosedPruned;
-			Stopwatch::Result timing = stopwatch.elapsed();
-			std::cout << "combine: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned, " << timing.utilization() << "\n";
 		}
 		curgen_.clear();
-		auto newStart = append(nextgen);
-		while (curgen_.size() != newStart) {
-			nextgen.clear();
-			Finisher finisher(&closed_);
-			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
-			parallel_reduce(tbb::blocked_range<std::size_t>(newStart, curgen_.size()),
-					maybe_owning_ptr<Finisher>(&finisher, false),
-					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
-					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
-						for (std::size_t i = r.begin(); i < r.end(); ++i) {
-							index_type sourceIndex = sourceIndexBase + (i-newStart);
-							automaton_type inflated(*curgen_[i]);
-							automaton_type::symbol_type locations = inflated.active_alphabet_size();
-							connect(inflated, sourceIndex, false, locations, *finish);
-						}
-					},
-					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
-						lhs->join(*rhs);
-					});
+		append(finisher.nextgen);
 
-			//TODO: this finish-merging is copied from above
-			unsigned int localClosedPruned = 0, globalClosedPruned = 0;
-			nextgen.insert(nextgen.end(), std::move_iterator(finisher.nextgen.begin()), std::move_iterator(finisher.nextgen.end()));
-			localClosedPruned += finisher.localClosedPruned;
-			globalClosedPruned += finisher.globalClosedPruned;
-			std::cout << "connect: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned\n";
-			newStart = append(nextgen);
-			std::cout << newStart << " " << curgen_.size() << " " << nextgen.size() << std::endl;
-		}
-	}
-private:
-	vector<const PackedAutomaton*> curgen_; //non-owning, owned by closed_'s elements
-	vector<Provenance> provenance_;
-	OwningClosedSet closed_;
-	vector<Input> inputs_;
-	vector<Target> targets_;
-
-	std::size_t append(std::vector<PackProv>& next) {
-		auto newStart = curgen_.size();
-		for (PackProv& p : next) {
-			const PackedAutomaton* observer = p.first.get();
-			if (closed_.insert(std::move(p.first)).second) {
-				auto hash = observer->packed_hash();
-				for (const Target& t : targets_)
-					if (t.packed_hash == hash || t.mirror_packed_hash == hash) {
-						print_provenance_backtrace(p.second);
-						//TODO: maybe put it in some member variable to be checked when convenient?
-					}
-				//TODO: add insert overload taking the hash so we only compute it once
-				curgen_.push_back(observer);
-				provenance_.push_back(p.second);
-			}
-			//otherwise unique_ptr cleans it up somewhere, possibly in the guts
-			//of closed_.insert.  TODO: we might prefer to release memory in a
-			//large batch at the end of the loop rather than during each
-			//iteration, for better locality (both data and code).
-		}
-		return newStart;
+		Stopwatch::Result timing = stopwatch.elapsed();
+		//TODO: total size, summary stats of produced or the entire closed set?
+		fmt::print("Finished combine {} in {} ({}); produced {}, pruned {}, closed size {}.\n",
+				generation_, timing.hms(), timing.utilization(), curgen_.size(), finisher.localClosedPruned, closed_.size());
 	}
 
 	void combine_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
@@ -492,6 +439,69 @@ private:
 					combine(*mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 			}
 		}
+	}
+
+	void do_connect() {
+		Stopwatch connectwatch;
+		std::size_t newStart = 0;
+		unsigned int subgeneration = 0;
+		unsigned int totalProduced = 0, totalGlobalPruned = 0, totalLocalPruned = 0;
+		while (curgen_.size() != newStart) {
+			Stopwatch subgenwatch;
+			Finisher finisher(&closed_);
+			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
+			parallel_reduce(tbb::blocked_range<std::size_t>(newStart, curgen_.size()),
+					maybe_owning_ptr<Finisher>(&finisher, false),
+					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
+						for (std::size_t i = r.begin(); i < r.end(); ++i) {
+							index_type sourceIndex = sourceIndexBase + (i-newStart);
+							automaton_type inflated(*curgen_[i]);
+							automaton_type::symbol_type locations = inflated.active_alphabet_size();
+							connect(inflated, sourceIndex, false, locations, *finish);
+						}
+					},
+					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
+						lhs->join(*rhs);
+					});
+			std::size_t produced = finisher.nextgen.size();
+			newStart = append(finisher.nextgen);
+			Stopwatch::Result timing = subgenwatch.elapsed();
+			fmt::print("Finished connect {}.{} in {} ({}); produced {}, globally pruned {}, locally pruned {}, closed size {}.\n",
+				generation_, subgeneration, timing.hms(), timing.utilization(),
+				produced, finisher.globalClosedPruned, finisher.localClosedPruned, closed_.size());
+			++subgeneration;
+			totalProduced += produced;
+			totalGlobalPruned += finisher.globalClosedPruned;
+			totalLocalPruned += finisher.localClosedPruned;
+		}
+		Stopwatch::Result timing = connectwatch.elapsed();
+		fmt::print("Finished connect {} in {} ({}); total: produced {}, globally pruned {}, locally pruned {}.\n",
+				generation_, timing.hms(), timing.utilization(),
+				totalProduced, totalGlobalPruned, totalLocalPruned);
+	}
+
+	std::size_t append(std::vector<PackProv>& next) {
+		auto newStart = curgen_.size();
+		for (PackProv& p : next) {
+			const PackedAutomaton* observer = p.first.get();
+			if (closed_.insert(std::move(p.first)).second) {
+				auto hash = observer->packed_hash();
+				for (const Target& t : targets_)
+					if (t.packed_hash == hash || t.mirror_packed_hash == hash) {
+						print_provenance_backtrace(p.second);
+						//TODO: maybe put it in some member variable to be checked when convenient?
+					}
+				//TODO: add insert overload taking the hash so we only compute it once
+				curgen_.push_back(observer);
+				provenance_.push_back(p.second);
+			}
+			//otherwise unique_ptr cleans it up somewhere, possibly in the guts
+			//of closed_.insert.  TODO: we might prefer to release memory in a
+			//large batch at the end of the loop rather than during each
+			//iteration, for better locality (both data and code).
+		}
+		return newStart;
 	}
 
 	[[gnu::cold]]
@@ -536,10 +546,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	}
 
 	GenerationalSearch gs(inputs, outputs);
-	for (int generation = 1; ; ++generation) {
+	for (int generation = 1; ; ++generation)
 		gs.advance();
-		std::cout << "finished " << generation << std::endl;
-	}
 
 	return 0;
 }
