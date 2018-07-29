@@ -139,72 +139,6 @@ private:
 	}
 };
 
-struct Runnable {
-	virtual void operator()() = 0;
-	virtual ~Runnable() {};
-};
-
-template<class Callable>
-struct RunnableImpl : public Runnable {
-	RunnableImpl(const RunnableImpl&) = default;
-	RunnableImpl(RunnableImpl&&) = default;
-	RunnableImpl(const Callable& callable) : callable_(callable) {}
-	RunnableImpl(Callable&& callable) : callable_(std::move(callable)) {}
-	void operator()() override {callable_();}
-private:
-	Callable callable_;
-};
-
-class ThreadPool {
-public:
-	ThreadPool(int threads = std::thread::hardware_concurrency(), unsigned int queueSize = 1024) : tasks_(queueSize) {
-		for (int i = 0; i < threads; ++i)
-			workers_.emplace_back(threadProc, std::ref(tasks_));
-	}
-	template<class Callable, class... Args>
-	auto submit(Callable&& task, Args&&... args) {
-		std::promise<std::invoke_result_t<Callable, Args...>> promise;
-		auto future = promise.get_future();
-//		unique_ptr<Runnable> f = std::make_unique<RunnableImpl>(
-//			//http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0780r2.html
-////			[promise=std::move(promise), task=std::move(task), ...args=std::move(args)] {
-//			[promise=std::move(promise), task=std::move(task), args=std::make_tuple(std::move(args)...)] () mutable {
-//			try {
-//				promise.set_value(std::apply(task, args));
-//			} catch(...) {
-//				try {
-//					promise.set_exception(std::current_exception());
-//				} catch (...) {} //nothing to be done
-//			}
-//		});
-		unique_ptr<Runnable> f(new RunnableImpl(
-				[promise=std::move(promise), task=std::move(task), args=std::make_tuple(std::move(args)...)] () mutable {
-					try {
-						//TODO: should we be moving from args here?
-						promise.set_value(std::apply(task, args));
-					} catch(...) {
-						try {
-							promise.set_exception(std::current_exception());
-						} catch (...) {} //nothing to be done
-					}
-				}
-				));
-		tasks_.put(std::move(f));
-		return future;
-	}
-private:
-	bounded_queue<unique_ptr<Runnable>> tasks_;
-	std::vector<std::thread> workers_;
-	static void threadProc(decltype(tasks_)& queue) {
-		//TODO: consider pinning threads to cores
-		while (true) {
-			auto p = queue.take();
-			if (!p) return;
-			p->operator()();
-		}
-	}
-};
-
 typedef Automaton<8u> automaton_type;
 typedef pair<automaton_type, Provenance> AutoProv;
 typedef pair<unique_ptr<const PackedAutomaton>, Provenance> PackProv;
@@ -413,7 +347,6 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 	tbb::parallel_reduce(tbb::blocked_range<unsigned int>(0, locations), body);
 }
 
-constexpr index_type combine_batch_size = 500, connect_batch_size = 500;
 class GenerationalSearch {
 public:
 	GenerationalSearch(vector<automaton_type>& inputs, vector<automaton_type>& targets) {
@@ -435,7 +368,6 @@ public:
 	}
 	void advance() {
 		vector<PackProv> nextgen;
-		std::vector<std::future<Finisher>> futures;
 		auto finishAction = [&](automaton_type&& a, Provenance p) {
 			a.minimize();
 			canonicalize(a, a.active_alphabet_size());
@@ -455,7 +387,6 @@ public:
 			for (auto& i : inputs_)
 				finishAction(automaton_type{i.normal}, Provenance(i.index));
 		} else {
-			futures.clear();
 			Finisher finisher(&closed_); //TODO: don't actually check global closed set, we never hit
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-curgen_.size());
 			Stopwatch stopwatch;
@@ -470,56 +401,17 @@ public:
 					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
 						lhs->join(*rhs);
 					});
-//			for (index_type i = 0, );
-//					i < curgen_.size();
-//					i += combine_batch_size, sourceIndex += combine_batch_size) {
-//				auto first = curgen_.data()+i, last = curgen_.data() + std::min<std::size_t>(i+combine_batch_size, curgen_.size());
-//				futures.push_back(pool_.submit(&GenerationalSearch::combine_range, this, first, last, sourceIndex));
-//			}
 			unsigned int localClosedPruned = 0, globalClosedPruned = 0;
 			nextgen.insert(nextgen.end(), std::move_iterator(finisher.nextgen.begin()), std::move_iterator(finisher.nextgen.end()));
 			localClosedPruned += finisher.localClosedPruned;
 			globalClosedPruned += finisher.globalClosedPruned;
 			Stopwatch::Result timing = stopwatch.elapsed();
 			std::cout << "combine: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned, " << timing.utilization() << "\n";
-
-//			index_type firstSourceIndex = numeric_cast<index_type>(provenance_.size()-curgen_.size());
-//			Finisher result = pool_.submit(&GenerationalSearch::combine_range, this,
-//					curgen_.data(), curgen_.data()+curgen_.size(), firstSourceIndex).get();
-//			nextgen = std::move(result.nextgen);
-//			for (index_type i = 0, sourceIndex = numeric_cast<index_type>(provenance_.size()-curgen_.size());
-//					i < curgen_.size();
-//					i++, sourceIndex++) {
-//				const PackedAutomaton* source = curgen_[i];
-//				automaton_type unpacked(*source);
-//				automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
-//				automaton_type mirrored = mirror(unpacked);
-//				bool shouldmirror = unpacked == mirrored;
-//				for (const Input& i : inputs_) {
-//					if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
-//					combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
-//					if (i.mirror.state_size())
-//						combine(unpacked, sourceIndex, false, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
-//					if (shouldmirror) {
-//						combine(mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
-//						if (i.mirror.state_size()) //TODO: the both-mirrored combine may be redundant
-//							combine(mirrored, sourceIndex, true, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
-//					}
-//				}
-//			}
 		}
 		curgen_.clear();
 		auto newStart = append(nextgen);
 		while (curgen_.size() != newStart) {
 			nextgen.clear();
-//			futures.clear();
-//			for (index_type i = numeric_cast<index_type>(newStart), sourceIndex = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
-//					i < curgen_.size();
-//					i += connect_batch_size, sourceIndex += connect_batch_size) {
-//				auto first = curgen_.data()+i, last = curgen_.data() + std::min<std::size_t>(i+connect_batch_size, curgen_.size());
-//				futures.push_back(pool_.submit(&GenerationalSearch::connect_range, this, first, last, sourceIndex));
-//			}
-
 			Finisher finisher(&closed_);
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
 			parallel_reduce(tbb::blocked_range<std::size_t>(newStart, curgen_.size()),
@@ -543,16 +435,6 @@ public:
 			localClosedPruned += finisher.localClosedPruned;
 			globalClosedPruned += finisher.globalClosedPruned;
 			std::cout << "connect: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned\n";
-//			for (index_type i = numeric_cast<index_type>(newStart), sourceIndex = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
-//					i < curgen_.size();
-//					i++, sourceIndex++) {
-//				automaton_type inflated(*curgen_[i]);
-//				automaton_type mirrored = mirror(inflated);
-//				automaton_type::symbol_type locations = inflated.active_alphabet_size();
-//				connect(inflated, sourceIndex, false, locations, finishAction);
-//				if (inflated != mirrored)
-//					connect(mirrored, sourceIndex, true, locations, finishAction);
-//			}
 			newStart = append(nextgen);
 			std::cout << newStart << " " << curgen_.size() << " " << nextgen.size() << std::endl;
 		}
@@ -563,7 +445,6 @@ private:
 	OwningClosedSet closed_;
 	vector<Input> inputs_;
 	vector<Target> targets_;
-	ThreadPool pool_;
 
 	std::size_t append(std::vector<PackProv>& next) {
 		auto newStart = curgen_.size();
@@ -588,8 +469,6 @@ private:
 		return newStart;
 	}
 
-
-
 	void combine_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
 		//from toggles.cpp's Combine::operator(); TODO: may want to reunify
 		automaton_type unpacked(*source);
@@ -613,30 +492,6 @@ private:
 					combine(*mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
 			}
 		}
-	}
-
-	Finisher combine_range(const PackedAutomaton** first, const PackedAutomaton** last, index_type firstSourceIndex) {
-		Finisher finisher(&closed_);
-		//https://stackoverflow.com/a/18514815/3614835
-		for (auto [source, sourceIndex] = std::make_pair(first, firstSourceIndex); source != last; ++source, ++sourceIndex)
-			combine_once(*source, sourceIndex, finisher);
-		return finisher;
-	}
-
-	void connect_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
-		automaton_type inflated(*source);
-		automaton_type::symbol_type locations = inflated.active_alphabet_size();
-		connect(inflated, sourceIndex, false, locations, finishAction);
-	}
-
-	Finisher connect_range(const PackedAutomaton** first, const PackedAutomaton** last, index_type firstSourceIndex) {
-		//TODO: this is basically the same as combine_range, but as we need to
-		//form a pointer to it, it may be awkward to template-merge them.
-		Finisher finisher(&closed_);
-		//https://stackoverflow.com/a/18514815/3614835
-		for (auto [source, sourceIndex] = std::make_pair(first, firstSourceIndex); source != last; ++source, ++sourceIndex)
-			connect_once(*source, sourceIndex, finisher);
-		return finisher;
 	}
 
 	[[gnu::cold]]
@@ -664,20 +519,6 @@ private:
 		std::cout << std::flush;
 	}
 };
-
-//struct Expansion;
-//
-//Expansion map(const automaton_type& a, index_type index, const vector<AutoProv>& combinables /* inputs + more? */) {
-//	throw std::logic_error("");
-//}
-//
-//Expansion map(const PackedAutomaton& a, index_type index, const vector<AutoProv>& combinables) {
-//
-//}
-//
-//Expansion reduce(const Expansion& left, const Expansion& right) {
-//
-//}
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	vector<automaton_type> inputs, outputs;
