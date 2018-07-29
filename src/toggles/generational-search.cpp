@@ -456,20 +456,30 @@ public:
 				finishAction(automaton_type{i.normal}, Provenance(i.index));
 		} else {
 			futures.clear();
+			Finisher finisher(&closed_); //TODO: don't actually check global closed set, we never hit
+			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-curgen_.size());
 			Stopwatch stopwatch;
-			for (index_type i = 0, sourceIndex = numeric_cast<index_type>(provenance_.size()-curgen_.size());
-					i < curgen_.size();
-					i += combine_batch_size, sourceIndex += combine_batch_size) {
-				auto first = curgen_.data()+i, last = curgen_.data() + std::min<std::size_t>(i+combine_batch_size, curgen_.size());
-				futures.push_back(pool_.submit(&GenerationalSearch::combine_range, this, first, last, sourceIndex));
-			}
+			parallel_reduce(tbb::blocked_range<std::size_t>(0, curgen_.size()),
+					maybe_owning_ptr<Finisher>(&finisher, false),
+					//TODO: common-ize repeated lambdas
+					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
+						for (std::size_t i = r.begin(); i < r.end(); ++i)
+							combine_once(curgen_[i], sourceIndexBase + i, *finish);
+					},
+					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
+						lhs->join(*rhs);
+					});
+//			for (index_type i = 0, );
+//					i < curgen_.size();
+//					i += combine_batch_size, sourceIndex += combine_batch_size) {
+//				auto first = curgen_.data()+i, last = curgen_.data() + std::min<std::size_t>(i+combine_batch_size, curgen_.size());
+//				futures.push_back(pool_.submit(&GenerationalSearch::combine_range, this, first, last, sourceIndex));
+//			}
 			unsigned int localClosedPruned = 0, globalClosedPruned = 0;
-			for (auto& future : futures) {
-				Finisher f = future.get();
-				nextgen.insert(nextgen.end(), std::move_iterator(f.nextgen.begin()), std::move_iterator(f.nextgen.end()));
-				localClosedPruned += f.localClosedPruned;
-				globalClosedPruned += f.globalClosedPruned;
-			}
+			nextgen.insert(nextgen.end(), std::move_iterator(finisher.nextgen.begin()), std::move_iterator(finisher.nextgen.end()));
+			localClosedPruned += finisher.localClosedPruned;
+			globalClosedPruned += finisher.globalClosedPruned;
 			Stopwatch::Result timing = stopwatch.elapsed();
 			std::cout << "combine: " << localClosedPruned << " locally pruned, " << globalClosedPruned << " globally pruned, " << timing.utilization() << "\n";
 
