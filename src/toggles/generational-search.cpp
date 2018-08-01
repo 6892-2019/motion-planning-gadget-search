@@ -272,6 +272,24 @@ auto parallel_reduce(Range range, State&& initialState, SplitFunc splitter, Eval
 	return std::move(body.state_);
 }
 
+auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
+	//TODO: these alphamap manipulations could all be precomputed, though it's
+	//not clear that would be any faster than using a stack variable
+	std::array<unsigned int, automaton_type::alphabet_size_v> alphamap;
+	if (connectPoint+1 == locations) {
+		auto end = alphamap.begin()+locations-2;
+		//other connect point is zero, so start from 1
+		std::iota(alphamap.begin(), end, 1);
+		std::fill(end, alphamap.end(), std::numeric_limits<automaton_type::symbol_type>::max());
+	} else {
+		auto middle = alphamap.begin()+connectPoint, end = alphamap.begin()+locations-2;
+		std::iota(alphamap.begin(), middle, 0);
+		std::iota(middle, end, connectPoint+2);
+		std::fill(end, alphamap.end(), std::numeric_limits<automaton_type::symbol_type>::max());
+	}
+	return alphamap;
+}
+
 void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 		unsigned int locations, Finisher& finish) {
 	using state_type = typename automaton_type::state_type;
@@ -294,23 +312,13 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 			unsigned int locations = locations_;
 			Finisher& finish = *finisher_;
 
-			//TODO: these alphamap manipulations could all be precomputed
-			std::vector<symbol_type> alphamap(automaton_type::alphabet_size_v);
 			for (unsigned int l = locationRange.begin(); l < locationRange.end(); ++l) {
 				unsigned int m = (l+1) % locations;
 				automaton_type connected = a;
 				enjoin(connected, l, m);
 				acceptingClosure(connected, locations);
-
-				std::iota(alphamap.begin(), alphamap.begin() + locations, 0);
-				std::fill(alphamap.begin() + locations, alphamap.end(), std::numeric_limits<symbol_type>::max());
-				//remove larger first to avoid off-by-one
-				alphamap.erase(alphamap.begin()+std::max(l, m));
-				alphamap.erase(alphamap.begin()+std::min(l, m));
-				//pad with 0
-				alphamap.push_back(std::numeric_limits<symbol_type>::max());
-				alphamap.push_back(std::numeric_limits<symbol_type>::max());
-				connected.renumberAlphabet(0, connected.state_size(), alphamap.begin());
+				auto alphamap = connect_alphamap(locations, l);
+				connected.renumberAlphabet(alphamap.begin());
 
 				//We may have disconnected the automaton (disconnecting the
 				//configuration graph of the gadget it represents).
