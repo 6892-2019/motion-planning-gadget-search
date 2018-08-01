@@ -188,7 +188,7 @@ struct Finisher {
 	}
 	void join(Finisher& rhs) {
 		//If we're globally pruning, we did it already.
-		assert(((bool)globalClosed) && ((bool)rhs.globalClosed));
+		assert(((bool)globalClosed) == ((bool)rhs.globalClosed));
 		for (PackProv& p : rhs.nextgen) {
 			if (localClosed.insert(p.first.get()).second) //TODO: if we save the hash, use it here
 				nextgen.push_back(std::move(p));
