@@ -151,10 +151,12 @@ using OwningClosedSet = ClosedSet<std::unique_ptr<const PackedAutomaton>>;
 using NonowningClosedSet = ClosedSet<const PackedAutomaton*>;
 typedef unsigned int index_type;
 
+using RotationVec = boost::container::small_vector<unsigned int, automaton_type::alphabet_size_v>;
 struct Input {
 	index_type index;
 	automaton_type normal, mirror; //mirror is empty if the input is not chiral
 	AutomatonBase::symbol_type active_alphabet_size;
+	RotationVec normal_rotations, mirror_rotations;
 };
 
 struct Target {
@@ -361,6 +363,55 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 	tbb::parallel_reduce(tbb::blocked_range<unsigned int>(0, locations), body);
 }
 
+void combine(const automaton_type& la, uint32_t l, bool leftMirror, automaton_type::state_type leftLocations,
+		const automaton_type& ra, uint32_t r, bool rightMirror, automaton_type::state_type rightLocations,
+		const RotationVec& rightRotations, Finisher& finish) {
+	using symbol_type = automaton_type::symbol_type;
+	std::array<symbol_type, automaton_type::alphabet_size_v> slide, sliderotate;
+	std::fill(slide.begin(), slide.begin()+rightLocations, std::numeric_limits<symbol_type>::max());
+	std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
+	std::fill(slide.begin()+rightLocations+leftLocations, slide.end(), std::numeric_limits<symbol_type>::max());
+	for (decltype(leftLocations) ll = 0; ll < leftLocations; ++ll) {
+		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<symbol_type>::max());
+		automaton_type lm = la;
+		lm.renumberAlphabet(slide);
+		for (auto rotation : rightRotations) {
+			//Could be two iotas instead.
+			std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+rightLocations, 0);
+			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+rotation, sliderotate.begin()+ll+rightLocations);
+			automaton_type rm = ra;
+			rm.renumberAlphabet(sliderotate);
+			automaton_type combined = automaton::shuffleAccept(lm, rm);
+			finish(std::move(combined), Provenance(l, ll, leftMirror, r, rotation, rightMirror));
+		}
+		std::swap(slide[ll], slide[ll+rightLocations]);
+	}
+}
+
+auto find_useful_rotations(const automaton_type& a) {
+	using symbol_type = automaton_type::symbol_type;
+	RotationVec useful;
+	auto locations = a.active_alphabet_size();
+	if (!locations) return useful;
+
+	OwningClosedSet closed;
+	std::array<symbol_type, automaton_type::alphabet_size_v> rotation;
+	std::fill(rotation.begin()+locations, rotation.end(), std::numeric_limits<symbol_type>::max());
+	for (unsigned int rl = 0; rl < locations; ++rl) {
+		//It's arbitrary which way we rotate so long as we match what combine does.
+		std::iota(rotation.begin(), rotation.begin()+locations, 0);
+		std::rotate(rotation.begin(), rotation.begin()+rl, rotation.begin()+locations);
+		automaton_type rm = a;
+		rm.renumberAlphabet(rotation);
+		rm.canonicalize(); //The normal, non-alphabet-adjusting canonicalize.
+		auto p = pack(rm);
+		//if we haven't seen it before
+		if (closed.insert(pack(rm)).second)
+			useful.push_back(rl);
+	}
+	return useful;
+}
+
 class GenerationalSearch {
 public:
 	GenerationalSearch(vector<automaton_type>& inputs, vector<automaton_type>& targets) {
@@ -370,7 +421,10 @@ public:
 			if (m == inputs[i])
 				m.clear();
 			auto asz = inputs[i].active_alphabet_size();
-			inputs_.push_back({numeric_cast<index_type>(i), std::move(inputs[i]), std::move(m), asz});
+			auto normal_rotations = find_useful_rotations(inputs[i]);
+			auto mirror_rotations = find_useful_rotations(m);
+			inputs_.push_back({numeric_cast<index_type>(i), std::move(inputs[i]), std::move(m),
+					asz, normal_rotations, mirror_rotations});
 		}
 		targets_.reserve(targets.size());
 		for (auto& t : targets) {
@@ -437,16 +491,16 @@ private:
 		bool chiral;
 		for (const Input& i : inputs_) {
 			if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
-			combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
+			combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, i.normal_rotations, finishAction);
 			if (i.mirror.state_size())
-				combine(unpacked, sourceIndex, false, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, finishAction);
+				combine(unpacked, sourceIndex, false, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, i.mirror_rotations, finishAction);
 			else {
 				if (!mirrored) {
 					mirrored.emplace(mirror(unpacked));
 					chiral = *mirrored != unpacked;
 				}
 				if (chiral)
-					combine(*mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, finishAction);
+					combine(*mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, i.normal_rotations, finishAction);
 			}
 		}
 	}
