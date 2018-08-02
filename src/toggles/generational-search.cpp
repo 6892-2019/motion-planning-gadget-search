@@ -311,6 +311,12 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
 				std::array<automaton_type::symbol_type, automaton_type::alphabet_size_v> compression;
 				for (unsigned int c = r.begin(); c != r.end(); ++c) {
+					//If there are no accept states in the component, it
+					//represents the empty language, and we can skip it.  (There
+					//don't seem to be any non-singleton components having no
+					//accept states, so we only check singletons.)
+					if (sccs.end(c) - sccs.begin(c) == 1 && !connected.accept(*sccs.begin(c))) continue;
+
 					automaton_type op = connected;
 					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
 					op.minimize();
