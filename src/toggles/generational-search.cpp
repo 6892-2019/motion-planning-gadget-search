@@ -292,75 +292,56 @@ auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
 	return alphamap;
 }
 
+void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
+		unsigned int locations, unsigned int connectPoint, Finisher& finisher) {
+	automaton_type connected = a;
+	enjoin(connected, connectPoint, (connectPoint+1) % locations); //TODO: maybe branch instead of modulo
+	acceptingClosure(connected, locations);
+	auto alphamap = connect_alphamap(locations, connectPoint);
+	connected.renumberAlphabet(alphamap.begin());
+
+	//We may have disconnected the automaton (disconnecting the
+	//configuration graph of the gadget it represents).
+	automaton::SCCs sccs = automaton::find_components(connected);
+	//TODO: don't reduce if just one; don't reduce over singleton components (?)
+
+	maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
+			maybe_owning_ptr<Finisher>(&finisher, false),
+			indirect_split,
+			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
+				std::array<automaton_type::symbol_type, automaton_type::alphabet_size_v> compression;
+				for (unsigned int c = r.begin(); c != r.end(); ++c) {
+					automaton_type op = connected;
+					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
+					op.minimize();
+					automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
+					if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
+					if (active.size() != (locations - 2)) {
+						//compress the alphabet
+						active.sort();
+						std::copy(active.begin(), active.end(), compression.begin());
+						std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<automaton_type::symbol_type>::max());
+						op.renumberAlphabet(compression.begin());
+						//Because we're deleting unused symbols, we don't need to
+						//minimize again; any two equivalent states would differ only in
+						//the symbols we deleted, but those symbols were inactive.
+					}
+					(*finish)(std::move(op), Provenance(gadgetIndex, connectPoint, c, mirrored));
+				}
+			},
+			indirect_join);
+}
+
 void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
-		unsigned int locations, Finisher& finish) {
-	using state_type = typename automaton_type::state_type;
-	using symbol_type = typename automaton_type::symbol_type;
-
-	struct ConnectReduceBody {
-		const automaton_type* a_;
-		std::uint32_t gadgetIndex_;
-		bool mirrored_;
-		unsigned int locations_;
-		maybe_owning_ptr<Finisher> finisher_;
-		ConnectReduceBody(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored, unsigned int locations, Finisher& finisher) :
-				a_(&a), gadgetIndex_(gadgetIndex), mirrored_(mirrored), locations_(locations), finisher_(&finisher, false) {}
-		ConnectReduceBody(ConnectReduceBody& lhs, tbb::split) : a_(lhs.a_), gadgetIndex_(lhs.gadgetIndex_),
-				mirrored_(lhs.mirrored_), locations_(lhs.locations_), finisher_(new Finisher(*lhs.finisher_, tbb::split{}), true) {}
-		void operator()(const tbb::blocked_range<unsigned int> locationRange) {
-			const automaton_type& a = *a_;
-			std::uint32_t gadgetIndex = gadgetIndex_;
-			bool mirrored = mirrored_;
-			unsigned int locations = locations_;
-			Finisher& finish = *finisher_;
-
-			for (unsigned int l = locationRange.begin(); l < locationRange.end(); ++l) {
-				unsigned int m = (l+1) % locations;
-				automaton_type connected = a;
-				enjoin(connected, l, m);
-				acceptingClosure(connected, locations);
-				auto alphamap = connect_alphamap(locations, l);
-				connected.renumberAlphabet(alphamap.begin());
-
-				//We may have disconnected the automaton (disconnecting the
-				//configuration graph of the gadget it represents).
-				automaton::SCCs sccs = automaton::find_components(connected);
-				//TODO: don't reduce if just one; don't reduce over singleton components (?)
-
-				maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
-						maybe_owning_ptr<Finisher>(finisher_.get(), false),
-						indirect_split,
-						[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
-							std::array<automaton_type::symbol_type, automaton_type::alphabet_size_v> compression;
-							for (unsigned int c = r.begin(); c != r.end(); ++c) {
-								automaton_type op = connected;
-								setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
-								op.minimize();
-								automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
-								if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
-								if (active.size() != (locations - 2)) {
-									//compress the alphabet
-									active.sort();
-									std::copy(active.begin(), active.end(), compression.begin());
-									std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<symbol_type>::max());
-									op.renumberAlphabet(compression.begin());
-									//Because we're deleting unused symbols, we don't need to
-									//minimize again; any two equivalent states would differ only in
-									//the symbols we deleted, but those symbols were inactive.
-								}
-								(*finish)(std::move(op), Provenance(gadgetIndex, l, c, mirrored));
-							}
-						},
-						indirect_join);
-			}
-		}
-		void join(ConnectReduceBody& rhs) {
-			finisher_->join(*rhs.finisher_);
-		}
-	};
-
-	ConnectReduceBody body{a, gadgetIndex, mirrored, locations, finish};
-	tbb::parallel_reduce(tbb::blocked_range<unsigned int>(0, locations), body);
+		unsigned int locations, Finisher& finisher) {
+	parallel_reduce(tbb::blocked_range<unsigned int>(0, locations),
+			maybe_owning_ptr<Finisher>(&finisher, false),
+			indirect_split,
+			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
+				for (unsigned int l = r.begin(); l < r.end(); ++l)
+					connect_at(a, gadgetIndex, mirrored, locations, l, *finish);
+			},
+			indirect_join);
 }
 
 void combine(const automaton_type& la, uint32_t l, bool leftMirror, automaton_type::state_type leftLocations,
