@@ -63,6 +63,19 @@ void split_view(std::vector<std::string_view>& out, std::string_view haystack, c
 	out.push_back(haystack.substr(start, scan-start));
 }
 
+Parts partition(std::string_view haystack, char delimiter) {
+	auto index = haystack.find(delimiter);
+	if (index == std::string_view::npos)
+		return Parts{haystack, "", ""};
+	return Parts{haystack.substr(0, index), haystack.substr(index, index+1), haystack.substr(index+1)};
+}
+Parts partition(std::string_view haystack, std::string_view delimiter) {
+	auto index = haystack.find(delimiter);
+	if (index == std::string_view::npos)
+		return Parts{haystack, "", ""};
+	return Parts{haystack.substr(0, index), haystack.substr(index, index+1), haystack.substr(index+1)};
+}
+
 
 std::string join(const std::vector<std::string_view>& inputs, std::string_view delimiter) {
 	std::string result;

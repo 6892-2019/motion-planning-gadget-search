@@ -38,6 +38,10 @@ void split_view(std::vector<std::string_view>& out, std::string_view haystack, c
 std::vector<std::string_view> split_view(const std::string&& temp, char delimiter) = delete;
 void split_view(std::vector<std::string_view>& out, const std::string&& temp, char delimiter) = delete;
 
+// like Python's str.partition
+using Parts = std::tuple<std::string, std::string, std::string>;
+Parts partition(std::string_view haystack, char delimiter);
+Parts partition(std::string_view haystack, std::string_view delimiter);
 
 std::string join(const std::vector<std::string_view>& inputs, std::string_view delimiter);
 std::string join(const std::vector<std::string>& inputs, std::string_view delimiter);
