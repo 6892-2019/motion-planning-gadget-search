@@ -7,6 +7,8 @@
 #include "hopscotch/hopscotch_set.h"
 #include "stringutils.hpp"
 #include "maybe_owning_ptr.hpp"
+#include "stringutils.hpp"
+#include "automaton-io.hpp"
 #include <fmt/core.h>
 
 using namespace automaton;
@@ -581,19 +583,34 @@ private:
 	}
 };
 
+automaton_type automatonFromArg(std::string_view arg) {
+	auto [prefix, sep, suffix] = partition(arg, ':');
+	if (sep.empty())
+		return *known_gadget(arg, automaton_type::alphabet_size_v);
+	if (prefix == "file") {
+		automaton_type thing{*deserialize(suffix)};
+		automaton_type copy(thing);
+		canonicalize(copy, copy.active_alphabet_size(), true);
+		if (copy != thing)
+			fmt::print("warning: canonicalizing changed {}", suffix);
+		return copy;
+	}
+	throw std::runtime_error(fmt::format("bad prefix {} in {}", prefix, arg));
+}
+
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	vector<automaton_type> inputs, outputs;
 
 	std::vector<std::string_view> tokens = split_view(argv[1], ',');
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "input " << i << ": " << tokens[i] << "\n";
-		inputs.push_back(*known_gadget(tokens[i], automaton_type::alphabet_size_v));
+		inputs.push_back(automatonFromArg(tokens[i]));
 	}
 
 	tokens = split_view(argv[2], ',');
 	for (unsigned int i = 0; i < tokens.size(); ++i) {
 		std::cout << "output " << i << ": " << tokens[i] << "\n";
-		outputs.push_back(*known_gadget(tokens[i], automaton_type::alphabet_size_v));
+		outputs.push_back(automatonFromArg(tokens[i]));
 	}
 
 	GenerationalSearch gs(inputs, outputs);
