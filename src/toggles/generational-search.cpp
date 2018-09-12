@@ -5,6 +5,7 @@
 #include "gadgetdefs.hpp"
 #include "packedautomaton.hpp"
 #include "hopscotch/hopscotch_set.h"
+#include "hopscotch/hopscotch_map.h"
 #include "stringutils.hpp"
 #include "maybe_owning_ptr.hpp"
 #include <fmt/core.h>
@@ -171,22 +172,25 @@ struct Finisher {
 	NonowningClosedSet localClosed;
 	const OwningClosedSet* globalClosed;
 	unsigned int globalClosedPruned = 0, localClosedPruned = 0;
-	void operator()(automaton_type&& a, Provenance p) {
+	bool operator()(automaton_type&& a, Provenance p) {
 		canonicalize(a, a.active_alphabet_size());
 		auto packed = pack(a);
 		auto hash = packed->packed_hash();
 		//Check the closed set to deduplicate early.
 		if (globalClosed && globalClosed->find(packed, hash) != globalClosed->end()) {
 			++globalClosedPruned;
-			return;
+			return false;
 		}
 		if (localClosed.insert(packed.get()).second) { //TODO: insert overload taking the hash
 			//We could check targets here, but we can't easily report a finding
 			//and, once we go parallel, we want to ensure we get a deterministic
 			//finding, so we'd have to check that an earlier thread hadn't yet.
 			nextgen.emplace_back(std::move(packed), p);
-		} else
+			return true;
+		} else {
 			++localClosedPruned;
+			return false;
+		}
 	}
 	void join(Finisher& rhs) {
 		//If we're globally pruning, we did it already.
@@ -292,6 +296,44 @@ auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
 	return alphamap;
 }
 
+SCCs find_undirected_components(const AutomatonBase& a) {
+	using state_type = AutomatonBase::state_type;
+	tsl::hopscotch_map<state_type, std::vector<state_type>> edgelist;
+	for (state_type s = 0, end = a.state_size(); s < end; ++s)
+		a.for_each_destination(s, [&](state_type w) {
+			edgelist[s].push_back(w);
+			edgelist[w].push_back(s);
+		});
+	for (auto it = edgelist.begin(); it != edgelist.end(); ++it) {
+		auto& list = it.value();
+		std::sort(list.begin(), list.end());
+		list.erase(std::unique(list.begin(), list.end()), list.end());
+	}
+	boost::dynamic_bitset<std::size_t> unvisited(a.state_size());
+	unvisited.set();
+	SCCs result;
+	result.components_.reserve(a.state_size());
+	circular_deque<state_type, 32> stack;
+
+	for (auto start = unvisited.find_first(); start < unvisited.size(); start = unvisited.find_next(start)) {
+		result.indices_.push_back(static_cast<unsigned int>(result.components_.size()));
+		stack.push_back(start);
+		unvisited.reset(start);
+		result.components_.push_back(start);
+		while (!stack.empty()) {
+			state_type top = stack.back();
+			stack.pop_back();
+			for (state_type d : edgelist[top])
+				if (unvisited.test_set(d, false)) {
+					result.components_.push_back(d);
+					stack.push_back(d);
+				}
+		}
+	}
+	result.indices_.push_back(static_cast<unsigned int>(result.components_.size()));
+	return result;
+}
+
 void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 		unsigned int locations, unsigned int connectPoint, Finisher& finisher) {
 	automaton_type connected = a;
@@ -299,13 +341,43 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 	acceptingClosure(connected, locations);
 	auto alphamap = connect_alphamap(locations, connectPoint);
 	connected.renumberAlphabet(alphamap.begin());
+//	connected.minimize();
+
+//	automaton::AutomatonBase::SymbolSet active = connected.activeAlphabet();
+//	if (active.size() <= 1) return; //there are no interesting 1-symbol automata
+//	if (active.size() != (locations - 2)) {
+//		std::array<automaton_type::symbol_type, automaton_type::alphabet_size_v> compression;
+//		//compress the alphabet
+//		active.sort();
+//		std::copy(active.begin(), active.end(), compression.begin());
+//		std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<automaton_type::symbol_type>::max());
+//		connected.renumberAlphabet(compression.begin());
+//		//Because we're deleting unused symbols, we don't need to
+//		//minimize again; any two equivalent states would differ only in
+//		//the symbols we deleted, but those symbols were inactive.
+//	}
+//	finisher(std::move(connected), Provenance(gadgetIndex, connectPoint, 0, mirrored));
 
 	//We may have disconnected the automaton (disconnecting the
 	//configuration graph of the gadget it represents).
 	automaton::SCCs sccs = automaton::find_components(connected);
 	//TODO: don't reduce if just one; don't reduce over singleton components (?)
 
-	maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
+//	//predless states used to have transitions to them, but no longer do because
+//	//we removed symbols.  Is that a kind of disconnectedness we care about?
+//	boost::dynamic_bitset<std::size_t> predless(connected.state_size());
+//	predless.set();
+//	connected.for_each_transition([&](automaton_type::state_type, automaton_type::symbol_type, automaton_type::state_type to){predless.reset(to);});
+//	int nonempty = 0;
+//	for (unsigned int c = 0; c < sccs.size(); ++c)
+//		if (std::any_of(sccs.begin(c), sccs.end(c), [&](unsigned int s){return connected.accept(s);}))
+//			++nonempty;
+//	std::cout << connected.state_size() << ", " << connected.accept_size() << ", " << sccs.size() << ", " << nonempty << "\n";
+//	for (auto q = predless.find_first(); q < predless.size(); q = predless.find_next(q))
+//		std::cout << q << (connected.accept(q) ? "a" : "") << " ";
+//	std::cout << std::endl;
+
+	parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
 			maybe_owning_ptr<Finisher>(&finisher, false),
 			indirect_split,
 			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
@@ -315,7 +387,8 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 					//represents the empty language, and we can skip it.  (There
 					//don't seem to be any non-singleton components having no
 					//accept states, so we only check singletons.)
-					if (sccs.end(c) - sccs.begin(c) == 1 && !connected.accept(*sccs.begin(c))) continue;
+//					if (sccs.end(c) - sccs.begin(c) == 1 && !connected.accept(*sccs.begin(c))) continue;
+					if (std::none_of(sccs.begin(c), sccs.end(c), [&](unsigned int s){return connected.accept(s);})) continue;
 
 					automaton_type op = connected;
 					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
@@ -351,28 +424,45 @@ void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 }
 
 void combine(const automaton_type& la, uint32_t l, bool leftMirror, automaton_type::state_type leftLocations,
-		const automaton_type& ra, uint32_t r, bool rightMirror, automaton_type::state_type rightLocations,
+		const automaton_type& ra, uint32_t rightGadgetIndex, bool rightMirror, automaton_type::state_type rightLocations,
 		const RotationVec& rightRotations, Finisher& finish) {
 	using symbol_type = automaton_type::symbol_type;
-	std::array<symbol_type, automaton_type::alphabet_size_v> slide, sliderotate;
-	std::fill(slide.begin(), slide.begin()+rightLocations, std::numeric_limits<symbol_type>::max());
-	std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
-	std::fill(slide.begin()+rightLocations+leftLocations, slide.end(), std::numeric_limits<symbol_type>::max());
-	for (decltype(leftLocations) ll = 0; ll < leftLocations; ++ll) {
-		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<symbol_type>::max());
-		automaton_type lm = la;
-		lm.renumberAlphabet(slide);
-		for (auto rotation : rightRotations) {
-			//Could be two iotas instead.
-			std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+rightLocations, 0);
-			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+rotation, sliderotate.begin()+ll+rightLocations);
-			automaton_type rm = ra;
-			rm.renumberAlphabet(sliderotate);
-			automaton_type combined = automaton::shuffleAccept(lm, rm);
-			finish(std::move(combined), Provenance(l, ll, leftMirror, r, rotation, rightMirror));
-		}
-		std::swap(slide[ll], slide[ll+rightLocations]);
-	}
+
+
+	parallel_reduce(tbb::blocked_range<unsigned int>(0, leftLocations),
+			maybe_owning_ptr<Finisher>(&finish, false),
+			indirect_split,
+			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
+				std::array<symbol_type, automaton_type::alphabet_size_v> slide, sliderotate;
+				std::fill(slide.begin(), slide.begin()+rightLocations, std::numeric_limits<symbol_type>::max());
+				std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
+				std::fill(slide.begin()+rightLocations+leftLocations, slide.end(), std::numeric_limits<symbol_type>::max());
+				for (unsigned int ll = 0; ll < r.begin(); ++ll)
+					std::swap(slide[ll], slide[ll+rightLocations]);
+				for (decltype(leftLocations) ll = r.begin(); ll != r.end(); ++ll) {
+					std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<symbol_type>::max());
+					automaton_type lm = la;
+					lm.renumberAlphabet(slide);
+					for (auto rotation : rightRotations) {
+						//Could be two iotas instead.
+						std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+rightLocations, 0);
+						std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+rotation, sliderotate.begin()+ll+rightLocations);
+						automaton_type rm = ra;
+						rm.renumberAlphabet(sliderotate);
+						automaton_type combined = automaton::shuffleAccept(lm, rm);
+						(*finish)(std::move(combined), Provenance(l, ll, leftMirror, rightGadgetIndex, rotation, rightMirror));
+
+//						combined.minimize();
+//						//We can't canonicalize before connecting (because we'd lose the connect point),
+//						//so we lose an opportunity to deduplicate by progressing immediately to connect.
+//						connect_at(combined, l, false, leftLocations+rightLocations,
+//								(leftLocations+rightLocations+ll-1) % (leftLocations + rightLocations), *finish);
+//						connect_at(combined, l, false, leftLocations+rightLocations,
+//								(leftLocations+rightLocations+ll+rightLocations-1) % (leftLocations + rightLocations), *finish);
+					}
+					std::swap(slide[ll], slide[ll+rightLocations]);
+				}
+			}, indirect_join);
 }
 
 auto find_useful_rotations(const automaton_type& a) {
@@ -429,6 +519,7 @@ public:
 		fmt::print("Finished generation {} in {} ({}); produced {}, closed size {}.\n",
 				generation_, timing.hms(), timing.utilization(), curgen_.size(), closed_.size());
 		++generation_;
+		if (curgen_.empty()) std::exit(0);
 	}
 private:
 	vector<const PackedAutomaton*> curgen_; //non-owning, owned by closed_'s elements
@@ -599,6 +690,27 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	GenerationalSearch gs(inputs, outputs);
 	for (int generation = 1; ; ++generation)
 		gs.advance();
+
+//	auto toggle = pack(*known_gadget("1-toggle", automaton_type::alphabet_size_v))->packed_hash();
+//	auto nop = pack(*known_gadget("2-nop", automaton_type::alphabet_size_v))->packed_hash();
+//
+//	automaton_type q = *known_gadget("antiparallel-2-toggle", automaton_type::alphabet_size_v);
+//	auto locations = q.active_alphabet_size();
+//	for (unsigned i = 0; i < locations; ++i) {
+//		Finisher finisher(nullptr);
+//		std::cout << i << std::endl;
+//		connect_at(q, 0, false, locations, i, finisher);
+//		for (auto& p : finisher.nextgen) {
+//			auto hash = p.first->packed_hash();
+//			if (hash == toggle)
+//				std::cout << "got a toggle\n";
+//			else if (hash == nop)
+//				std::cout << "got a nop\n";
+//			else
+//				std::cout << "unrecognized:\n" << *p.first << std::endl;
+//		}
+//		std::cout << "pruned " << finisher.localClosedPruned << std::endl;
+//	}
 
 	return 0;
 }

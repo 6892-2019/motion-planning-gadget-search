@@ -1118,7 +1118,7 @@ public:
 	auto end(unsigned int component) const {
 		return components_.begin() + indices_[component+1];
 	}
-private:
+public:
 	using state_type = AutomatonBase::state_type;
 	std::vector<AutomatonBase::state_type> components_;
 	std::vector<unsigned int> indices_;
