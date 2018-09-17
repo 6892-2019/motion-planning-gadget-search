@@ -294,31 +294,59 @@ auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
 	return alphamap;
 }
 
-auto predecessorless_accept_states(const automaton_type& a) {
-	using state_type = automaton_type::state_type;
-	dynarray<unsigned int> predcount(a.state_size());
+template<class ForEachDestination, class IsAccept>
+auto predecessorless_accept_things(const unsigned int size,
+		ForEachDestination&& for_each_destination, IsAccept&& accept) {
+	dynarray<unsigned int> predcount(size);
 	std::fill(predcount.begin(), predcount.end(), 0u);
-	for (state_type s : xrange(a.state_size()))
-		a.for_each_destination(s, [&](state_type t){++predcount[t];});
+	for (auto s : xrange(size))
+		for_each_destination(s, [&](unsigned int t){++predcount[t];});
 
 	//We don't want predecessorless nonaccept states to count as predecessors.
 	bool progress = true;
 	while (progress) {
 		progress = false;
-		for (state_type i = 0; i < predcount.size(); ++i)
-			if (predcount[i] == 0 && !a.accept(i)) {
-				a.for_each_destination(i, [&](state_type t){--predcount[t];});
+		for (unsigned int i = 0; i < size; ++i)
+			if (predcount[i] == 0 && !accept(i)) {
+				for_each_destination(i, [&](unsigned int t){--predcount[t];});
 				//Mark this state as previously considered, not to be repeated.
 				predcount[i] = std::numeric_limits<unsigned int>::max();
 				progress = true;
 			}
 	}
 
-	std::vector<state_type> retval;
-	for (state_type i = 0; i < predcount.size(); ++i)
-		if (predcount[i] == 0 && a.accept(i))
+	std::vector<unsigned int> retval;
+	for (unsigned int i = 0; i < size; ++i)
+		if (predcount[i] == 0 && accept(i))
 			retval.push_back(i);
 	return retval;
+}
+auto predecessorless_accept_states(const automaton_type& a) {
+	return predecessorless_accept_things(a.state_size(),
+			[&](unsigned int s, auto&& action){a.for_each_destination(s, action);},
+			[&](unsigned int s){return a.accept(s);});
+}
+auto predecessorless_accept_components(const automaton_type& a, const SCCs& sccs) {
+	dynarray<unsigned int> state_to_comp(a.state_size());
+	for (auto c : xrange(sccs.size()))
+		for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
+			state_to_comp[s] = c;
+	return predecessorless_accept_things(sccs.size(),
+			[&](unsigned int c, auto&& action){
+				//We might visit a destination many times if it's targeted by
+				//multiple states in the source component, but that's fine as
+				//long as we're consistent between increments and decrements.
+				for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
+					a.for_each_destination(s, [&](automaton_type::state_type t) {
+						if (state_to_comp[t] != c) //only count edges to other components
+							action(state_to_comp[t]);
+					});
+			},
+			[&](unsigned int c) {
+				return std::any_of(sccs.begin(c), sccs.end(c), [&](unsigned int s){
+					return a.accept(s);
+				});
+			});
 }
 
 void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
@@ -332,9 +360,10 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 	//We may have disconnected the automaton (disconnecting the
 	//configuration graph of the gadget it represents).
 	automaton::SCCs sccs = automaton::find_components(connected);
+	auto roots = predecessorless_accept_components(connected, sccs);
 	//TODO: don't reduce if just one; don't reduce over singleton components (?)
 
-	maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, sccs.size()),
+	maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, roots.size()),
 			maybe_owning_ptr<Finisher>(&finisher, false),
 			indirect_split,
 			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
@@ -344,10 +373,11 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 					//represents the empty language, and we can skip it.  (There
 					//don't seem to be any non-singleton components having no
 					//accept states, so we only check singletons.)
-					if (sccs.end(c) - sccs.begin(c) == 1 && !connected.accept(*sccs.begin(c))) continue;
+//					if (sccs.end(c) - sccs.begin(c) == 1 && !connected.accept(*sccs.begin(c))) continue;
 
 					automaton_type op = connected;
-					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
+//					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
+					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(roots[c]), sccs.end(roots[c]));
 					op.minimize();
 					automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
 					if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
