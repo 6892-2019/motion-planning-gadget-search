@@ -294,6 +294,33 @@ auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
 	return alphamap;
 }
 
+auto predecessorless_accept_states(const automaton_type& a) {
+	using state_type = automaton_type::state_type;
+	dynarray<unsigned int> predcount(a.state_size());
+	std::fill(predcount.begin(), predcount.end(), 0u);
+	for (state_type s : xrange(a.state_size()))
+		a.for_each_destination(s, [&](state_type t){++predcount[t];});
+
+	//We don't want predecessorless nonaccept states to count as predecessors.
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		for (state_type i = 0; i < predcount.size(); ++i)
+			if (predcount[i] == 0 && !a.accept(i)) {
+				a.for_each_destination(i, [&](state_type t){--predcount[t];});
+				//Mark this state as previously considered, not to be repeated.
+				predcount[i] = std::numeric_limits<unsigned int>::max();
+				progress = true;
+			}
+	}
+
+	std::vector<state_type> retval;
+	for (state_type i = 0; i < predcount.size(); ++i)
+		if (predcount[i] == 0 && a.accept(i))
+			retval.push_back(i);
+	return retval;
+}
+
 void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
 		unsigned int locations, unsigned int connectPoint, Finisher& finisher) {
 	automaton_type connected = a;
