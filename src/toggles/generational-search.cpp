@@ -492,6 +492,7 @@ public:
 		fmt::print("Finished generation {} in {} ({}); produced {}, closed size {}.\n",
 				generation_, timing.hms(), timing.utilization(), curgen_.size(), closed_.size());
 		++generation_;
+		if (curgen_.empty()) std::exit(0);
 	}
 private:
 	vector<const PackedAutomaton*> curgen_; //non-owning, owned by closed_'s elements
