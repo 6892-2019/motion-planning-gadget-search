@@ -379,10 +379,6 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 //					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
 					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(roots[c]), sccs.end(roots[c]));
 					op.minimize();
-					std::vector<unsigned int> accepts;
-					op.for_each_accept([&](unsigned int s){accepts.push_back(s);});
-					setInitialStatesToAcceptingStatesInRange(op, accepts.begin(), accepts.end());
-					op.minimize();
 					automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
 					if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
 					if (active.size() != (locations - 2)) {
