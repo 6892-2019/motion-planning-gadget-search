@@ -213,6 +213,11 @@ const GadgetLine seven_tripwire[] = {
 	{1, 1, 0, 0}, {1, 2, 3, 0}, {1, 3, 2, 0},
 	{1, 0, 1, 1}, {1, 1, 0, 1},
 };
+const GadgetLine dichotomizer[] = {
+	{0, 0, 1, 1}, {0, 3, 2, 2},
+	{1, 1, 0, 0},
+	{2, 2, 3, 0},
+};
 
 const tuple<string_view, const GadgetLine*, const GadgetLine*> simple_gadgets[] = {
 	{"diode"sv, std::begin(diode), std::end(diode)},
@@ -232,6 +237,7 @@ const tuple<string_view, const GadgetLine*, const GadgetLine*> simple_gadgets[] 
 	{"crossing-seven-seven"sv, std::begin(crossing_seven_seven), std::end(crossing_seven_seven)},
 	{"seven-lock"sv, std::begin(seven_lock), std::end(seven_lock)},
 	{"seven-tripwire"sv, std::begin(seven_tripwire), std::end(seven_tripwire)},
+	{"dichotomizer"sv, std::begin(dichotomizer), std::end(dichotomizer)},
 };
 
 unsigned int parse_locations(unsigned int alphabet_size, const std::cmatch& match) {
