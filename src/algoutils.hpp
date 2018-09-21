@@ -178,7 +178,7 @@ struct indirect_hash {
 struct free_deleter {
 	constexpr free_deleter() noexcept = default;
 	template<typename T>
-	void operator()(T* ptr) noexcept {
+	void operator()(T* ptr) const noexcept {
 		std::free(ptr);
 	}
 };
