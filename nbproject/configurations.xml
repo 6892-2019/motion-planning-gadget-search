@@ -234,6 +234,12 @@
         <ccTool flags="1">
         </ccTool>
       </item>
+      <item path="src/pack-detail.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/pack.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/pack.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/packedautomaton.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/pathpuzzles/pathpuzzles.cpp" ex="false" tool="1" flavor2="11">

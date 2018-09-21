@@ -2,6 +2,8 @@
 #include "automaton.hpp"
 #include "packedautomaton.hpp"
 #include "packedautomaton-detail.hpp"
+#include "pack.hpp"
+#include "pack-detail.hpp"
 #include "automaton-io.hpp"
 #include "util.hpp"
 #include <doctest.h>
@@ -9,6 +11,23 @@
 using namespace automaton;
 using state_type = AutomatonBase::state_type;
 using symbol_type = AutomatonBase::symbol_type;
+
+TEST_CASE("AutomatonTest_VarintRoundtrip") {
+	for (unsigned int i = 0; i < 70000; ++i) {
+		std::array<std::byte, 8> data;
+		std::fill(data.begin(), data.end(), std::byte{0});
+
+		detail::PackWriter writer(data.begin(), data.end());
+		writer.writeVarint(i);
+		CHECK_UNARY_FALSE(writer.overflow());
+
+		detail::PackReader reader(data.begin(), data.end());
+		unsigned int recovered = reader.readVarint();
+		CHECK_EQ(recovered, i);
+		CHECK_UNARY_FALSE(reader.overflow());
+		CHECK_EQ(writer.tell(), reader.tell());
+	}
+}
 
 namespace {
 using MakePackPtr = std::unique_ptr<const PackedAutomaton>(*)(const AutomatonBase& a);
