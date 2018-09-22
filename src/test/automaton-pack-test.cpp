@@ -28,7 +28,8 @@ TEST_CASE("AutomatonTest_VarintRoundtrip") {
 }
 
 namespace {
-void test_newpack(const AutomatonBase& a) {
+void test_pack(WorkingAutomaton& a) {
+	a.canonicalize();
 	dynarray<std::byte> data(16*1024*1024);
 	Pack* pack_end = pack(a, data.begin(), data.end());
 	auto worker = make_working(a.alphabet_size());
@@ -36,27 +37,11 @@ void test_newpack(const AutomatonBase& a) {
 	CHECK_EQ(pack_end, unpack_end);
 	CHECK_EQ(*worker, a);
 }
-}
-
-namespace {
-void test_pack(WorkingAutomaton& a) {
-	a.canonicalize();
-	test_newpack(a);
-}
 void test_pack(WorkingAutomaton&& a) {
 	//Only const lvalue refs can bind rvalues, but in this case we really do
 	//want to mutate temporaries (to canonicalize them), so this overload binds
 	//them and delegates to the lvalue ref overload.
-	return test_pack(a);
-}
-
-void test_pack_if_representable(WorkingAutomaton& a) {
-	a.canonicalize();
 	test_pack(a);
-}
-MAYBE_UNUSED void test_pack_if_representable(WorkingAutomaton&& a) {
-	//See comment in test_pack overload above.
-	return test_pack_if_representable(a);
 }
 } //anonymous namespace
 
@@ -71,21 +56,7 @@ TEST_CASE("AutomatonTest_Pack1") {
 	test_pack(rtl);
 	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
 	test_pack(parallelToggleBase);
-	auto shuf = shuffleAccept(noop, parallelToggleBase), rshuf = shuffleAccept(parallelToggleBase, noop);
-	test_pack(shuf);
-	test_pack(rshuf);
-	shuf.canonicalize();
-	rshuf.canonicalize();
-	test_pack(shuf);
-	test_pack(rshuf);
-}
-
-TEST_CASE("AutomatonTest_Roundtrip") {
-	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
-	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
-	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
 	auto shuf = shuffleAccept(noop, parallelToggleBase);
-	shuf.canonicalize();
 	test_pack(shuf);
 }
 
@@ -97,10 +68,9 @@ TEST_CASE("AutomatonTest_PackDestinations") {
 	a.addTrans(0, 0, 1);
 	a.addTrans(0, 1, 1);
 	a.addTrans(0, 3, 1);
-	a.canonicalize();
 	test_pack(a);
 }
 
 TEST_CASE("AutomatonTest_Pack2719215598098816079") {
-	test_pack_if_representable(*deserialize<16>("data/test/16-351-864-972-det-2719215598098816079.auto"));
+	test_pack(*deserialize<16>("data/test/16-351-864-972-det-2719215598098816079.auto"));
 }
