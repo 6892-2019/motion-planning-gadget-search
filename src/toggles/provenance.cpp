@@ -1,5 +1,5 @@
 #include "precompiled.hpp"
-#include "registry.hpp"
+#include "provenance.hpp"
 
 std::ostream& operator<<(std::ostream& o, Provenance& p) {
 	if (p.isInput())

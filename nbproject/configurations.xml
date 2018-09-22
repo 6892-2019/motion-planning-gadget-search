@@ -40,7 +40,7 @@
         <in>generational-search.cpp</in>
         <in>ops.cpp</in>
         <in>provenance.hpp</in>
-        <in>registry.cpp</in>
+        <in>provenance.cpp</in>
         <in>test-gadgetdefs.cpp</in>
         <in>toggles.cpp</in>
       </df>

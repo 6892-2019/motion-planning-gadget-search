@@ -8,13 +8,11 @@
 #ifndef PROVENANCE_HPP
 #define PROVENANCE_HPP
 
-#include "automaton.hpp"
-
 struct Provenance {
 	std::uint32_t first, second, i, j;
 	Provenance() = default;
 	Provenance(std::uint32_t initialIndex) : first(ALLONES), second(initialIndex), i(ALLONES), j(ALLONES) {}
-	Provenance(std::uint32_t parent, std::uint32_t connection, automaton::AutomatonBase::state_type newInitialState, bool mirrored)
+	Provenance(std::uint32_t parent, std::uint32_t connection, std::uint32_t newInitialState, bool mirrored)
 		: first(parent), second(ALLONES), i(mirrored ? connection | TOPBIT : connection), j(newInitialState) {}
 	Provenance(std::uint32_t firstParent, std::uint32_t firstSplice, bool firstMirrored,
 			std::uint32_t secondParent, std::uint32_t secondSplice, bool secondMirrored)

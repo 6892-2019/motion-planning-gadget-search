@@ -2,6 +2,7 @@
 #include "automaton.hpp"
 #include "provenance.hpp"
 #include "ops.hpp"
+#include "canonicalize.hpp"
 #include "gadgetdefs.hpp"
 #include "packedautomaton.hpp"
 #include "hopscotch/hopscotch_set.h"
@@ -9,6 +10,8 @@
 #include "maybe_owning_ptr.hpp"
 #include "stringutils.hpp"
 #include "automaton-io.hpp"
+#include <tbb/parallel_reduce.h>
+#include <tbb/blocked_range.h>
 #include <fmt/core.h>
 
 using namespace automaton;
