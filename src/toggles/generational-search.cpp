@@ -180,6 +180,9 @@ public:
 	}
 	std::byte* allocate() {
 		pages_.emplace_back(static_cast<std::byte*>(std::malloc(pageSize_)));
+#ifndef NDEBUG
+		std::fill(current_begin(), current_end(), std::byte{0xFF});
+#endif //NDEBUG
 		return pages_.back().get();
 	}
 	std::size_t page_size() const {
