@@ -1,6 +1,5 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
-#include "packedautomaton.hpp"
 #include "automaton-io.hpp"
 #include "hopscotch/hopscotch_map.h"
 #include <jemalloc/jemalloc.h>
@@ -67,9 +66,6 @@ bool operator==(const AutomatonBase& left, const AutomatonBase& right) {
 	if (auto l = dynamic_cast<const WorkingAutomaton*>(&left),
 			r = dynamic_cast<const WorkingAutomaton*>(&right); l && r)
 		return compare_working(*l, *r);
-	if (auto l = dynamic_cast<const PackedAutomaton*>(&left),
-			r = dynamic_cast<const PackedAutomaton*>(&right); l && r)
-		return *l == *r;
 
 	return compare_slowpath(left, right);
 }
