@@ -4,7 +4,7 @@
 #include "ops.hpp"
 #include "canonicalize.hpp"
 #include "gadgetdefs.hpp"
-#include "packedautomaton.hpp"
+#include "pack.hpp"
 #include "hopscotch/hopscotch_set.h"
 #include "stringutils.hpp"
 #include "maybe_owning_ptr.hpp"
@@ -13,6 +13,7 @@
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
 #include <fmt/core.h>
+#include <jemalloc/jemalloc.h>
 
 using namespace automaton;
 using std::vector;
@@ -147,13 +148,10 @@ private:
 
 typedef Automaton<8u> automaton_type;
 typedef pair<automaton_type, Provenance> AutoProv;
-typedef pair<unique_ptr<const PackedAutomaton>, Provenance> PackProv;
-template<class PackPointer>
-using ClosedSet = tsl::hopscotch_set<PackPointer,
-		indirect_hash, indirect_equal, std::allocator<PackPointer>,
+typedef pair<const Pack*, Provenance> PackProv;
+using ClosedSet = tsl::hopscotch_set<const Pack*,
+		PackHasher, PackEqualer, std::allocator<const Pack*>,
 		30, true /* store the hash */>;
-using OwningClosedSet = ClosedSet<std::unique_ptr<const PackedAutomaton>>;
-using NonowningClosedSet = ClosedSet<const PackedAutomaton*>;
 typedef unsigned int index_type;
 
 using RotationVec = boost::container::small_vector<unsigned int, automaton_type::alphabet_size_v>;
@@ -166,30 +164,78 @@ struct Input {
 
 struct Target {
 	std::size_t packed_hash, mirror_packed_hash;
-	std::unique_ptr<const PackedAutomaton> normal, mirror;
+	const Pack* normal, *mirror;
+};
+
+class PageHolder {
+public:
+	PageHolder(std::size_t desiredPageSize) : pageSize_(nallocx(desiredPageSize, 0)) {
+		allocate();
+	}
+	std::byte* current_begin() const {
+		return pages_.back().get();
+	}
+	std::byte* current_end() const {
+		return current_begin() + page_size();
+	}
+	std::byte* allocate() {
+		pages_.emplace_back(static_cast<std::byte*>(std::malloc(pageSize_)));
+		return pages_.back().get();
+	}
+	std::size_t page_size() const {
+		return pageSize_;
+	}
+	std::size_t page_count() const {
+		return pages_.size();
+	}
+	std::size_t total_page_memory() const {
+		//doesn't include the PageHolder itself
+		return page_size() * page_count();
+	}
+private:
+	//should maybe be a small_vector?
+	std::vector<std::unique_ptr<std::byte, free_deleter>> pages_;
+	std::size_t pageSize_;
 };
 
 struct Finisher {
-	Finisher(const OwningClosedSet* closed) : globalClosed(closed) {}
-	Finisher(const Finisher& f, tbb::split) : globalClosed(f.globalClosed) {}
+	Finisher(const ClosedSet* closed) : pages(16*1024*1024), cur(pages.allocate()), globalClosed(closed) {}
+	Finisher(const Finisher& f, tbb::split) : pages(16*1024*1024), cur(pages.allocate()), globalClosed(f.globalClosed) {}
 	vector<PackProv> nextgen;
-	NonowningClosedSet localClosed;
-	const OwningClosedSet* globalClosed;
+	PageHolder pages;
+	Pack* cur;
+	ClosedSet localClosed;
+	const ClosedSet* globalClosed;
 	unsigned int globalClosedPruned = 0, localClosedPruned = 0;
+	std::size_t bytesAdopted = 0;
 	void operator()(automaton_type&& a, Provenance p) {
 		canonicalize(a, a.active_alphabet_size());
-		auto packed = pack(a);
-		auto hash = packed->packed_hash();
+		Pack* new_cur = pack(a, cur, pages.current_end());
+		if (!new_cur) {
+			//This might waste some space on the old page if we prune this
+			//automaton, but it ensures we don't have more than one empty page.
+			cur = pages.allocate();
+			new_cur = pack(a, cur, pages.current_end());
+			if (!new_cur) {
+				std::cout << "pack too big?!\n";
+				serialize(a, defaultFilename(a));
+				return; //This being pathological, don't stop the search for this.
+			}
+		}
+
+		auto hash = packed_hash(cur);
 		//Check the closed set to deduplicate early.
-		if (globalClosed && globalClosed->find(packed, hash) != globalClosed->end()) {
+		if (globalClosed && globalClosed->find(cur, hash) != globalClosed->end()) {
 			++globalClosedPruned;
 			return;
 		}
-		if (localClosed.insert(packed.get()).second) { //TODO: insert overload taking the hash
+		if (localClosed.insert(cur).second) { //TODO: insert overload taking the hash
 			//We could check targets here, but we can't easily report a finding
 			//and, once we go parallel, we want to ensure we get a deterministic
 			//finding, so we'd have to check that an earlier thread hadn't yet.
-			nextgen.emplace_back(std::move(packed), p);
+			nextgen.emplace_back(cur, p);
+			bytesAdopted += numeric_cast<std::size_t>(new_cur - cur);
+			cur = new_cur;
 		} else
 			++localClosedPruned;
 	}
@@ -197,13 +243,28 @@ struct Finisher {
 		//If we're globally pruning, we did it already.
 		assert(((bool)globalClosed) == ((bool)rhs.globalClosed));
 		for (PackProv& p : rhs.nextgen) {
-			if (localClosed.insert(p.first.get()).second) //TODO: if we save the hash, use it here
-				nextgen.push_back(std::move(p));
-			else
+			//We can either copy survivors to our PageHolder, or linear-search
+			//for and adopt their pages.  Assuming we committed packs in order,
+			//we'd only need to keep track of which is the current page and
+			//whether we've adopted it.  At the cost of increased memory
+			//retention, we could just adopt all the pages, only compacting when
+			//committing to the new generation and closed set.
+			if (!localClosed.count(p.first)) { //TODO: use saved hash (if we do)
+				auto size = packed_size(p.first);
+				if (pages.current_end() - cur < size)
+					//Above we rejected any packs larger than a page, so we know
+					//we won't have any here.
+					cur = pages.allocate();
+				localClosed.insert(cur); //TODO: use hash
+				nextgen.emplace_back(cur, p.second);
+				cur = std::copy(p.first, p.first + size, cur);
+				bytesAdopted += size;
+			} else
 				++localClosedPruned;
 		}
 		globalClosedPruned += rhs.globalClosedPruned;
 		localClosedPruned += rhs.localClosedPruned;
+		//deliberately don't merge bytesAdopted
 	}
 };
 
@@ -443,7 +504,9 @@ auto find_useful_rotations(const automaton_type& a) {
 	auto locations = a.active_alphabet_size();
 	if (!locations) return useful;
 
-	OwningClosedSet closed;
+	PageHolder pages(16*1024*1024);
+	std::byte* cur = pages.allocate();
+	ClosedSet closed;
 	std::array<symbol_type, automaton_type::alphabet_size_v> rotation;
 	std::fill(rotation.begin()+locations, rotation.end(), std::numeric_limits<symbol_type>::max());
 	for (unsigned int rl = 0; rl < locations; ++rl) {
@@ -453,17 +516,23 @@ auto find_useful_rotations(const automaton_type& a) {
 		automaton_type rm = a;
 		rm.renumberAlphabet(rotation);
 		rm.canonicalize(); //The normal, non-alphabet-adjusting canonicalize.
-		auto p = pack(rm);
+		auto p = pack(rm, cur, pages.current_end());
+		if (!p) {
+			std::cout << "I guess 16MB wasn't enough for everybody.\n";
+			std::terminate();
+		}
 		//if we haven't seen it before
-		if (closed.insert(pack(rm)).second)
+		if (closed.insert(cur).second)
 			useful.push_back(rl);
+		cur = p;
 	}
 	return useful;
 }
 
 class GenerationalSearch {
 public:
-	GenerationalSearch(vector<automaton_type>& inputs, vector<automaton_type>& targets) {
+	GenerationalSearch(vector<automaton_type>& inputs, vector<automaton_type>& targets)
+			: pages_(256*1024*1024), cur_(pages_.allocate()) {
 		inputs_.reserve(inputs.size());
 		for (auto i : xrange(inputs.size())) {
 			automaton_type m = mirror(inputs[i]);
@@ -477,10 +546,10 @@ public:
 		}
 		targets_.reserve(targets.size());
 		for (auto& t : targets) {
-			auto p = pack(t);
-			auto m = pack(mirror(t));
-			auto ph = p->packed_hash(), mh = m->packed_hash();
-			targets_.push_back({ph, mh, std::move(p), std::move(m)});
+			auto normalPack = cur_;
+			auto mirrorPack = pack(t, normalPack, pages_.current_end());
+			cur_ = pack(mirror(t), mirrorPack, pages_.current_end());
+			targets_.push_back({packed_hash(normalPack), packed_hash(mirrorPack), normalPack, mirrorPack});
 		}
 	}
 	void advance() {
@@ -494,9 +563,11 @@ public:
 		if (curgen_.empty()) std::exit(0);
 	}
 private:
-	vector<const PackedAutomaton*> curgen_; //non-owning, owned by closed_'s elements
+	PageHolder pages_;
+	std::byte* cur_;
+	vector<const Pack*> curgen_; //non-owning, stored in pages_ and already in closed_
 	vector<Provenance> provenance_;
-	OwningClosedSet closed_;
+	ClosedSet closed_;
 	vector<Input> inputs_;
 	vector<Target> targets_;
 	unsigned int generation_ = 0;
@@ -530,9 +601,10 @@ private:
 				generation_, timing.hms(), timing.utilization(), curgen_.size(), finisher.localClosedPruned, closed_.size());
 	}
 
-	void combine_once(const PackedAutomaton* source, index_type sourceIndex, Finisher& finishAction) {
+	void combine_once(const Pack* source, index_type sourceIndex, Finisher& finishAction) {
 		//from toggles.cpp's Combine::operator(); TODO: may want to reunify
-		automaton_type unpacked(*source);
+		automaton_type unpacked;
+		unpack(unpacked, source);
 		automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
 		//We only mirror once we have to.  Once we've mirrored, we check if we're
 		//chiral so we can skip the == after the first time.  mirrored continues
@@ -570,7 +642,8 @@ private:
 					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
 						for (std::size_t i = r.begin(); i < r.end(); ++i) {
 							index_type sourceIndex = sourceIndexBase + (i-newStart);
-							automaton_type inflated(*curgen_[i]);
+							automaton_type inflated;
+							unpack(inflated, curgen_[i]);
 							automaton_type::symbol_type locations = inflated.active_alphabet_size();
 							connect(inflated, sourceIndex, false, locations, *finish);
 						}
@@ -598,22 +671,25 @@ private:
 	std::size_t append(std::vector<PackProv>& next) {
 		auto newStart = curgen_.size();
 		for (PackProv& p : next) {
-			const PackedAutomaton* observer = p.first.get();
-			if (closed_.insert(std::move(p.first)).second) {
-				auto hash = observer->packed_hash();
+			auto hash = packed_hash(p.first);
+			//If we're globally pruning in Finisher, this should always succeed.
+			if (!closed_.count(p.first, hash)) {
+				auto size = packed_size(p.first);
+				assert(size < pages_.page_size());
 				for (const Target& t : targets_)
 					if (t.packed_hash == hash || t.mirror_packed_hash == hash) {
 						print_provenance_backtrace(p.second);
 						//TODO: maybe put it in some member variable to be checked when convenient?
 					}
-				//TODO: add insert overload taking the hash so we only compute it once
-				curgen_.push_back(observer);
+				if (pages_.current_end() - cur_ < size)
+					cur_ = pages_.allocate();
+				closed_.insert(cur_); //TODO: use hash
+				curgen_.push_back(cur_);
+				cur_ = std::copy(p.first, p.first+size, cur_);
 				provenance_.push_back(p.second);
 			}
-			//otherwise unique_ptr cleans it up somewhere, possibly in the guts
-			//of closed_.insert.  TODO: we might prefer to release memory in a
-			//large batch at the end of the loop rather than during each
-			//iteration, for better locality (both data and code).
+			//TODO: we could reduce peak memory by freeing pages from the
+			//Finisher feeding us after we're done copying off of them.
 		}
 		return newStart;
 	}

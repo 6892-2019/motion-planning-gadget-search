@@ -22,6 +22,18 @@ std::size_t packed_hash(const Pack* pack);
 bool packed_equal(const Pack* left, const Pack* right);
 //could provide memcmp if useful
 
+//for unordered containers
+struct PackHasher {
+	bool operator()(const Pack* pack) const {
+		return packed_hash(pack);
+	}
+};
+struct PackEqualer {
+	bool operator()(const Pack* left, const Pack* right) const {
+		return packed_equal(left, right);
+	}
+};
+
 } //namespace automaton
 
 #endif /* AUTOMATON_PACK_HPP_INCLUDED */
