@@ -255,9 +255,10 @@ struct Finisher {
 					//Above we rejected any packs larger than a page, so we know
 					//we won't have any here.
 					cur = pages.allocate();
-				localClosed.insert(cur); //TODO: use hash
-				nextgen.emplace_back(cur, p.second);
+				Pack* pack_starts = cur;
 				cur = std::copy(p.first, p.first + size, cur);
+				localClosed.insert(pack_starts); //TODO: use hash
+				nextgen.emplace_back(pack_starts, p.second);
 				bytesAdopted += size;
 			} else
 				++localClosedPruned;
@@ -683,9 +684,10 @@ private:
 					}
 				if (pages_.current_end() - cur_ < size)
 					cur_ = pages_.allocate();
-				closed_.insert(cur_); //TODO: use hash
-				curgen_.push_back(cur_);
+				Pack* pack_starts = cur_;
 				cur_ = std::copy(p.first, p.first+size, cur_);
+				closed_.insert(pack_starts); //TODO: use hash
+				curgen_.push_back(pack_starts);
 				provenance_.push_back(p.second);
 			}
 			//TODO: we could reduce peak memory by freeing pages from the
