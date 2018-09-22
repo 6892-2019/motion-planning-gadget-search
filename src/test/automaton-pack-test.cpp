@@ -30,6 +30,17 @@ TEST_CASE("AutomatonTest_VarintRoundtrip") {
 }
 
 namespace {
+void test_newpack(const AutomatonBase& a) {
+	dynarray<std::byte> data(1024*1024*1024);
+	Pack* pack_end = pack(a, data.begin(), data.end());
+	auto worker = make_working(a.alphabet_size());
+	const Pack* unpack_end = unpack(*worker, data.begin(), pack_end);
+	CHECK_EQ(pack_end, unpack_end);
+	CHECK_EQ(*worker, a);
+}
+}
+
+namespace {
 using MakePackPtr = std::unique_ptr<const PackedAutomaton>(*)(const AutomatonBase& a);
 void pack_impl_test(const AutomatonBase& a, MakePackPtr make) {
 	assert(a.canonical());
@@ -67,6 +78,7 @@ void pack_impl_test(const AutomatonBase& a, MakePackPtr make) {
 
 void test_pack(WorkingAutomaton& a) {
 	a.canonicalize();
+	test_newpack(a);
 #define TEST_PACK(IMPL) pack_impl_test(a, &detail::make_pack<IMPL>);
 	TEST_PACK(detail::Diminutive8OffsetPackedAutomaton)
 	TEST_PACK(detail::Tiny8OffsetPackedAutomaton)

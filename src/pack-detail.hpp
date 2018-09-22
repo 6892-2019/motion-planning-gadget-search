@@ -44,6 +44,17 @@ public:
 		writeBytes<4>(value);
 		return *this;
 	}
+	PackWriter& writeBytes(unsigned int value, unsigned int count) {
+		switch (count) {
+			case 1: return write8(value);
+			case 2: return write16(value);
+			case 3: return write24(value);
+			case 4: return write32(value);
+			default:
+				assert(false);
+				__builtin_unreachable();
+		}
+	}
 	PackWriter& writeVarint(unsigned int value) {
 		//inspired by https://sqlite.org/src4/doc/trunk/www/varint.wiki but
 		//only with 32-bit range, so recovering a few more small values.
@@ -67,7 +78,11 @@ public:
 	}
 
 	PackWriter& seek(Pack* pos) {
-		assert(first_ <= pos && pos < last_);
+		assert(first_ <= pos);
+		if (!(pos < last_)) {
+			pos = last_;
+			overflow_ = true;
+		}
 		cur_ = pos;
 		return *this;
 	}
@@ -89,15 +104,15 @@ private:
 		cur_ = std::copy_n(begin, count, cur_);
 	}
 	Pack* cur_;
-	const Pack* const last_;
-	const Pack* const first_;
+	Pack* const last_;
+	Pack* const first_;
 	bool overflow_; //set on attempt to write past last_
 };
 
 
 class PackReader {
 public:
-	PackReader(Pack* first, Pack* last) : cur_(first), last_(last), first_(first), overflow_(false) {}
+	PackReader(const Pack* first, const Pack* last) : cur_(first), last_(last), first_(first), overflow_(false) {}
 	unsigned int read8() {
 		return readBytes<1>();
 	}
@@ -109,6 +124,17 @@ public:
 	}
 	unsigned int read32() {
 		return readBytes<4>();
+	}
+	unsigned int readBytes(unsigned int count) {
+		switch (count) {
+			case 1: return read8();
+			case 2: return read16();
+			case 3: return read24();
+			case 4: return read32();
+			default:
+				assert(false);
+				__builtin_unreachable();
+		}
 	}
 	unsigned int readVarint() {
 		unsigned int first = read8();

@@ -323,6 +323,15 @@ public:
 	 * @return true iff this automaton's language is infinite
 	 */
 	bool infinite();
+
+private:
+	/**
+	 * Set bookkeeping flags.  This is a hack so that unpack() can be a free
+	 * function operating on WorkingAutomaton, instead of templated over
+	 * Automaton<N>.
+	 */
+	virtual void setFlagsHack(bool deterministic, bool minimal, bool canonical) = 0;
+	friend const std::byte* unpack(WorkingAutomaton& a, const std::byte* first, const std::byte* last);
 };
 
 std::unique_ptr<WorkingAutomaton> make_working(unsigned int size);

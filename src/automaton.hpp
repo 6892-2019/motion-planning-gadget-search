@@ -700,6 +700,17 @@ private:
 	friend Automaton<N> any();
 	template<unsigned int N>
 	friend Automaton<N> lit(std::initializer_list<typename Automaton<N>::symbol_type> symbols);
+
+	void setFlagsHack(bool deterministic, bool minimal, bool canonical) override {
+		//implications converted to disjunctions:
+		assert(!minimal || deterministic);
+		assert(!canonical || minimal);
+		deterministic_ = deterministic;
+		minimal_ = minimal;
+		canonical_ = canonical;
+		if (this->canonical())
+			prepareForEquals();
+	}
 };
 
 #define AUTOMATON_EXTERN_TEMPLATE extern

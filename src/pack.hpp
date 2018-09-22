@@ -9,14 +9,14 @@
 #define AUTOMATON_PACK_HPP_INCLUDED
 
 #include <cstddef>
-#include "automaton.hpp"
+#include "automatonbase.hpp"
 
 namespace automaton {
 
 using Pack = std::byte;
 
-Pack* pack(AutomatonBase& a, Pack* first, Pack* last);
-Pack* unpack(WorkingAutomaton& a, const Pack* first, const Pack* last = nullptr);
+Pack* pack(const AutomatonBase& a, Pack* first, Pack* last);
+const Pack* unpack(WorkingAutomaton& a, const Pack* first, const Pack* last = nullptr);
 unsigned int packed_size(const Pack* pack);
 std::size_t packed_hash(const Pack* pack);
 bool packed_equal(const Pack* left, const Pack* right);
