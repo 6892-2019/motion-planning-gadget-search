@@ -3,15 +3,19 @@
 #include "automaton.hpp"
 #include "automaton-io.hpp"
 #include "pack.hpp"
+#include "ioutils.hpp"
 
 using namespace automaton;
 //'clock' in the global namespace is already defined, sigh
 using myclock = std::chrono::high_resolution_clock;
 
-int main(int argc, char* argv[]) { //genbuild entrypoint
+int main(int argc, const char* argv[]) { //genbuild entrypoint
+	std::vector<std::string> filenames = processFilenameArgs(argv+1, argv+argc);
 	std::vector<std::unique_ptr<WorkingAutomaton>> automata;
-	for (int i = 1; i < argc; ++i)
-		automata.push_back(deserialize(argv[i]));
+	for (auto& filename : filenames) {
+		automata.push_back(deserialize(filename));
+		automata.back()->canonicalize();
+	}
 
 	dynarray<std::byte> data(1024*1024*1024);
 	std::vector<const Pack*> packs;
