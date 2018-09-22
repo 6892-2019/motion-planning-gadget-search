@@ -32,8 +32,14 @@ int main(int argc, const char* argv[]) { //genbuild entrypoint
 	std::size_t hash = 0;
 	//Print the hash a) to prevent the benchmark from being optimized out and
 	//b) so we can tell if our optimizations changed the result or not.
-	for (auto p : packs)
+	for (auto i : xrange(packs.size())) {
+		const Pack* p = packs[i];
 		hash += packed_hash(p);
+		auto unpacked = make_working(automata[i]->alphabet_size());
+		auto unpack_result = unpack(*unpacked, p, i+1 < packs.size() ? packs[i+1] : cur);
+		if (!unpack_result || *unpacked != *automata[i])
+			std::cout << "roundtrip problem: " << filenames[i] << std::endl;
+	}
 	std::cout << hash << "\n";
 	std::cout << (cur - data.begin()) << "\n";
 
