@@ -702,11 +702,14 @@ private:
 		Stopwatch stopwatch;
 
 		auto newStart = curgen_.size();
+		std::size_t sizeConsidered = 0, sizeCommitted = 0;
+		auto oldClosedSize = closed_.size();
 		for (PackProv& p : next) {
+			auto size = packed_size(p.first);
+			sizeConsidered += size;
 			auto hash = packed_hash(p.first);
 			//If we're globally pruning in Finisher, this should always succeed.
 			if (!closed_.count(p.first, hash)) {
-				auto size = packed_size(p.first);
 				assert(size < pages_.page_size());
 				for (const Target& t : targets_)
 					if (t.packed_hash == hash || t.mirror_packed_hash == hash) {
@@ -720,14 +723,17 @@ private:
 				closed_.insert(pack_starts); //TODO: use hash
 				curgen_.push_back(pack_starts);
 				provenance_.push_back(p.second);
+				sizeCommitted += size;
 			}
 			//TODO: we could reduce peak memory by freeing pages from the
 			//Finisher feeding us after we're done copying off of them.
 		}
 
 		Stopwatch::Result timing = stopwatch.elapsed();
-		fmt::print("append took {}ms; {} -> {} after considering {}.\n",
-				timing.millis(), newStart, curgen_.size(), next.size());
+		fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
+				timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
+				next.size(), sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
+				((double)(closed_.size() - oldClosedSize))/next.size(), ((double)sizeCommitted)/sizeConsidered);
 		return newStart;
 	}
 
