@@ -24,7 +24,7 @@ bool packed_equal(const Pack* left, const Pack* right);
 
 //for unordered containers
 struct PackHasher {
-	bool operator()(const Pack* pack) const {
+	std::size_t operator()(const Pack* pack) const {
 		return packed_hash(pack);
 	}
 };

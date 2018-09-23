@@ -34,6 +34,8 @@ void test_pack(WorkingAutomaton& a) {
 	Pack* pack_end = pack(a, data.begin(), data.end());
 	CHECK_EQ(pack_end - data.begin(), packed_size(data.begin()));
 	CHECK_UNARY(packed_equal(data.begin(), data.begin()));
+	CHECK_UNARY(PackEqualer()(data.begin(), data.begin()));
+	CHECK_EQ(PackHasher()(data.begin()), packed_hash(data.begin()));
 
 	auto worker = make_working(a.alphabet_size());
 	const Pack* unpack_end = unpack(*worker, data.begin(), pack_end);
