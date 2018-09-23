@@ -98,13 +98,16 @@ const Pack* unpack(WorkingAutomaton& a, const Pack* first, const Pack* last) {
 
 unsigned int packed_size(const Pack* pack) {
 	//If we add any coding flags, we need to mask them out here.
-	return detail::PackReader(pack, pack+3).read24();
+	//There are no length-0 packs, so we can advertise four available bytes.
+	//That allows a 4-byte load and mask instead of three 1-byte loads.
+	return detail::PackReader(pack, pack+4).read24();
 }
 std::size_t packed_hash(const Pack* pack) {
 	return farmhash::Hash(reinterpret_cast<const char*>(pack), packed_size(pack));
 }
 bool packed_equal(const Pack* left, const Pack* right) {
-	return std::equal(left, left+packed_size(left), right, right+packed_size(right));
+	auto lsize = packed_size(left), rsize = packed_size(right);
+	return lsize == rsize && !std::memcmp(left, right, lsize);
 }
 
 } //namespace automaton

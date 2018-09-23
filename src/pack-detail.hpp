@@ -166,11 +166,22 @@ public:
 private:
 	template<unsigned int N>
 	unsigned int readBytes() {
+		unsigned int value = 0;
+		if constexpr (N == 3) {
+			//If we won't read off the end by doing so, it's much faster to load
+			//an aligned dword and mask off the bytes we want.
+			if (cur_ + 4 <= last_) {
+				std::memcpy(&value, cur_, 4);
+				value &= 0x00FFFFFF;
+				cur_ += N;
+				return value;
+			}
+		}
+
 		if (cur_ + N > last_) {
 			overflow_ = true;
 			return 0;
 		}
-		unsigned int value = 0;
 		std::memcpy(&value, cur_, N);
 		cur_ += N;
 		return value;
