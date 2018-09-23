@@ -59,6 +59,9 @@
       <in>main.cpp</in>
       <in>natural_map.cpp</in>
       <in>natural_set.cpp</in>
+      <in>pack-detail.hpp</in>
+      <in>pack.cpp</in>
+      <in>pack.hpp</in>
       <in>packedautomaton.cpp</in>
       <in>pinning.cpp</in>
       <in>polyvariant.hpp</in>

@@ -163,6 +163,7 @@ public:
 	}
 	const Pack* tell() const {return cur_;}
 	bool overflow() const {return overflow_;}
+	bool eof() const {return cur_ == last_;}
 private:
 	template<unsigned int N>
 	unsigned int readBytes() {
