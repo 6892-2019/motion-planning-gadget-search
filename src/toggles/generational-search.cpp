@@ -260,9 +260,9 @@ struct Finisher {
 			bytesAdopted += rhs.bytesAdopted;
 		}
 
-		Stopwatch stopwatch;
-		auto oldbytes = bytesAdopted;
-		auto oldcount = nextgen.size();
+//		Stopwatch stopwatch;
+//		auto oldbytes = bytesAdopted;
+//		auto oldcount = nextgen.size();
 
 		//If we're globally pruning, we did it already.
 		assert(((bool)globalClosed) == ((bool)rhs.globalClosed));
@@ -291,10 +291,10 @@ struct Finisher {
 		localClosedPruned += rhs.localClosedPruned;
 		//deliberately don't merge bytesAdopted
 
-		Stopwatch::Result timing = stopwatch.elapsed();
-		fmt::print("Finisher::join took {}ms; left {} ({}), right {} ({}), now {} ({}).\n",
-				timing.millis(), oldcount, oldbytes, rhs.nextgen.size(), rhs.bytesAdopted,
-				nextgen.size(), bytesAdopted);
+//		Stopwatch::Result timing = stopwatch.elapsed();
+//		fmt::print("Finisher::join took {}ms; left {} ({}), right {} ({}), now {} ({}).\n",
+//				timing.millis(), oldcount, oldbytes, rhs.nextgen.size(), rhs.bytesAdopted,
+//				nextgen.size(), bytesAdopted);
 	}
 };
 
@@ -699,14 +699,14 @@ private:
 	}
 
 	std::size_t append(std::vector<PackProv>& next) {
-		Stopwatch stopwatch;
+//		Stopwatch stopwatch;
+//		std::size_t sizeConsidered = 0, sizeCommitted = 0;
+//		auto oldClosedSize = closed_.size();
 
 		auto newStart = curgen_.size();
-		std::size_t sizeConsidered = 0, sizeCommitted = 0;
-		auto oldClosedSize = closed_.size();
 		for (PackProv& p : next) {
 			auto size = packed_size(p.first);
-			sizeConsidered += size;
+//			sizeConsidered += size;
 			auto hash = packed_hash(p.first);
 			//If we're globally pruning in Finisher, this should always succeed.
 			if (!closed_.count(p.first, hash)) {
@@ -723,17 +723,17 @@ private:
 				closed_.insert(pack_starts); //TODO: use hash
 				curgen_.push_back(pack_starts);
 				provenance_.push_back(p.second);
-				sizeCommitted += size;
+//				sizeCommitted += size;
 			}
 			//TODO: we could reduce peak memory by freeing pages from the
 			//Finisher feeding us after we're done copying off of them.
 		}
 
-		Stopwatch::Result timing = stopwatch.elapsed();
-		fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
-				timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
-				next.size(), sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
-				((double)(closed_.size() - oldClosedSize))/next.size(), ((double)sizeCommitted)/sizeConsidered);
+//		Stopwatch::Result timing = stopwatch.elapsed();
+//		fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
+//				timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
+//				next.size(), sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
+//				((double)(closed_.size() - oldClosedSize))/next.size(), ((double)sizeCommitted)/sizeConsidered);
 		return newStart;
 	}
 
