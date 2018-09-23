@@ -30,7 +30,7 @@ private:
 public:
 	using key_type = T;
 	using value_type = T;
-	using size_type = std::size_t;
+	using size_type = unsigned int;
 	using difference_type = std::ptrdiff_t;
 	using reference = value_type&;
 	using const_reference = const value_type&;
@@ -48,7 +48,7 @@ public:
 		return data_.empty();
 	}
 	size_type size() const {
-		return data_.size();
+		return static_cast<size_type>(data_.size());
 	}
 	//max_size()? don't know what to return
 
