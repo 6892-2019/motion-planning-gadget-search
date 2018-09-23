@@ -32,6 +32,9 @@ void test_pack(WorkingAutomaton& a) {
 	a.canonicalize();
 	dynarray<std::byte> data(16*1024*1024);
 	Pack* pack_end = pack(a, data.begin(), data.end());
+	CHECK_EQ(pack_end - data.begin(), packed_size(data.begin()));
+	CHECK_UNARY(packed_equal(data.begin(), data.begin()));
+
 	auto worker = make_working(a.alphabet_size());
 	const Pack* unpack_end = unpack(*worker, data.begin(), pack_end);
 	CHECK_EQ(pack_end, unpack_end);
