@@ -35,12 +35,13 @@
       <df name="toggles">
         <in>benchmark-toggles.cpp</in>
         <in>canonicalize.cpp</in>
+        <in>dump-known-gadgets.cpp</in>
         <in>gadgetdefs.cpp</in>
         <in>gadgetdefs.hpp</in>
         <in>generational-search.cpp</in>
         <in>ops.cpp</in>
-        <in>provenance.hpp</in>
         <in>provenance.cpp</in>
+        <in>provenance.hpp</in>
         <in>test-gadgetdefs.cpp</in>
         <in>toggles.cpp</in>
       </df>
@@ -50,6 +51,7 @@
       <in>automaton-io.cpp</in>
       <in>automaton.cpp</in>
       <in>automatonbase.cpp</in>
+      <in>bitset.cpp</in>
       <in>bitset.hpp</in>
       <in>circular_deque.hpp</in>
       <in>expr.cpp</in>
@@ -58,6 +60,7 @@
       <in>ioutils.cpp</in>
       <in>main.cpp</in>
       <in>natural_map.cpp</in>
+      <in>natural_map.hpp</in>
       <in>natural_set.cpp</in>
       <in>pack-detail.hpp</in>
       <in>pack.cpp</in>
@@ -221,6 +224,8 @@
           </incDir>
         </ccTool>
       </item>
+      <item path="src/natural_map.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/natural_set.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
           <incDir>
@@ -311,9 +316,9 @@
       </item>
       <item path="src/toggles/ops.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/provenance.hpp" ex="false" tool="3" flavor2="0">
+      <item path="src/toggles/provenance.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/registry.cpp" ex="false" tool="1" flavor2="0">
+      <item path="src/toggles/provenance.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/test-gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
       </item>
