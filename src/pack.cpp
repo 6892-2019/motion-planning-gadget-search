@@ -43,11 +43,9 @@ Pack* pack(const AutomatonBase& a, Pack* first, Pack* last) {
 	//could also try to use two or more bits for small automata, but they are
 	//likely not to have enough transitions.
 
-	bool accept_trailing = !accept_in_outgoing_mask;
-	//So we know where transition lists end and the accept bitmask begins.  Also
-	//lets us reserve when unpacking.
-	if (accept_trailing)
-		w.writeVarint(state_size);
+	//Before every (partial) group of 8 states, emit a byte holding their accept
+	//bits.  This avoids having to store the state size.
+	bool interspersed_accept = !accept_in_outgoing_mask;
 
 	if (use_active_alpha) {
 		active.sort(); //Don't need it now, but necessary for later.
@@ -62,6 +60,13 @@ Pack* pack(const AutomatonBase& a, Pack* first, Pack* last) {
 	boost::container::small_vector<state_type, 16> dests;
 	dests.assign(alphabet_size, FENCE);
 	for (state_type s = 0; s < state_size; ++s) {
+		if (interspersed_accept && s % 8 == 0) {
+			unsigned int acceptmask = 0;
+			for (state_type t = s; t < s+8 && t < state_size; ++t)
+				acceptmask |= (a.accept(t) << (t-s));
+			w.write8(acceptmask);
+		}
+
 		std::fill(dests.begin(), dests.end(), FENCE);
 		a.for_each_transition(s, [&](symbol_type a, state_type t) {
 			assert(dests[a] == FENCE && "nondeterministic?");
@@ -97,18 +102,6 @@ Pack* pack(const AutomatonBase& a, Pack* first, Pack* last) {
 		w.seek(list_end);
 	}
 
-	if (accept_trailing) {
-		unsigned int acceptmask = 0;
-		for (state_type s = 0; s < state_size;) {
-			for (unsigned int i = 0; i < 8 && s < state_size; ++i, ++s) {
-				//we can safely shift on the first iteration because we start at 0
-				acceptmask |= (a.accept(s) << i);
-			}
-			w.write8(acceptmask);
-			acceptmask = 0;
-		}
-	}
-
 	if (w.overflow())
 		return nullptr;
 	auto end = w.tell();
@@ -133,21 +126,13 @@ const Pack* unpack(WorkingAutomaton& a, const Pack* first, const Pack* last) {
 	bool accept_in_outgoing_mask = size & detail::coding_accept_in_outgoing;
 	size &= ~detail::coding_all;
 
-	bool accept_trailing = !accept_in_outgoing_mask;
-	unsigned int state_size = std::numeric_limits<unsigned int>::max();
-	if (accept_trailing) {
-		state_size = r.readVarint();
-		a.reserve(state_size);
-		for (state_type s = 0; s < state_size; ++s)
-			a.addState(); //consider addState(unsigned int) to add many states
-	}
-	//If we don't know the state size to start with, we have to add them as
-	//demanded, either when we come to the nth transition list or when state n
-	//appears as a destination.
+	bool interspersed_accept = !accept_in_outgoing_mask;
+	//Because we don't store the state size, we have to add them as demanded,
+	//either when we come to the nth transition list or when state n appears as
+	//a destination.
 	//TODO: GCC can't see through a.state_size(), so it may be worth tracking it
 	//ourselves to save some virtual calls.
 	auto ensure_enough_states = [&](state_type s) {
-		if (accept_trailing) return s; //already handled above
 		while (a.state_size() <= s)
 			a.addState();
 		return s;
@@ -164,10 +149,17 @@ const Pack* unpack(WorkingAutomaton& a, const Pack* first, const Pack* last) {
 	}
 	const unsigned int bits_in_outgoing_mask = use_active_alpha ? active.size() : alphabet_size;
 
-	for (state_type s = 0; (!accept_trailing || s < state_size) && !r.eof(); ++s) {
-		//TODO: ditch accept_trailing and interleave bytes of accept bits before
-		//every (s % 8)th state (including before the first state).  That will
-		//save the cost of writing the state size, plus simplify this loop's condition.
+	for (state_type s = 0; !r.eof(); ++s) {
+		if (interspersed_accept && s % 8 == 0) {
+			unsigned int acceptmask = r.read8();
+			//Because the default is not-accept, we don't care how many of these
+			//bits are relevant (i.e., if this is a full or partial group), just
+			//that we do something for the set bits.
+			for (state_type t = 0; t < 8; ++t)
+				if (acceptmask & (1 << t))
+					a.setAccept(ensure_enough_states(s+t));
+		}
+
 		ensure_enough_states(s);
 		unsigned int mask = r.readBytes(outgoing_mask_bytes);
 		if (use_active_alpha) {
@@ -183,14 +175,6 @@ const Pack* unpack(WorkingAutomaton& a, const Pack* first, const Pack* last) {
 			//It's false if we don't set it, so we save a virtual call by not
 			//passing mask & (1 << bits_in_outgoing_mask) as a second argument.
 			a.setAccept(s);
-	}
-
-	if (accept_trailing) {
-		for (state_type s = 0; s < state_size;) {
-			unsigned int acceptmask = r.read8();
-			for (unsigned int i = 0; i < 8 && s < state_size; ++i, ++s)
-				a.setAccept(s, acceptmask & (1 << i));
-		}
 	}
 
 	a.setFlagsHack(true, true, true);
