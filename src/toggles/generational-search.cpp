@@ -457,7 +457,7 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 	auto roots = predecessorless_accept_components(connected, sccs);
 	//TODO: don't reduce if just one; don't reduce over singleton components (?)
 
-	maybe_owning_ptr<Finisher> f = parallel_reduce(tbb::blocked_range<unsigned int>(0, roots.size()),
+	parallel_reduce(tbb::blocked_range<unsigned int>(0, static_cast<unsigned int>(roots.size())),
 			maybe_owning_ptr<Finisher>(&finisher, false),
 			indirect_split,
 			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
@@ -618,7 +618,7 @@ private:
 					indirect_split,
 					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
 						for (std::size_t i = r.begin(); i < r.end(); ++i)
-							combine_once(curgen_[i], sourceIndexBase + i, *finish);
+							combine_once(curgen_[i], static_cast<unsigned int>(sourceIndexBase + i), *finish);
 					},
 					indirect_join);
 		}
@@ -661,7 +661,7 @@ private:
 		Stopwatch connectwatch;
 		std::size_t newStart = 0;
 		unsigned int subgeneration = 0;
-		unsigned int totalProduced = 0, totalGlobalPruned = 0, totalLocalPruned = 0;
+		std::size_t totalProduced = 0, totalGlobalPruned = 0, totalLocalPruned = 0;
 		while (curgen_.size() != newStart) {
 			Stopwatch subgenwatch;
 			Finisher finisher(&closed_);
@@ -671,7 +671,7 @@ private:
 					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
 					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
 						for (std::size_t i = r.begin(); i < r.end(); ++i) {
-							index_type sourceIndex = sourceIndexBase + (i-newStart);
+							index_type sourceIndex = numeric_cast<index_type>(sourceIndexBase + (i-newStart));
 							automaton_type inflated;
 							unpack(inflated, curgen_[i]);
 							automaton_type::symbol_type locations = inflated.active_alphabet_size();
