@@ -243,6 +243,23 @@ struct Finisher {
 			++localClosedPruned;
 	}
 	void join(Finisher& rhs) {
+		if (nextgen.empty()) {
+			//You'd think this shouldn't happen, but it does, both due to global
+			//pruning and TBB's overzealous splitting.
+			assert(localClosed.empty());
+			assert(pages.current_begin() == pages.current_end());
+			assert(localClosedPruned == 0);
+			assert(bytesAdopted == 0);
+			nextgen = std::move(rhs.nextgen);
+			pages = std::move(rhs.pages);
+			cur = rhs.cur;
+			localClosed = std::move(rhs.localClosed);
+			assert(globalClosed == rhs.globalClosed);
+			globalClosedPruned += rhs.globalClosedPruned;
+			localClosedPruned += rhs.localClosedPruned;
+			bytesAdopted += rhs.bytesAdopted;
+		}
+
 		Stopwatch stopwatch;
 		auto oldbytes = bytesAdopted;
 		auto oldcount = nextgen.size();
