@@ -206,3 +206,20 @@ TEST_CASE("AutomatonTest_CanonicalizeRenumber4") {
 		} while (std::next_permutation(renumbering.begin()+1, renumbering.end()));
 	}
 }
+
+//TEST_CASE("AutomatonTest_PermuteAlphabet") {
+//	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+//	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+//	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+//	auto shuf = shuffleAccept(noop, parallelToggleBase);
+//	auto cshuf = canonicalize(shuf);
+//
+//	std::array<AutomatonBase::symbol_type, 4> alpha;
+//	std::iota(alpha.begin(), alpha.end(), 0);
+//	do {
+//		auto test = cshuf;
+//		test.permuteAlphabet(alpha.data());
+//		TODO: set test.minimal_ = false so we can actually minimize, and verify
+//		that didn't change anything
+//	} while (std::next_permutation(alpha.begin(), alpha.end()));
+//}

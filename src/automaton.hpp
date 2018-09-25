@@ -451,6 +451,15 @@ private:
 		return ns;
 	}
 
+	template<class RandomAccessIterator>
+	static symbol_mask_type permuteAlphabet(symbol_mask_type cur, RandomAccessIterator map) {
+		//just like renumberAlphabet above, but constant 0 and 1 are illegal
+		symbol_mask_type ns;
+		for (symbol_type a = 0; a < alphabet_size_v; ++a)
+			ns.set(a, cur[map[a]]);
+		return ns;
+	}
+
 public:
 	/**
 	 * Renumbers the symbols on transitions out of all states in this automaton
@@ -483,6 +492,22 @@ public:
 				deterministic_ = false;
 		}
 		minimal_ = canonical_ = false;
+	}
+
+	/**
+	 * Permutes the symbols on transitions out of all states in this automaton
+	 * by looking up through the given iterator.  This changes the language of
+	 * the automaton, but the resulting automaton is minimal for the new
+	 * language iff the previous automaton was minimal for the old language.
+	 */
+	template<class RandomAccessIterator>
+	void permuteAlphabet(RandomAccessIterator symbolMap) {
+		//TODO: assert it's a permutation
+		for (state_type s = 0; s != state_size(); ++s)
+			for (Transition& t : transitions_[s])
+				t.symbols_ = permuteAlphabet(t.symbols_, symbolMap);
+		//Changing the alphabet may change the canonical state numbers.
+		canonical_ = false;
 	}
 
 	/**
