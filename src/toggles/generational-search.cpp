@@ -538,13 +538,13 @@ auto find_useful_rotations(const automaton_type& a) {
 	std::byte* cur = pages.allocate();
 	ClosedSet closed;
 	std::array<symbol_type, automaton_type::alphabet_size_v> rotation;
-	std::fill(rotation.begin()+locations, rotation.end(), std::numeric_limits<symbol_type>::max());
+	std::iota(rotation.begin(), rotation.end(), 0);
 	for (unsigned int rl = 0; rl < locations; ++rl) {
 		//It's arbitrary which way we rotate so long as we match what combine does.
 		std::iota(rotation.begin(), rotation.begin()+locations, 0);
 		std::rotate(rotation.begin(), rotation.begin()+rl, rotation.begin()+locations);
 		automaton_type rm = a;
-		rm.renumberAlphabet(rotation);
+		rm.permuteAlphabet(rotation);
 		rm.canonicalize(); //The normal, non-alphabet-adjusting canonicalize.
 		auto p = pack(rm, cur, pages.current_end());
 		if (!p) {
