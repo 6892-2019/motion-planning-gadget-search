@@ -507,22 +507,31 @@ void combine(const automaton_type& la, uint32_t l, bool leftMirror, automaton_ty
 		const automaton_type& ra, uint32_t r, bool rightMirror, automaton_type::state_type rightLocations,
 		const RotationVec& rightRotations, Finisher& finish) {
 	using symbol_type = automaton_type::symbol_type;
-	std::array<symbol_type, automaton_type::alphabet_size_v> slide, sliderotate;
-	std::fill(slide.begin(), slide.begin()+rightLocations, std::numeric_limits<symbol_type>::max());
+	std::array<symbol_type, automaton_type::alphabet_size_v> slide;
+	automaton_type shiftedRight = ra;
+	std::iota(slide.begin(), slide.end(), 0);
+	std::rotate(slide.rbegin(), slide.rbegin()+leftLocations, slide.rend());
+	shiftedRight.renumberAlphabet(slide.data());
+	automaton_type shuffled = automaton::shuffleAccept(la, shiftedRight);
+	shuffled.minimize();
+	//Now [0,leftLocations) are from the left and [leftLocations,leftLocations+rightLocations)
+	//are from the right.  We want to start inserting at left location 0, so we
+	//write all the right locations, then all the left locations.  We'll rotate
+	//the right locations as appropriate.  Then we'll move a left location to
+	//the other end of the array.  Locations beyond leftLocations+rightLocations
+	//are left alone, as they are always inactive.
+	std::iota(slide.begin(), slide.begin()+rightLocations, leftLocations);
 	std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
-	std::fill(slide.begin()+rightLocations+leftLocations, slide.end(), std::numeric_limits<symbol_type>::max());
+	std::iota(slide.begin()+rightLocations+leftLocations, slide.end(), rightLocations+leftLocations);
 	for (decltype(leftLocations) ll = 0; ll < leftLocations; ++ll) {
-		std::fill(sliderotate.begin(), sliderotate.end(), std::numeric_limits<symbol_type>::max());
-		automaton_type lm = la;
-		lm.renumberAlphabet(slide);
 		for (auto rotation : rightRotations) {
-			//Could be two iotas instead.
-			std::iota(sliderotate.begin()+ll, sliderotate.begin()+ll+rightLocations, 0);
-			std::rotate(sliderotate.begin()+ll, sliderotate.begin()+ll+rotation, sliderotate.begin()+ll+rightLocations);
-			automaton_type rm = ra;
-			rm.renumberAlphabet(sliderotate);
-			automaton_type combined = automaton::shuffleAccept(lm, rm);
-			finish(std::move(combined), Provenance(l, ll, leftMirror, r, rotation, rightMirror));
+			//Because we're reading a list of rotations (not rotation deltas),
+			//we have to re-initialize the right locations each time.
+			std::iota(slide.begin()+ll, slide.begin()+ll+rightLocations, leftLocations);
+			std::rotate(slide.begin()+ll, slide.begin()+ll+rotation, slide.begin()+ll+rightLocations);
+			automaton_type permuted = shuffled;
+			permuted.permuteAlphabet(slide.data());
+			finish(std::move(permuted), Provenance(l, ll, leftMirror, r, rotation, rightMirror));
 		}
 		std::swap(slide[ll], slide[ll+rightLocations]);
 	}
