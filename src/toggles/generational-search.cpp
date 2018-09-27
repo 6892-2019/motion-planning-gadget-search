@@ -645,24 +645,13 @@ private:
 		automaton_type unpacked;
 		unpack(unpacked, source);
 		automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
-		//We only mirror once we have to.  Once we've mirrored, we check if we're
-		//chiral so we can skip the == after the first time.  mirrored continues
-		//to live until the end of the function even if we're achiral, but that's good enough.
-		std::optional<automaton_type> mirrored;
-		bool chiral = false;
 		for (const Input& i : inputs_) {
 			if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
 			combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, i.normal_rotations, finishAction);
 			if (i.mirror.state_size())
 				combine(unpacked, sourceIndex, false, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, i.mirror_rotations, finishAction);
-			else {
-				if (!mirrored) {
-					mirrored.emplace(mirror(unpacked));
-					chiral = *mirrored != unpacked;
-				}
-				if (chiral)
-					combine(*mirrored, sourceIndex, true, leftLocations, i.normal, i.index, false, i.active_alphabet_size, i.normal_rotations, finishAction);
-			}
+			//If we didn't mirror on the right, we used to try mirroring on the
+			//left here, but it turns out to not generate anything new.
 		}
 	}
 
