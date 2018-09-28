@@ -12,8 +12,6 @@
 #include "automaton-io.hpp"
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
-#include <fmt/core.h>
-#include <fmt/ranges.h>
 #include <jemalloc/jemalloc.h>
 
 using namespace automaton;
@@ -444,7 +442,7 @@ auto predecessorless_accept_components(const automaton_type& a, const SCCs& sccs
 			});
 }
 
-void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
+void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, const Provenance* combineData, //could also be optional<Provenance>
 		unsigned int locations, unsigned int connectPoint, Finisher& finisher) {
 	automaton_type connected = a;
 	enjoin(connected, connectPoint, (connectPoint+1) % locations); //TODO: maybe branch instead of modulo
@@ -486,26 +484,28 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrore
 						//minimize again; any two equivalent states would differ only in
 						//the symbols we deleted, but those symbols were inactive.
 					}
-					(*finish)(std::move(op), Provenance(gadgetIndex, connectPoint, c, mirrored));
+					if (combineData)
+						(*finish)(std::move(op), Provenance::connect(*combineData, connectPoint, c));
+					else
+						(*finish)(std::move(op), Provenance::connect(gadgetIndex, connectPoint, c));
 				}
 			},
 			indirect_join);
 }
 
-void connect(const automaton_type& a, std::uint32_t gadgetIndex, bool mirrored,
-		unsigned int locations, Finisher& finisher) {
+void connect(const automaton_type& a, std::uint32_t gadgetIndex, unsigned int locations, Finisher& finisher) {
 	parallel_reduce(tbb::blocked_range<unsigned int>(0, locations),
 			maybe_owning_ptr<Finisher>(&finisher, false),
 			indirect_split,
 			[&](const tbb::blocked_range<unsigned int>& r, maybe_owning_ptr<Finisher>& finish) {
 				for (unsigned int l = r.begin(); l < r.end(); ++l)
-					connect_at(a, gadgetIndex, mirrored, locations, l, *finish);
+					connect_at(a, gadgetIndex, nullptr, locations, l, *finish);
 			},
 			indirect_join);
 }
 
-void combine(const automaton_type& la, uint32_t l, bool leftMirror, automaton_type::state_type leftLocations,
-		const automaton_type& ra, uint32_t r, bool rightMirror, automaton_type::state_type rightLocations,
+void combine(const automaton_type& la, uint32_t l, automaton_type::state_type leftLocations,
+		const automaton_type& ra, uint32_t r, automaton_type::state_type rightLocations,
 		const RotationVec& rightRotations, Finisher& finish) {
 	using symbol_type = automaton_type::symbol_type;
 	std::array<symbol_type, automaton_type::alphabet_size_v> slide;
@@ -532,7 +532,11 @@ void combine(const automaton_type& la, uint32_t l, bool leftMirror, automaton_ty
 			std::rotate(slide.begin()+ll, slide.begin()+ll+rotation, slide.begin()+ll+rightLocations);
 			automaton_type permuted = shuffled;
 			permuted.permuteAlphabet(slide.data());
-			finish(std::move(permuted), Provenance(l, ll, leftMirror, r, rotation, rightMirror));
+			Provenance prov = Provenance::combine(l, r, ll, rotation);
+			connect_at(permuted, std::numeric_limits<std::uint32_t>::max(), &prov, leftLocations+rightLocations,
+					(leftLocations+rightLocations+ll-1) % (leftLocations + rightLocations), finish);
+			connect_at(permuted, std::numeric_limits<std::uint32_t>::max(), &prov, leftLocations+rightLocations,
+					(leftLocations+rightLocations+ll+rightLocations-1) % (leftLocations + rightLocations), finish);
 		}
 		std::swap(slide[ll], slide[ll+rightLocations]);
 	}
@@ -626,7 +630,7 @@ private:
 			//"combine against nothing" to get started.  This includes mirrored
 			//inputs, but that's safe and not too wasteful.
 			for (auto& i : inputs_)
-				finisher(automaton_type{i.normal}, Provenance(i.index));
+				finisher(automaton_type{i.normal}, Provenance::input(i.index));
 		} else {
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-curgen_.size());
 			parallel_reduce(tbb::blocked_range<std::size_t>(0, curgen_.size()),
@@ -654,7 +658,7 @@ private:
 		automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
 		for (const Input& i : inputs_) {
 			if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
-			combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, i.useful_rotations, finishAction);
+			combine(unpacked, sourceIndex, leftLocations, i.normal, i.index, i.active_alphabet_size, i.useful_rotations, finishAction);
 		}
 	}
 
@@ -676,7 +680,7 @@ private:
 							automaton_type inflated;
 							unpack(inflated, curgen_[i]);
 							automaton_type::symbol_type locations = inflated.active_alphabet_size();
-							connect(inflated, sourceIndex, false, locations, *finish);
+							connect(inflated, sourceIndex, locations, *finish);
 						}
 					},
 					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
@@ -712,11 +716,11 @@ private:
 			//If we're globally pruning in Finisher, this should always succeed.
 			if (!closed_.count(p.first, hash)) {
 				assert(size < pages_.page_size());
-				for (const Target& t : targets_)
-					if (t.packed_hash == hash || t.mirror_packed_hash == hash) {
-						print_provenance_backtrace(p.second);
-						//TODO: maybe put it in some member variable to be checked when convenient?
-					}
+				for (auto i : xrange(targets_.size())) {
+					const Target& t = targets_[i];
+					if (t.packed_hash == hash || t.mirror_packed_hash == hash)
+						fmt::print("found target {}: {}\n", i, p.second);
+				}
 				if (pages_.current_end() - cur_ < size)
 					cur_ = pages_.allocate();
 				Pack* pack_starts = cur_;
@@ -736,31 +740,6 @@ private:
 //				next.size(), sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
 //				((double)(closed_.size() - oldClosedSize))/next.size(), ((double)sizeCommitted)/sizeConsidered);
 		return newStart;
-	}
-
-	[[gnu::cold]]
-	void print_provenance_backtrace(Provenance& provenance) {
-		circular_deque<std::uint32_t, 32> queue;
-		linear_set<std::uint32_t> printed;
-
-		std::cout << "<found> = " << provenance << '\n';
-		for (auto p : provenance.parents())
-			if (printed.insert(p).second)
-				queue.push_back(p);
-
-		while (!queue.empty()) {
-			auto idx = queue.pop_front();
-			auto prov = provenance_.at(idx);
-			std::cout << idx << " = " << prov << '\n';
-			//Ideally we'd print the automaton here, but we're no longer
-			//maintaining an id->automaton map.  We'll have to replay the
-			//log this code is printing out.
-			for (auto p : prov.parents())
-				if (printed.insert(p).second)
-					queue.push_back(p);
-		}
-
-		std::cout << std::flush;
 	}
 };
 
