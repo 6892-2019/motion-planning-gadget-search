@@ -247,7 +247,7 @@ struct Finisher {
 			//You'd think this shouldn't happen, but it does, both due to global
 			//pruning and TBB's overzealous splitting.
 			assert(localClosed.empty());
-			assert(pages.current_begin() == pages.current_end());
+			assert(cur == pages.current_begin());
 			assert(localClosedPruned == 0);
 			assert(bytesAdopted == 0);
 			nextgen = std::move(rhs.nextgen);
