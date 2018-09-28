@@ -13,6 +13,7 @@
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <jemalloc/jemalloc.h>
 
 using namespace automaton;
@@ -157,9 +158,9 @@ typedef unsigned int index_type;
 using RotationVec = boost::container::small_vector<unsigned int, automaton_type::alphabet_size_v>;
 struct Input {
 	index_type index;
-	automaton_type normal, mirror; //mirror is empty if the input is not chiral
 	AutomatonBase::symbol_type active_alphabet_size;
-	RotationVec normal_rotations, mirror_rotations;
+	automaton_type normal;
+	RotationVec useful_rotations;
 };
 
 struct Target {
@@ -570,25 +571,31 @@ auto find_useful_rotations(const automaton_type& a) {
 
 class GenerationalSearch {
 public:
-	GenerationalSearch(vector<automaton_type>& inputs, vector<automaton_type>& targets)
+	GenerationalSearch(vector<pair<std::string_view, automaton_type>>& inputs,
+			vector<pair<std::string_view, automaton_type>>& targets)
 			: pages_(256*1024*1024), cur_(pages_.allocate()) {
-		inputs_.reserve(inputs.size());
-		for (auto i : xrange(inputs.size())) {
-			automaton_type m = mirror(inputs[i]);
-			if (m == inputs[i])
-				m.clear();
-			auto asz = inputs[i].active_alphabet_size();
-			auto normal_rotations = find_useful_rotations(inputs[i]);
-			auto mirror_rotations = find_useful_rotations(m);
-			inputs_.push_back({numeric_cast<index_type>(i), std::move(inputs[i]), std::move(m),
-					asz, normal_rotations, mirror_rotations});
+		for (auto& [name, a] : inputs) {
+			auto asz = a.active_alphabet_size();
+			auto normal_rotations = find_useful_rotations(a);
+			inputs_.push_back({numeric_cast<index_type>(inputs_.size()), asz, a, normal_rotations});
+			fmt::print("input {}: {}, size {}, rotations {}\n",
+					inputs_.back().index, name, inputs_.back().active_alphabet_size, inputs_.back().useful_rotations);
+
+			automaton_type m = mirror(a);
+			if (m != a) {
+				auto mirror_rotations = find_useful_rotations(m);
+				inputs_.push_back({numeric_cast<index_type>(inputs_.size()), asz, m, mirror_rotations});
+				fmt::print("input {}: {} (mirrored), size {}, rotations {}\n",
+						inputs_.back().index, name, inputs_.back().active_alphabet_size, inputs_.back().useful_rotations);
+			}
 		}
 		targets_.reserve(targets.size());
-		for (auto& t : targets) {
+		for (auto& [name, t] : targets) {
 			auto normalPack = cur_;
 			auto mirrorPack = pack(t, normalPack, pages_.current_end());
 			cur_ = pack(mirror(t), mirrorPack, pages_.current_end());
 			targets_.push_back({packed_hash(normalPack), packed_hash(mirrorPack), normalPack, mirrorPack});
+			fmt::print("target {}: {}\n", targets_.size()-1, name);
 		}
 	}
 	void advance() {
@@ -616,10 +623,10 @@ private:
 		Finisher finisher(nullptr); //We'll never hit in closed_ when combining.
 		if (generation_ == 0) {
 			assert(closed_.empty());
-			//"combine against nothing" to get started
+			//"combine against nothing" to get started.  This includes mirrored
+			//inputs, but that's safe and not too wasteful.
 			for (auto& i : inputs_)
 				finisher(automaton_type{i.normal}, Provenance(i.index));
-				//TODO: i.mirror if nonempty?
 		} else {
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-curgen_.size());
 			parallel_reduce(tbb::blocked_range<std::size_t>(0, curgen_.size()),
@@ -647,11 +654,7 @@ private:
 		automaton_type::symbol_type leftLocations = unpacked.active_alphabet_size();
 		for (const Input& i : inputs_) {
 			if (leftLocations + i.active_alphabet_size > automaton_type::alphabet_size_v) continue;
-			combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, i.normal_rotations, finishAction);
-			if (i.mirror.state_size())
-				combine(unpacked, sourceIndex, false, leftLocations, i.mirror, i.index, true, i.active_alphabet_size, i.mirror_rotations, finishAction);
-			//If we didn't mirror on the right, we used to try mirroring on the
-			//left here, but it turns out to not generate anything new.
+			combine(unpacked, sourceIndex, false, leftLocations, i.normal, i.index, false, i.active_alphabet_size, i.useful_rotations, finishAction);
 		}
 	}
 
@@ -777,19 +780,14 @@ automaton_type automatonFromArg(std::string_view arg) {
 }
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
-	vector<automaton_type> inputs, outputs;
+	vector<pair<std::string_view, automaton_type>> inputs, outputs;
 
-	std::vector<std::string_view> tokens = split_view(argv[1], ',');
-	for (unsigned int i = 0; i < tokens.size(); ++i) {
-		std::cout << "input " << i << ": " << tokens[i] << "\n";
-		inputs.push_back(automatonFromArg(tokens[i]));
-	}
-
-	tokens = split_view(argv[2], ',');
-	for (unsigned int i = 0; i < tokens.size(); ++i) {
-		std::cout << "output " << i << ": " << tokens[i] << "\n";
-		outputs.push_back(automatonFromArg(tokens[i]));
-	}
+	std::vector<std::string_view> input_tokens = split_view(argv[1], ','),
+			output_tokens = split_view(argv[2], ',');
+	for (auto name : input_tokens)
+		inputs.emplace_back(name, automatonFromArg(name));
+	for (auto name : output_tokens)
+		outputs.emplace_back(name, automatonFromArg(name));
 
 	GenerationalSearch gs(inputs, outputs);
 	for (int generation = 1; ; ++generation)
