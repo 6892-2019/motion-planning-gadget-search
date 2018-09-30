@@ -146,7 +146,6 @@ private:
 };
 
 typedef Automaton<8u> automaton_type;
-typedef pair<automaton_type, Provenance> AutoProv;
 typedef pair<const Pack*, Provenance> PackProv;
 using ClosedSet = tsl::hopscotch_set<const Pack*,
 		PackHasher, PackEqualer, std::allocator<const Pack*>,
