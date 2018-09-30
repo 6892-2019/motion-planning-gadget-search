@@ -623,7 +623,7 @@ private:
 
 	void do_combine() {
 		Stopwatch stopwatch;
-		Finisher finisher(nullptr); //We'll never hit in closed_ when combining.
+		Finisher finisher(&closed_);
 		if (generation_ == 0) {
 			assert(closed_.empty());
 			//"combine against nothing" to get started.  This includes mirrored
@@ -646,8 +646,10 @@ private:
 
 		Stopwatch::Result timing = stopwatch.elapsed();
 		//TODO: total size, summary stats of produced or the entire closed set?
-		fmt::print("Finished combine {} in {} ({}); produced {}, pruned {}, closed size {}.\n",
-				generation_, timing.hms(), timing.utilization(), curgen_.size(), finisher.localClosedPruned, closed_.size());
+		fmt::print("Finished combine {} in {} ({}); "
+				"produced {}, globally pruned {}, locally pruned {}, closed size {}.\n",
+				generation_, timing.hms(), timing.utilization(), curgen_.size(),
+				finisher.globalClosedPruned, finisher.localClosedPruned, closed_.size());
 	}
 
 	void combine_once(const Pack* source, index_type sourceIndex, Finisher& finishAction) {
