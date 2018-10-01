@@ -13,6 +13,7 @@
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
 #include <jemalloc/jemalloc.h>
+#include <boost/process.hpp>
 
 using namespace automaton;
 using std::vector;
@@ -601,17 +602,19 @@ public:
 			fmt::print("target {}: {}\n", targets_.size()-1, name);
 		}
 	}
+	virtual ~GenerationalSearch() = default;
 	void advance() {
 		Stopwatch stopwatch;
+		subgeneration_requested_ = generation_requested_ = false;
 		do_combine();
 		do_connect();
 		Stopwatch::Result timing = stopwatch.elapsed();
 		fmt::print("Finished generation {} in {} ({}); produced {}, closed size {}.\n",
 				generation_, timing.hms(), timing.utilization(), curgen_.size(), closed_.size());
 		++generation_;
-		if (curgen_.empty()) std::exit(0);
+		if (!generation_requested_) std::exit(0);
 	}
-private:
+protected:
 	PageHolder pages_;
 	std::byte* cur_;
 	vector<const Pack*> curgen_; //non-owning, stored in pages_ and already in closed_
@@ -620,6 +623,7 @@ private:
 	vector<Input> inputs_;
 	vector<Target> targets_;
 	unsigned int generation_ = 0;
+	bool subgeneration_requested_ = false, generation_requested_ = false;
 
 	void do_combine() {
 		Stopwatch stopwatch;
@@ -668,7 +672,7 @@ private:
 		std::size_t newStart = 0;
 		unsigned int subgeneration = 0;
 		std::size_t totalProduced = 0, totalGlobalPruned = 0, totalLocalPruned = 0;
-		while (curgen_.size() != newStart) {
+		while (subgeneration_requested_) {
 			Stopwatch subgenwatch;
 			Finisher finisher(&closed_);
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
@@ -704,7 +708,7 @@ private:
 				totalProduced, totalGlobalPruned, totalLocalPruned);
 	}
 
-	std::size_t append(std::vector<PackProv>& next) {
+	virtual std::size_t append(std::vector<PackProv>& next) {
 //		Stopwatch stopwatch;
 //		std::size_t sizeConsidered = 0, sizeCommitted = 0;
 //		auto oldClosedSize = closed_.size();
@@ -740,7 +744,19 @@ private:
 //				timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
 //				next.size(), sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
 //				((double)(closed_.size() - oldClosedSize))/next.size(), ((double)sizeCommitted)/sizeConsidered);
+		subgeneration_requested_ = curgen_.size() != newStart;
+		generation_requested_ |= subgeneration_requested_;
 		return newStart;
+	}
+};
+
+class DistributedGenerationalSearch : public GenerationalSearch {
+public:
+	DistributedGenerationalSearch(vector<pair<std::string_view, automaton_type>>& inputs,
+			vector<pair<std::string_view, automaton_type>>& targets,
+			std::vector<std::string>& hosts)
+			: GenerationalSearch(inputs, targets) {
+
 	}
 };
 
@@ -760,8 +776,17 @@ automaton_type automatonFromArg(std::string_view arg) {
 }
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
-	vector<pair<std::string_view, automaton_type>> inputs, outputs;
+	std::vector<std::string> hosts;
+	if (std::getenv("SLURM_STEP_NODELIST")) {
+		boost::process::ipstream pipe;
+		boost::process::child child("scontrol show hostnames $SLURM_STEP_NODELIST");
+		std::string line;
+		while (pipe && std::getline(pipe, line) && !line.empty())
+			hosts.push_back(line);
+		child.wait();
+	}
 
+	vector<pair<std::string_view, automaton_type>> inputs, outputs;
 	std::vector<std::string_view> input_tokens = split_view(argv[1], ','),
 			output_tokens = split_view(argv[2], ',');
 	for (auto name : input_tokens)
@@ -769,9 +794,17 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	for (auto name : output_tokens)
 		outputs.emplace_back(name, automatonFromArg(name));
 
-	GenerationalSearch gs(inputs, outputs);
-	for (int generation = 1; ; ++generation)
-		gs.advance();
+	unique_ptr<GenerationalSearch> gs;
+	if (hosts.size() <= 1) {
+		//running locally (inside or outside of SLURM doesn't matter)
+		GenerationalSearch gs(inputs, outputs);
+		for (int generation = 1; ; ++generation)
+			gs.advance();
+	} else {
+		DistributedGenerationalSearch gs(inputs, outputs, hosts);
+		for (int generation = 1; ; ++generation)
+			gs.advance();
+	}
 
 	return 0;
 }
