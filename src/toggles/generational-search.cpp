@@ -14,6 +14,8 @@
 #include <tbb/blocked_range.h>
 #include <jemalloc/jemalloc.h>
 #include <boost/process.hpp>
+#include <unistd.h>
+#include <netinet/sctp.h>
 
 using namespace automaton;
 using std::vector;
@@ -755,8 +757,124 @@ public:
 	DistributedGenerationalSearch(vector<pair<std::string_view, automaton_type>>& inputs,
 			vector<pair<std::string_view, automaton_type>>& targets,
 			std::vector<std::string>& hosts)
-			: GenerationalSearch(inputs, targets) {
+			: GenerationalSearch(inputs, targets), hostnames_(hosts) {
+		std::sort(hostnames_.begin(), hostnames_.end());
+		std::string localhost = localhostname();
+		machine_id_ = numeric_cast<decltype(machine_id_)>(
+				std::find(hostnames_.begin(), hostnames_.end(), localhost) - hostnames_.begin());
+		assoc_.assign(hostnames_.size(), std::numeric_limits<sctp_assoc_t>::max());
 
+		addresses_.reserve(hostnames_.size());
+		for (const auto& name : hostnames_)
+			addresses_.push_back(get_address(name));
+
+		socket_ = socket(AF_INET, SOCK_SEQPACKET, IPPROTO_SCTP);
+		if (socket_ < 0) {
+			perror("socket");
+			std::exit(1);
+		}
+
+		//We need this to get sndrcvinfo filled in later.
+		sctp_event_subscribe events = {};
+		events.sctp_data_io_event = 1;
+		if (setsockopt(socket_, SOL_SCTP, SCTP_EVENTS, &events, sizeof(events)) < 0) {
+			perror("setsockopt SCTP_EVENTS");
+			std::exit(1);
+		}
+		int fragment_interleave = 0;
+		if (setsockopt(socket_, SOL_SCTP, SCTP_FRAGMENT_INTERLEAVE, &fragment_interleave, sizeof(fragment_interleave)) < 0) {
+			perror("setsockopt SCTP_FRAGMENT_INTERLEAVE");
+			std::exit(1);
+		}
+
+		sockaddr_in bind_addr;
+		memset(&bind_addr, 0, sizeof(bind_addr));
+		bind_addr.sin_family = AF_INET;
+		bind_addr.sin_port = htons(12000);
+		bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		if (bind(socket_, (sockaddr*)&bind_addr, sizeof(bind_addr)) < 0) {
+			perror("bind");
+			std::exit(1);
+		}
+
+		if (listen(socket_, 1) < 0) {
+			perror("listen");
+			std::exit(1);
+		}
+
+		//Form an association to ourselves and all machines preceding us.
+		//(Connecting to a node that we've already associated with is an error
+		//that doesn't fill in the association id, so we can't just do the
+		//obvious all-to-all here.)
+		for (unsigned int i = 0; i <= machine_id_; ++i) {
+			sctp_assoc_t assoc;
+			Stopwatch timer;
+			int rc = 0, savederrno = 0;
+			//Wait a bit before giving up if the peer isn't listening yet.
+			do {
+				rc = sctp_connectx(socket_, (sockaddr*)&addresses_[i], 1, &assoc);
+				savederrno = errno;
+			} while (rc && savederrno == ECONNREFUSED && timer.elapsed().seconds() < 3);
+			if (rc) {
+				fmt::print("sctp_connectx: {} ({})\n", strerror(savederrno), savederrno);
+				std::exit(1);
+			}
+			assoc_[i] = assoc;
+		}
+
+		//Get the association id for successors (that connected to us).  We'll
+		//retry this up to a timeout because we're racing the inbound connects.
+		for (unsigned int i = machine_id_+1; i < assoc_.size(); ++i) {
+			Stopwatch timer;
+			do {
+				sctp_paddrinfo info = {};
+				std::memcpy(&info.spinfo_address, &addresses_[i], sizeof(sockaddr_in));
+				socklen_t length = sizeof(info);
+				if (getsockopt(socket_, SOL_SCTP, SCTP_GET_PEER_ADDR_INFO, &info, &length) >= 0)
+					assoc_[i] = info.spinfo_assoc_id;
+			} while (assoc_[i] == std::numeric_limits<sctp_assoc_t>::max() && timer.elapsed().seconds() < 3);
+			if (assoc_[i] == std::numeric_limits<sctp_assoc_t>::max()) {
+				fmt::print("{}: unable to get assoc id for {}\n", localhost, hostnames_[i]);
+				std::exit(1);
+			}
+		}
+
+		fmt::print("{} successfully associated with {}\n", localhost, hostnames_);
+	}
+private:
+	int socket_;
+	std::vector<sctp_assoc_t> assoc_;
+	std::uint8_t machine_id_;
+	std::vector<std::string> hostnames_;
+	std::vector<sockaddr_in> addresses_;
+
+	static std::string localhostname() {
+		char name[HOST_NAME_MAX+1];
+		if (gethostname(name, sizeof(name))) {
+			perror("gethostname");
+			std::exit(1); //environment is not sane
+		}
+		return name;
+	}
+
+	static sockaddr_in get_address(const std::string& hostname) {
+		//This assumes there's only going to be one address, or at least that
+		//the first one is all we need.
+		addrinfo hints = {};
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_SEQPACKET;
+		hints.ai_protocol = IPPROTO_SCTP;
+		hints.ai_flags = AI_NUMERICSERV;
+		addrinfo* infos;
+		int rc = getaddrinfo(hostname.c_str(), "12000", &hints, &infos);
+		if (rc) {
+			fmt::print("getaddrinfo: {}\n", gai_strerror(rc));
+			std::exit(1);
+		}
+		sockaddr_in ret = {};
+		std::memcpy(&ret, infos->ai_addr, sizeof(sockaddr_in));
+		freeaddrinfo(infos);
+		return ret;
 	}
 };
 
@@ -777,9 +895,10 @@ automaton_type automatonFromArg(std::string_view arg) {
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::vector<std::string> hosts;
-	if (std::getenv("SLURM_STEP_NODELIST")) {
+	if (const char* nodes = std::getenv("SLURM_STEP_NODELIST")) {
 		boost::process::ipstream pipe;
-		boost::process::child child("scontrol show hostnames $SLURM_STEP_NODELIST");
+		std::string command = fmt::format("scontrol show hostnames {}", nodes);
+		boost::process::child child(command, boost::process::std_out > pipe);
 		std::string line;
 		while (pipe && std::getline(pipe, line) && !line.empty())
 			hosts.push_back(line);
