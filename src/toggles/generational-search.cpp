@@ -10,6 +10,7 @@
 #include "maybe_owning_ptr.hpp"
 #include "stringutils.hpp"
 #include "automaton-io.hpp"
+#include <thread>
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
 #include <jemalloc/jemalloc.h>
@@ -648,7 +649,7 @@ protected:
 					indirect_join);
 		}
 		curgen_.clear();
-		append(finisher.nextgen);
+		append(finisher);
 
 		Stopwatch::Result timing = stopwatch.elapsed();
 		//TODO: total size, summary stats of produced or the entire closed set?
@@ -694,7 +695,7 @@ protected:
 						lhs->join(*rhs);
 					});
 			std::size_t produced = finisher.nextgen.size();
-			newStart = append(finisher.nextgen);
+			newStart = append(finisher);
 			Stopwatch::Result timing = subgenwatch.elapsed();
 			fmt::print("Finished connect {}.{} in {} ({}); produced {}, globally pruned {}, locally pruned {}, closed size {}.\n",
 				generation_, subgeneration, timing.hms(), timing.utilization(),
@@ -710,13 +711,13 @@ protected:
 				totalProduced, totalGlobalPruned, totalLocalPruned);
 	}
 
-	virtual std::size_t append(std::vector<PackProv>& next) {
+	virtual std::size_t append(Finisher& finisher) {
 //		Stopwatch stopwatch;
 //		std::size_t sizeConsidered = 0, sizeCommitted = 0;
 //		auto oldClosedSize = closed_.size();
 
 		auto newStart = curgen_.size();
-		for (PackProv& p : next) {
+		for (PackProv& p : finisher.nextgen) {
 			auto size = packed_size(p.first);
 //			sizeConsidered += size;
 			auto hash = packed_hash(p.first);
@@ -841,12 +842,219 @@ public:
 
 		fmt::print("{} successfully associated with {}\n", localhost, hostnames_);
 	}
+
+protected:
+	std::size_t append(Finisher& finisher) override {
+		auto newStart = curgen_.size();
+		std::thread send(&DistributedGenerationalSearch::send_thread, this, std::ref(finisher));
+		std::thread recv(&DistributedGenerationalSearch::recv_thread, this);
+		send.join();
+		recv.join();
+
+		if (machine_id_ == 0) {
+			send_finished(true); //finish the broadcast
+			vote(curgen_.size() != newStart);
+			count_votes();
+		} else
+			vote(curgen_.size() != newStart);
+		subgeneration_requested_ = learn_result();
+		generation_requested_ |= subgeneration_requested_;
+		fmt::print("{} result is {}\n", hostnames_[machine_id_], subgeneration_requested_);
+		return newStart;
+	}
+
 private:
 	int socket_;
 	std::vector<sctp_assoc_t> assoc_;
 	std::uint8_t machine_id_;
 	std::vector<std::string> hostnames_;
 	std::vector<sockaddr_in> addresses_;
+
+	void send_thread(Finisher& finisher) {
+		//The send thread just blasts packs.
+
+		//TODO: ideally we'd have iovec support so we didn't need this.
+		dynarray<std::byte> buf(1*1024*1024);
+		//Division instructions are faster when the divisor is small, so help
+		//the compiler out by truncating it here.  (C++'s promotion rules will
+		//still promote it to int, but that should be undoable.)
+		std::uint8_t modulus = numeric_cast<std::uint8_t>(assoc_.size());
+		sctp_sndrcvinfo info = {};
+		for (PackProv& p : finisher.nextgen) {
+			p.second.machineId = machine_id_; //produced here
+			auto size = packed_size(p.first);
+			auto hash = packed_hash(p.first);
+			if (size + sizeof(hash) + sizeof(p.second) > buf.size()) //TODO: unlikely macro
+				fmt::print("{} skipping oversized pack {}\n", hostnames_[machine_id_], size);
+			auto shard = hash % modulus;
+			info.sinfo_assoc_id = assoc_[shard];
+
+			auto next = build(buf.begin(), &hash, sizeof(hash));
+			next = build(next, &p.second, sizeof(p.second));
+			next = build(next, p.first, size);
+			std::size_t len = static_cast<std::size_t>(next - buf.begin());
+			if (len != size + sizeof(hash) + sizeof(p.second))
+				fmt::print("bad size in send {} {}\n", len, size + sizeof(hash) + sizeof(p.second));
+
+			int sent = sctp_send(socket_, buf.begin(), len, &info, MSG_EOR);
+			if (sent < 0) //TODO: unlikely
+				perror("sctp_send while sending packs");
+			if (static_cast<std::size_t>(sent) < len) //TODO: unlikely
+				fmt::print("{} short pack write? wrote {} of {}\n", hostnames_[machine_id_], sent, len);
+			fmt::print("{} sent a message with length {}\n", hostnames_[machine_id_], sent);
+
+			//TODO: we'd like to free pages from the Finisher when we can.
+		}
+
+		send_finished();
+	}
+
+	void recv_thread() {
+		//The recv thread attempts to insert received packs.  It also listens
+		//for finished-sending-packs messages and terminates when it has all of
+		//them.
+		boost::dynamic_bitset<std::size_t> finished(assoc_.size());
+		dynarray<std::byte> buf(1*1024*1024);
+		sctp_sndrcvinfo info = {};
+		while (true) {
+			int flags = 0;
+			int count = 0;
+			//Partial reads are explicitly possible if the stack is "short on buffers".
+			//We disabled interleaving on this socket.
+			while (!(flags & MSG_EOR)) {
+				int delta = sctp_recvmsg(socket_, buf.begin()+count, buf.size(), nullptr, nullptr, &info, &flags);
+				if (delta < 0) //TODO: unlikely
+					perror("error receiving");
+				count += delta;
+			}
+			fmt::print("{} received a message with length {}\n", hostnames_[machine_id_], count);
+
+			if (count == 1) { //finished message
+				auto peer = std::to_integer<unsigned int>(buf[0]);
+				finished[peer] = true;
+				fmt::print("{} received finish from {}\n", hostnames_[machine_id_], hostnames_[peer]);
+				if (finished.all()) break;
+				continue;
+			}
+
+			std::size_t hash;
+			Provenance prov;
+			std::byte* pack = unbuild(buf.begin(), &hash, sizeof(hash));
+			pack = unbuild(pack, &prov, sizeof(prov));
+			//the usual append stuff:
+			if (!closed_.count(pack, hash)) {
+				auto size = packed_size(pack);
+				auto resize = count - sizeof(hash) - sizeof(prov);
+				auto rehash = packed_hash(pack);
+				fmt::print("{} {} {} {} {}\n", size, resize, hash, rehash, prov);
+				assert(size < pages_.page_size());
+				for (auto i : xrange(targets_.size())) {
+					const Target& t = targets_[i];
+					if (t.packed_hash == hash || t.mirror_packed_hash == hash)
+						fmt::print("found target {}: {}\n", i, prov);
+				}
+				if (pages_.current_end() - cur_ < size)
+					cur_ = pages_.allocate();
+				Pack* pack_starts = cur_;
+				cur_ = std::copy(pack, pack + size, cur_);
+				closed_.insert(pack_starts); //TODO: use hash
+				curgen_.push_back(pack_starts);
+				provenance_.push_back(prov);
+			}
+		}
+	}
+
+	void send_finished(bool ready_for_votes = false) {
+		fmt::print("{} finishing\n", hostnames_[machine_id_]);
+		//Broadcast to all nodes that we're done sending packs.  SCTP messages
+		//can't be empty, so this is a 1-byte message containing just our
+		//machine ID.  (We can't send this as a separate stream because it must
+		//be ordered with respect to the packs.)
+		sctp_sndrcvinfo info = {};
+		for (auto i : xrange(assoc_.size())) {
+			//Node 0 has special handling.  At first we only message ourselves.
+			//Then when we're ready to accept votes (after receiving finished
+			//messages from all other nodes), we complete the broadcast.
+			//If we're finishing an earlier broadcast, skip messaging ourselves
+			if (machine_id_ == 0 && i == 0 && ready_for_votes) continue;
+			//If this is the first broadcast, stop after messaging ourselves.
+			if (machine_id_ == 0 && i > 0 && !ready_for_votes) break;
+
+			info.sinfo_assoc_id = assoc_[i];
+			int sent = sctp_send(socket_, &machine_id_, sizeof(machine_id_), &info, MSG_EOR);
+			if (sent < 0) //TODO: unlikely
+				perror("sctp_send while sending finished message");
+			if (static_cast<std::size_t>(sent) < sizeof(machine_id_)) //TODO: unlikely
+				fmt::print("{} short finish write? wrote {} to {}\n", hostnames_[machine_id_], sent, hostnames_[i]);
+		}
+	}
+
+	void vote(bool want_subgen) {
+		std::array<std::uint8_t, 2> buf = {machine_id_, static_cast<std::uint8_t>(want_subgen ? 1 : 0)};
+		sctp_sndrcvinfo info = {};
+		info.sinfo_assoc_id = assoc_[0];
+		int sent = sctp_send(socket_, buf.data(), buf.size(), &info, MSG_EOR);
+		if (sent < 0) //TODO: unlikely
+			perror("sctp_send while sending vote");
+		if (static_cast<std::size_t>(sent) < buf.size()) //TODO: unlikely
+			fmt::print("{} short vote write? wrote {} of {}\n", hostnames_[machine_id_], sent, buf.size());
+	}
+
+	void count_votes() {
+		boost::dynamic_bitset<std::size_t> voted(assoc_.size()), wants(assoc_.size());
+		dynarray<std::byte> buf(1024);
+		sctp_sndrcvinfo info = {};
+		while (true) {
+			int flags = 0;
+			int count = 0;
+			//Partial reads are explicitly possible if the stack is "short on buffers".
+			//We disabled interleaving on this socket.
+			while (!(flags & MSG_EOR)) {
+				int delta = sctp_recvmsg(socket_, buf.begin()+count, buf.size(), nullptr, nullptr, &info, &flags);
+				if (delta < 0) //TODO: unlikely
+					perror("error receiving, expecting vote");
+				count += delta;
+			}
+			if (count != 2) {
+				fmt::print("Unexpected message when collecting votes, len {}", count);
+				continue; //try to just skip it if it's a pack?
+			}
+
+			voted[std::to_integer<unsigned int>(buf[0])] = true;
+			wants[std::to_integer<unsigned int>(buf[0])] = std::to_integer<bool>(buf[1]);
+			if (voted.all())
+				break;
+		}
+
+		std::uint8_t result = wants.any();
+		for (auto i : xrange(assoc_.size())) {
+			info.sinfo_assoc_id = assoc_[i];
+			int sent = sctp_send(socket_, &result, sizeof(result), &info, MSG_EOR);
+			if (sent < 0) //TODO: unlikely
+				perror("sctp_send while sending result");
+			if (static_cast<std::size_t>(sent) < sizeof(result)) //TODO: unlikely
+				fmt::print("{} short result write? wrote {} to {}\n", hostnames_[machine_id_], sent, hostnames_[i]);
+		}
+	}
+
+	bool learn_result() {
+		std::uint8_t result = 0;
+		sctp_sndrcvinfo info = {};
+		int flags = 0;
+		int delta = sctp_recvmsg(socket_, &result, sizeof(result), nullptr, nullptr, &info, &flags);
+		if (delta <= 0) //TODO: unlikely
+			perror("error receiving, expecting result");
+		return result != 0;
+	}
+
+	static std::byte* build(std::byte* dest, const void* src, int count) {
+		std::memcpy(dest, src, count);
+		return dest + count;
+	}
+	static std::byte* unbuild(std::byte* src, void* dest, int count) {
+		std::memcpy(dest, src, count);
+		return src + count;
+	}
 
 	static std::string localhostname() {
 		char name[HOST_NAME_MAX+1];
