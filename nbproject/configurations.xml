@@ -182,6 +182,8 @@
           </incDir>
         </ccTool>
       </item>
+      <item path="src/fmtutils.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/fuzz/fuzz-state-renumbering.cpp"
             ex="false"
             tool="1"

@@ -840,24 +840,33 @@ public:
 			}
 		}
 
+		//Set the default context for received messages to the sender's machine id.
+		for (unsigned int i = 0; i < assoc_.size(); ++i) {
+			sctp_assoc_value defctx = {assoc_[i], i};
+			if (setsockopt(socket_, SOL_SCTP, SCTP_CONTEXT, &defctx, sizeof(defctx)) < 0) {
+				perror("setsockopt SCTP_CONTEXT");
+				std::exit(1);
+			}
+		}
+
 		fmt::print("{} successfully associated with {}\n", localhost, hostnames_);
 	}
 
 protected:
 	std::size_t append(Finisher& finisher) override {
 		auto newStart = curgen_.size();
-		std::thread send(&DistributedGenerationalSearch::send_thread, this, std::ref(finisher));
-		std::thread recv(&DistributedGenerationalSearch::recv_thread, this);
-		send.join();
+		broadcast_control(ControlMsg::READY);
+		std::thread recv(&DistributedGenerationalSearch::recv_thread, this, std::ref(finisher));
 		recv.join();
 
 		if (machine_id_ == 0) {
-			send_finished(true); //finish the broadcast
+			broadcast_finished(true); //finish the broadcast
 			vote(curgen_.size() != newStart);
 			count_votes();
 		} else
 			vote(curgen_.size() != newStart);
 		subgeneration_requested_ = learn_result();
+
 		generation_requested_ |= subgeneration_requested_;
 		fmt::print("{} result is {}\n", hostnames_[machine_id_], subgeneration_requested_);
 		return newStart;
@@ -869,6 +878,13 @@ private:
 	std::uint8_t machine_id_;
 	std::vector<std::string> hostnames_;
 	std::vector<sockaddr_in> addresses_;
+	//A buffer for ready messages that arrive in learn_result.  The recv thread
+	//processes these before anything else.  This is not explicitly synchronized,
+	//but learn_result returns before the recv thread starts (in the next
+	//subgeneration), and the recv thread is joined before learn_result is called.
+	//If not for the ready message, we'd have to buffer (variable-length) packs.
+	//(We're storing just the source here, as that's all we care about.)
+	std::vector<std::uint8_t> ready_buffer_;
 
 	void send_thread(Finisher& finisher) {
 		//The send thread just blasts packs.
@@ -901,76 +917,96 @@ private:
 				perror("sctp_send while sending packs");
 			if (static_cast<std::size_t>(sent) < len) //TODO: unlikely
 				fmt::print("{} short pack write? wrote {} of {}\n", hostnames_[machine_id_], sent, len);
-			fmt::print("{} sent a message with length {}\n", hostnames_[machine_id_], sent);
+//			fmt::print("{} sent a message with length {}\n", hostnames_[machine_id_], sent);
 
 			//TODO: we'd like to free pages from the Finisher when we can.
 		}
 
-		send_finished();
+		broadcast_finished();
 	}
 
-	void recv_thread() {
-		//The recv thread attempts to insert received packs.  It also listens
-		//for finished-sending-packs messages and terminates when it has all of
-		//them.
-		boost::dynamic_bitset<std::size_t> finished(assoc_.size());
+	void recv_thread(Finisher& finisher) {
+		//The recv thread attempts to insert received packs.  It also does some
+		//bookkeeping: it waits for all nodes to be ready before launching the
+		//send thread, and terminates when all nodes have finished sending packs.
+		//We don't use the Finisher at all except to pass it to the send thread.
+		std::thread send; //declared here, but not started until ready.all()
+		boost::dynamic_bitset<std::size_t> ready(assoc_.size()), finished(assoc_.size());
 		dynarray<std::byte> buf(1*1024*1024);
-		sctp_sndrcvinfo info = {};
+
+		auto processReady = [&](std::uint8_t source) {
+			bool old = ready.test_set(source);
+			if (old) //TODO: unlikely
+				fmt::print("{} received duplicate or misaddressed ready from {}\n",
+						hostnames_[machine_id_], hostnames_[source]);
+			if (ready.all() && !send.joinable())
+				send = std::thread(&DistributedGenerationalSearch::send_thread, this, std::ref(finisher));
+		};
+
+		//See comment at ready_buffer_ declaration.
+		for (std::uint8_t s : ready_buffer_)
+			processReady(s);
+		ready_buffer_.clear();
+
 		while (true) {
-			int flags = 0;
-			int count = 0;
-			//Partial reads are explicitly possible if the stack is "short on buffers".
-			//We disabled interleaving on this socket.
-			while (!(flags & MSG_EOR)) {
-				int delta = sctp_recvmsg(socket_, buf.begin()+count, buf.size(), nullptr, nullptr, &info, &flags);
-				if (delta < 0) //TODO: unlikely
-					perror("error receiving");
-				count += delta;
-			}
-			fmt::print("{} received a message with length {}\n", hostnames_[machine_id_], count);
+			AnyMsg msg = recv(buf.begin(), buf.size());
 
-			if (count == 1) { //finished message
-				auto peer = std::to_integer<unsigned int>(buf[0]);
-				finished[peer] = true;
-				fmt::print("{} received finish from {}\n", hostnames_[machine_id_], hostnames_[peer]);
-				if (finished.all()) break;
-				continue;
-			}
+			if (ControlMsg* c = std::get_if<ControlMsg>(&msg)) {
+				bool old;
+				switch (c->msg) {
+					case ControlMsg::READY:
+						processReady(c->source);
+						break;
 
-			std::size_t hash;
-			Provenance prov;
-			std::byte* pack = unbuild(buf.begin(), &hash, sizeof(hash));
-			pack = unbuild(pack, &prov, sizeof(prov));
-			//the usual append stuff:
-			if (!closed_.count(pack, hash)) {
-				auto size = packed_size(pack);
-				auto resize = count - sizeof(hash) - sizeof(prov);
-				auto rehash = packed_hash(pack);
-				fmt::print("{} {} {} {} {}\n", size, resize, hash, rehash, prov);
-				assert(size < pages_.page_size());
-				for (auto i : xrange(targets_.size())) {
-					const Target& t = targets_[i];
-					if (t.packed_hash == hash || t.mirror_packed_hash == hash)
-						fmt::print("found target {}: {}\n", i, prov);
+					case ControlMsg::FINISHED:
+						old = finished.test_set(c->source);
+						if (old) //TODO: unlikely
+							fmt::print("{} received duplicate or misaddressed finished from {}\n",
+									hostnames_[machine_id_], hostnames_[c->source]);
+						if (finished.all())
+							goto break_infinite_loop;
+						break;
+
+					default:
+						fmt::print("{} ignoring unexpected control message {} from {}\n",
+								hostnames_[machine_id_], c->msg, hostnames_[c->source]);
 				}
-				if (pages_.current_end() - cur_ < size)
-					cur_ = pages_.allocate();
-				Pack* pack_starts = cur_;
-				cur_ = std::copy(pack, pack + size, cur_);
-				closed_.insert(pack_starts); //TODO: use hash
-				curgen_.push_back(pack_starts);
-				provenance_.push_back(prov);
+			} else if (PackMsg* p = std::get_if<PackMsg>(&msg)) {
+				//the usual append stuff:
+				//TODO: maybe we can refactor this along with the nondistributed search's
+				if (!closed_.count(p->pack, p->hash)) {
+					auto size = packed_size(p->pack);
+//					auto resize = p->end - p->pack;
+//					auto rehash = packed_hash(p->pack);
+//					fmt::print("{} {} {} {} {}\n", size, resize, p->hash, rehash, p->prov);
+					assert(size < pages_.page_size());
+					for (auto i : xrange(targets_.size())) {
+						const Target& t = targets_[i];
+						if (t.packed_hash == p->hash || t.mirror_packed_hash == p->hash)
+							fmt::print("found target {}: {}\n", i, p->prov);
+					}
+					if (pages_.current_end() - cur_ < size)
+						cur_ = pages_.allocate();
+					Pack* pack_starts = cur_;
+					cur_ = std::copy(p->pack, p->pack + size, cur_);
+					closed_.insert(pack_starts); //TODO: use hash
+					curgen_.push_back(pack_starts);
+					provenance_.push_back(p->prov);
+				}
+			} else { //TODO: unlikely
+				fmt::print("unhandled message type in recv_thread?!");
+				std::exit(1);
 			}
 		}
+		break_infinite_loop:
+
+		send.join();
 	}
 
-	void send_finished(bool ready_for_votes = false) {
+	void broadcast_finished(bool ready_for_votes = false) {
 		fmt::print("{} finishing\n", hostnames_[machine_id_]);
-		//Broadcast to all nodes that we're done sending packs.  SCTP messages
-		//can't be empty, so this is a 1-byte message containing just our
-		//machine ID.  (We can't send this as a separate stream because it must
-		//be ordered with respect to the packs.)
-		sctp_sndrcvinfo info = {};
+		//Broadcast to all nodes that we're done sending packs.  This is ordered
+		//with respect to the packs because it's in the same stream.
 		for (auto i : xrange(assoc_.size())) {
 			//Node 0 has special handling.  At first we only message ourselves.
 			//Then when we're ready to accept votes (after receiving finished
@@ -980,71 +1016,142 @@ private:
 			//If this is the first broadcast, stop after messaging ourselves.
 			if (machine_id_ == 0 && i > 0 && !ready_for_votes) break;
 
-			info.sinfo_assoc_id = assoc_[i];
-			int sent = sctp_send(socket_, &machine_id_, sizeof(machine_id_), &info, MSG_EOR);
-			if (sent < 0) //TODO: unlikely
-				perror("sctp_send while sending finished message");
-			if (static_cast<std::size_t>(sent) < sizeof(machine_id_)) //TODO: unlikely
-				fmt::print("{} short finish write? wrote {} to {}\n", hostnames_[machine_id_], sent, hostnames_[i]);
+			send_control(ControlMsg::FINISHED, i);
 		}
 	}
 
 	void vote(bool want_subgen) {
-		std::array<std::uint8_t, 2> buf = {machine_id_, static_cast<std::uint8_t>(want_subgen ? 1 : 0)};
-		sctp_sndrcvinfo info = {};
-		info.sinfo_assoc_id = assoc_[0];
-		int sent = sctp_send(socket_, buf.data(), buf.size(), &info, MSG_EOR);
-		if (sent < 0) //TODO: unlikely
-			perror("sctp_send while sending vote");
-		if (static_cast<std::size_t>(sent) < buf.size()) //TODO: unlikely
-			fmt::print("{} short vote write? wrote {} of {}\n", hostnames_[machine_id_], sent, buf.size());
+		send_control(want_subgen ? ControlMsg::VOTE_AYE : ControlMsg::VOTE_NAY, 0);
 	}
 
 	void count_votes() {
 		boost::dynamic_bitset<std::size_t> voted(assoc_.size()), wants(assoc_.size());
-		dynarray<std::byte> buf(1024);
-		sctp_sndrcvinfo info = {};
 		while (true) {
-			int flags = 0;
-			int count = 0;
-			//Partial reads are explicitly possible if the stack is "short on buffers".
-			//We disabled interleaving on this socket.
-			while (!(flags & MSG_EOR)) {
-				int delta = sctp_recvmsg(socket_, buf.begin()+count, buf.size(), nullptr, nullptr, &info, &flags);
-				if (delta < 0) //TODO: unlikely
-					perror("error receiving, expecting vote");
-				count += delta;
-			}
-			if (count != 2) {
-				fmt::print("Unexpected message when collecting votes, len {}", count);
-				continue; //try to just skip it if it's a pack?
-			}
-
-			voted[std::to_integer<unsigned int>(buf[0])] = true;
-			wants[std::to_integer<unsigned int>(buf[0])] = std::to_integer<bool>(buf[1]);
+			ControlMsg m = recv_control();
+			unsigned int voter = m.source;
+			bool vote = m.msg == ControlMsg::VOTE_AYE;
+			fmt::print("vote: {} {} ({})\n", hostnames_[voter], vote, m.msg);
+			voted[voter] = true;
+			wants[voter] = vote;
 			if (voted.all())
 				break;
 		}
 
-		std::uint8_t result = wants.any();
-		for (auto i : xrange(assoc_.size())) {
-			info.sinfo_assoc_id = assoc_[i];
-			int sent = sctp_send(socket_, &result, sizeof(result), &info, MSG_EOR);
-			if (sent < 0) //TODO: unlikely
-				perror("sctp_send while sending result");
-			if (static_cast<std::size_t>(sent) < sizeof(result)) //TODO: unlikely
-				fmt::print("{} short result write? wrote {} to {}\n", hostnames_[machine_id_], sent, hostnames_[i]);
-		}
+		bool result = wants.any();
+		fmt::print("voting result is {}\n", result);
+		broadcast_control(result ? ControlMsg::RESULT_AYE : ControlMsg::RESULT_NAY);
 	}
 
 	bool learn_result() {
-		std::uint8_t result = 0;
+		while (true) {
+			ControlMsg m = recv_control();
+			//See comment at ready_buffer_ declaration.
+			if (m.msg == ControlMsg::READY) {
+				ready_buffer_.push_back(m.source);
+				continue;
+			}
+			if (m.source != 0 || (m.msg != ControlMsg::RESULT_AYE && m.msg != ControlMsg::RESULT_NAY)) //TODO: unlikely
+				fmt::print("{} got bad result message {} from {}\n", hostnames_[machine_id_], m.msg, hostnames_[m.source]);
+			return m.msg == ControlMsg::RESULT_AYE;
+		}
+	}
+
+	struct Msg {
+		sctp_assoc_t assoc;
+		std::uint8_t source;
+		//Other things we could put here if we start using them:
+//		std::uint16_t stream;
+//		std::uint32_t ppid;
+	};
+	struct PackMsg : Msg {
+		std::size_t hash;
+		Provenance prov;
+		std::byte* pack;
+		std::byte* end; //for redundant checks against packed_size
+	};
+	struct ControlMsg : Msg {
+		//ready to receive packs
+		constexpr static std::byte READY = std::byte{0};
+		//finished sending packs
+		constexpr static std::byte FINISHED = std::byte{1};
+		constexpr static std::byte VOTE_AYE = std::byte{2};
+		constexpr static std::byte VOTE_NAY = std::byte{3};
+		constexpr static std::byte RESULT_AYE = std::byte{4};
+		constexpr static std::byte RESULT_NAY = std::byte{5};
+		std::byte msg;
+	};
+	using AnyMsg = std::variant<PackMsg, ControlMsg>;
+
+	AnyMsg recv(std::byte* buf, std::size_t len) {
 		sctp_sndrcvinfo info = {};
 		int flags = 0;
-		int delta = sctp_recvmsg(socket_, &result, sizeof(result), nullptr, nullptr, &info, &flags);
-		if (delta <= 0) //TODO: unlikely
-			perror("error receiving, expecting result");
-		return result != 0;
+		unsigned int total_read = 0;
+		//Partial reads are explicitly possible if the stack is "short on buffers".
+		//We disabled interleaving on this socket.
+		while (!(flags & MSG_EOR)) {
+			//TODO: if the buffer's empty, complain and/or discard the partial packet
+			int delta_read = sctp_recvmsg(socket_, buf+total_read, len-total_read,
+					nullptr, nullptr, //we ignore the socket address in favor of the assoc id
+					&info, &flags);
+			if (delta_read < 0) //TODO: unlikely
+				perror("sctp_recvmsg");
+			total_read += delta_read;
+		}
+
+		if (total_read < 1) { //unlikely
+			fmt::print("{} received message too short {} from {}\n", hostnames_[machine_id_],
+					total_read, hostnames_[info.sinfo_context]);
+			std::exit(1); //dunno what to do here
+		}
+
+		if (total_read == 1) {
+			ControlMsg m = {};
+			common_msg_init(m, info);
+			m.msg = buf[0];
+			//TODO: check m.msg is valid message type
+			return m;
+		}
+
+		if (total_read < sizeof(PackMsg::hash) + sizeof(PackMsg::prov) + 4 /* min pack size */) { //unlikely
+			fmt::print("{} received message too short {} from {}\n", hostnames_[machine_id_],
+					total_read, hostnames_[info.sinfo_context]);
+			std::exit(1); //dunno what to do here
+		}
+
+		PackMsg m;
+		common_msg_init(m, info);
+		m.end = buf + total_read;
+		buf = unbuild(buf, &m.hash, sizeof(m.hash));
+		m.pack = unbuild(buf, &m.prov, sizeof(m.prov));
+		return m;
+	}
+	ControlMsg recv_control() {
+		std::byte buf;
+		AnyMsg m = recv(&buf, sizeof(buf));
+		if (auto pcm = std::get_if<ControlMsg>(&m))
+			return *pcm;
+		fmt::print("{} received pack when expecting control message\n", hostnames_[machine_id_]);
+		std::exit(1);
+	}
+
+	void send_control(std::byte msg, unsigned long dest) {
+		sctp_sndrcvinfo info = {};
+		info.sinfo_assoc_id = assoc_[dest];
+		int sent = sctp_send(socket_, &msg, sizeof(msg), &info, MSG_EOR);
+		if (sent < numeric_cast<int>(sizeof(msg))) {//TODO: unlikely
+			auto savederrno = errno;
+			fmt::print("Problem sending control message {} from {} to {}: {} {}\n",
+					msg, hostnames_[machine_id_], hostnames_[dest], msg, strerror(savederrno));
+		}
+	}
+	void broadcast_control(std::byte msg) {
+		for (auto i : xrange(assoc_.size()))
+			send_control(msg, i);
+	}
+
+	static void common_msg_init(Msg& m, sctp_sndrcvinfo& info) {
+		m.assoc = info.sinfo_assoc_id;
+		m.source = numeric_cast<std::uint8_t>(info.sinfo_context);
 	}
 
 	static std::byte* build(std::byte* dest, const void* src, int count) {
