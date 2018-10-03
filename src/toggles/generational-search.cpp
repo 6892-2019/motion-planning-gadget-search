@@ -895,30 +895,11 @@ private:
 		//the compiler out by truncating it here.  (C++'s promotion rules will
 		//still promote it to int, but that should be undoable.)
 		std::uint8_t modulus = numeric_cast<std::uint8_t>(assoc_.size());
-		sctp_sndrcvinfo info = {};
 		for (PackProv& p : finisher.nextgen) {
 			p.second.machineId = machine_id_; //produced here
-			auto size = packed_size(p.first);
 			auto hash = packed_hash(p.first);
-			if (size + sizeof(hash) + sizeof(p.second) > buf.size()) //TODO: unlikely macro
-				fmt::print("{} skipping oversized pack {}\n", hostnames_[machine_id_], size);
 			auto shard = hash % modulus;
-			info.sinfo_assoc_id = assoc_[shard];
-
-			auto next = build(buf.begin(), &hash, sizeof(hash));
-			next = build(next, &p.second, sizeof(p.second));
-			next = build(next, p.first, size);
-			std::size_t len = static_cast<std::size_t>(next - buf.begin());
-			if (len != size + sizeof(hash) + sizeof(p.second))
-				fmt::print("bad size in send {} {}\n", len, size + sizeof(hash) + sizeof(p.second));
-
-			int sent = sctp_send(socket_, buf.begin(), len, &info, MSG_EOR);
-			if (sent < 0) //TODO: unlikely
-				perror("sctp_send while sending packs");
-			if (static_cast<std::size_t>(sent) < len) //TODO: unlikely
-				fmt::print("{} short pack write? wrote {} of {}\n", hostnames_[machine_id_], sent, len);
-//			fmt::print("{} sent a message with length {}\n", hostnames_[machine_id_], sent);
-
+			send_pack(hash, p.second, p.first, shard, buf);
 			//TODO: we'd like to free pages from the Finisher when we can.
 		}
 
@@ -1152,6 +1133,26 @@ private:
 	static void common_msg_init(Msg& m, sctp_sndrcvinfo& info) {
 		m.assoc = info.sinfo_assoc_id;
 		m.source = numeric_cast<std::uint8_t>(info.sinfo_context);
+	}
+
+	void send_pack(std::size_t hash, Provenance prov, const std::byte* pack,
+			unsigned long shard, dynarray<std::byte>& buf) {
+		auto size = packed_size(pack);
+		if (size + sizeof(hash) + sizeof(prov) > buf.size()) //TODO: unlikely macro
+			fmt::print("{} skipping oversized pack {}\n", hostnames_[machine_id_], size);
+
+		auto next = build(buf.begin(), &hash, sizeof(hash));
+		next = build(next, &prov, sizeof(prov));
+		next = build(next, pack, size);
+		std::size_t len = static_cast<std::size_t>(next - buf.begin());
+
+		sctp_sndrcvinfo info = {};
+		info.sinfo_assoc_id = assoc_[shard];
+		int sent = sctp_send(socket_, buf.begin(), len, &info, MSG_EOR);
+		if (sent < 0) //TODO: unlikely
+			perror("sctp_send while sending packs");
+		if (static_cast<std::size_t>(sent) < len) //TODO: unlikely
+			fmt::print("{} short pack write? wrote {} of {}\n", hostnames_[machine_id_], sent, len);
 	}
 
 	static std::byte* build(std::byte* dest, const void* src, int count) {
