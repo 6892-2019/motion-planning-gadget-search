@@ -213,8 +213,8 @@ private:
 };
 
 struct Finisher {
-	Finisher(const ClosedSet* closed) : pages(16*1024*1024), cur(pages.allocate()), globalClosed(closed) {}
-	Finisher(const Finisher& f, tbb::split) : pages(16*1024*1024), cur(pages.allocate()), globalClosed(f.globalClosed) {}
+	Finisher(const ClosedSet* closed) : pages(1*1024*1024), cur(pages.allocate()), globalClosed(closed) {}
+	Finisher(const Finisher& f, tbb::split) : pages(1*1024*1024), cur(pages.allocate()), globalClosed(f.globalClosed) {}
 	vector<PackProv> nextgen;
 	PageHolder pages;
 	Pack* cur;
