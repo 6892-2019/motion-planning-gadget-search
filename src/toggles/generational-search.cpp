@@ -271,6 +271,7 @@ struct Finisher {
 			globalClosedPruned += rhs.globalClosedPruned;
 			localClosedPruned += rhs.localClosedPruned;
 			bytesAdopted += rhs.bytesAdopted;
+			return;
 		}
 
 //		Stopwatch stopwatch;
