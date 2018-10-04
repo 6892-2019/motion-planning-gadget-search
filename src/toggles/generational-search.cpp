@@ -801,6 +801,7 @@ private:
 	void send_thread(Finisher& finisher) {
 		//The send thread just blasts packs.
 
+		auto stopwatch = Stopwatch::thread();
 		//TODO: ideally we'd have iovec support so we didn't need this.
 		dynarray<std::byte> buf(1*1024*1024);
 		//Division instructions are faster when the divisor is small, so help
@@ -813,6 +814,10 @@ private:
 			auto shard = hash % modulus;
 			send_pack(hash, p.second, p.first, shard, buf);
 		});
+
+		auto elapsed = stopwatch.elapsed();
+		fmt::print("{} finished sending packs in {} {} {}\n", hostnames_[machine_id_],
+				elapsed.hms(), elapsed.userSeconds(), elapsed.systemSeconds());
 
 		broadcast_finished();
 	}
