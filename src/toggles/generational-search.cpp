@@ -171,9 +171,7 @@ struct Target {
 
 class PageHolder {
 public:
-	PageHolder(std::size_t desiredPageSize) : pageSize_(nallocx(desiredPageSize, 0)) {
-		allocate();
-	}
+	PageHolder(std::size_t desiredPageSize) : pageSize_(nallocx(desiredPageSize, 0)) {}
 	std::byte* current_begin() const {
 		return pages_.back().get();
 	}
