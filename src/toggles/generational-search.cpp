@@ -197,6 +197,17 @@ public:
 		//doesn't include the PageHolder itself
 		return page_size() * page_count();
 	}
+
+	std::size_t size() const {
+		return pages_.size();
+	}
+	std::pair<std::byte*, std::byte*> page_bounds(std::size_t p) const {
+		if (pages_[p]) return {pages_[p].get(), pages_[p].get() + page_size()};
+		return {nullptr, nullptr};
+	}
+	void release(std::size_t p) {
+		pages_[p].reset();
+	}
 private:
 	//should maybe be a small_vector?
 	std::vector<std::unique_ptr<std::byte, free_deleter>> pages_;
@@ -268,7 +279,7 @@ struct Finisher {
 
 		//If we're globally pruning, we did it already.
 		assert(((bool)globalClosed) == ((bool)rhs.globalClosed));
-		for (PackProv& p : rhs.nextgen) {
+		rhs.destructive_for_each_pack([&](PackProv& p) {
 			//We can either copy survivors to our PageHolder, or linear-search
 			//for and adopt their pages.  Assuming we committed packs in order,
 			//we'd only need to keep track of which is the current page and
@@ -288,7 +299,7 @@ struct Finisher {
 				bytesAdopted += size;
 			} else
 				++localClosedPruned;
-		}
+		});
 		globalClosedPruned += rhs.globalClosedPruned;
 		localClosedPruned += rhs.localClosedPruned;
 		//deliberately don't merge bytesAdopted
@@ -297,6 +308,36 @@ struct Finisher {
 //		fmt::print("Finisher::join took {}ms; left {} ({}), right {} ({}), now {} ({}).\n",
 //				timing.millis(), oldcount, oldbytes, rhs.nextgen.size(), rhs.bytesAdopted,
 //				nextgen.size(), bytesAdopted);
+	}
+
+	/**
+	 * Call the given callable for every PackProv in this->nextgen, freeing
+	 * pages when possible.
+	 */
+	template<class Callable>
+	void destructive_for_each_pack(Callable&& callable) {
+		//These pointers will become dangling, so may as well clear this now.
+		//(I guess we could erase each element after visiting it...)
+		localClosed = {};
+		cur = nullptr;
+
+		//We're assuming the packs are in the same order in the pages.
+		std::size_t pagenumber = 0;
+		auto pagebounds = pages.page_bounds(pagenumber);
+
+		for (auto i = nextgen.begin(), end = nextgen.end(); i != end;) {
+			callable(*i);
+			++i;
+			if (i == end || !(pagebounds.first <= i->first && i->first < pagebounds.second)) {
+				pages.release(pagenumber);
+				++pagenumber;
+				if (pagenumber < pages.size())
+					pagebounds = pages.page_bounds(pagenumber);
+			}
+		}
+		//dangling, so clear it now
+		nextgen.clear();
+		nextgen.shrink_to_fit();
 	}
 };
 
@@ -717,7 +758,7 @@ protected:
 //		auto oldClosedSize = closed_.size();
 
 		auto newStart = curgen_.size();
-		for (PackProv& p : finisher.nextgen) {
+		finisher.destructive_for_each_pack([&](PackProv& p) {
 			auto size = packed_size(p.first);
 //			sizeConsidered += size;
 			auto hash = packed_hash(p.first);
@@ -738,9 +779,7 @@ protected:
 				provenance_.push_back(p.second);
 //				sizeCommitted += size;
 			}
-			//TODO: we could reduce peak memory by freeing pages from the
-			//Finisher feeding us after we're done copying off of them.
-		}
+		});
 
 //		Stopwatch::Result timing = stopwatch.elapsed();
 //		fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
@@ -895,13 +934,12 @@ private:
 		//the compiler out by truncating it here.  (C++'s promotion rules will
 		//still promote it to int, but that should be undoable.)
 		std::uint8_t modulus = numeric_cast<std::uint8_t>(assoc_.size());
-		for (PackProv& p : finisher.nextgen) {
+		finisher.destructive_for_each_pack([&](PackProv& p) {
 			p.second.machineId = machine_id_; //produced here
 			auto hash = packed_hash(p.first);
 			auto shard = hash % modulus;
 			send_pack(hash, p.second, p.first, shard, buf);
-			//TODO: we'd like to free pages from the Finisher when we can.
-		}
+		});
 
 		broadcast_finished();
 	}
