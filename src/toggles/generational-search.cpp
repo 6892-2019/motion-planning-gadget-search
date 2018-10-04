@@ -721,7 +721,7 @@ protected:
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
 			parallel_reduce(tbb::blocked_range<std::size_t>(newStart, curgen_.size()),
 					maybe_owning_ptr<Finisher>(&finisher, false),
-					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+					indirect_split,
 					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
 						for (std::size_t i = r.begin(); i < r.end(); ++i) {
 							index_type sourceIndex = numeric_cast<index_type>(sourceIndexBase + (i-newStart));
@@ -731,9 +731,7 @@ protected:
 							connect(inflated, sourceIndex, locations, *finish);
 						}
 					},
-					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
-						lhs->join(*rhs);
-					});
+					indirect_join);
 			std::size_t produced = finisher.nextgen.size();
 			newStart = append(finisher);
 			Stopwatch::Result timing = subgenwatch.elapsed();
