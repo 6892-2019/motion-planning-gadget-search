@@ -7,22 +7,29 @@ static std::chrono::microseconds from_timeval(const timeval& tv) {
 	return std::chrono::seconds(tv.tv_sec) + std::chrono::microseconds(tv.tv_usec);
 }
 
-Stopwatch::Stopwatch() : data_() {}
+Stopwatch::Stopwatch(int getrusage_who) : data_(getrusage_who), getrusage_who_(getrusage_who) {}
+
+auto Stopwatch::Stopwatch::process() -> Stopwatch {
+	return Stopwatch(RUSAGE_SELF);
+}
+auto Stopwatch::Stopwatch::thread() -> Stopwatch {
+	return Stopwatch(RUSAGE_THREAD);
+}
 
 void Stopwatch::reset() {
-	data_ = StopwatchData();
+	data_ = StopwatchData(getrusage_who_);
 }
 
 Stopwatch::Result Stopwatch::elapsed() const {
 	//Imply to the compiler that it should make the system calls ASAP.
-	auto end = StopwatchData();
+	auto end = StopwatchData(getrusage_who_);
 	return {data_, end};
 }
 
 
-Stopwatch::StopwatchData::StopwatchData() : time(best_clock::now()) {
+Stopwatch::StopwatchData::StopwatchData(int getrusage_who) : time(best_clock::now()) {
 	usage = {};
-	getrusage(RUSAGE_SELF, &usage);
+	getrusage(getrusage_who, &usage);
 }
 
 

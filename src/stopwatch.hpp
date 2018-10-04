@@ -19,7 +19,7 @@ private:
 			std::chrono::high_resolution_clock,
 			std::chrono::steady_clock>;
 	struct StopwatchData {
-		StopwatchData();
+		StopwatchData(int getrusage_who);
 		best_clock::time_point time;
 		rusage usage;
 	};
@@ -61,7 +61,15 @@ public:
 		Duration cpuTime() const;
 	};
 
-	Stopwatch();
+	/**
+	 * Returns a Stopwatch providing process-level statistics.
+	 */
+	static Stopwatch process();
+	/**
+	 * Returns a Stopwatch providing thread-level statistics.  The returned
+	 * Stopwatch has thread affinity, of course.
+	 */
+	static Stopwatch thread();
 	/**
 	 * Resets the start point.
 	 */
@@ -73,7 +81,9 @@ public:
 	 */
 	Result elapsed() const;
 private:
+	Stopwatch(int getrusage_who);
 	StopwatchData data_;
+	int getrusage_who_;
 };
 
 #endif /* AUTOMATON_STOPWATCH_HPP_INCLUDED */

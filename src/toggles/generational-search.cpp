@@ -148,7 +148,7 @@ struct Finisher {
 			return;
 		}
 
-//		Stopwatch stopwatch;
+//		auto stopwatch = Stopwatch::process();
 //		auto oldbytes = bytesAdopted;
 //		auto oldcount = nextgen.size();
 
@@ -523,7 +523,7 @@ public:
 	}
 	virtual ~GenerationalSearch() = default;
 	void advance() {
-		Stopwatch stopwatch;
+		auto stopwatch = Stopwatch::process();
 		subgeneration_requested_ = generation_requested_ = false;
 		do_combine();
 		do_connect();
@@ -545,7 +545,7 @@ protected:
 	bool subgeneration_requested_ = false, generation_requested_ = false;
 
 	void do_combine() {
-		Stopwatch stopwatch;
+		auto stopwatch = Stopwatch::process();
 		Finisher finisher(&closed_);
 		if (generation_ == 0) {
 			assert(closed_.empty());
@@ -587,12 +587,12 @@ protected:
 	}
 
 	void do_connect() {
-		Stopwatch connectwatch;
+		auto connectwatch = Stopwatch::process();
 		std::size_t newStart = 0;
 		unsigned int subgeneration = 0;
 		std::size_t totalProduced = 0, totalGlobalPruned = 0, totalLocalPruned = 0;
 		while (subgeneration_requested_) {
-			Stopwatch subgenwatch;
+			auto subgenwatch = Stopwatch::process();
 			Finisher finisher(&closed_);
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
 			parallel_reduce(tbb::blocked_range<std::size_t>(newStart, curgen_.size()),
@@ -626,7 +626,7 @@ protected:
 	}
 
 	virtual std::size_t append(Finisher& finisher) {
-//		Stopwatch stopwatch;
+//		auto stopwatch = Stopwatch::process();
 //		std::size_t sizeConsidered = 0, sizeCommitted = 0;
 //		auto oldClosedSize = closed_.size();
 
@@ -721,7 +721,7 @@ public:
 		//obvious all-to-all here.)
 		for (unsigned int i = 0; i <= machine_id_; ++i) {
 			sctp_assoc_t assoc;
-			Stopwatch timer;
+			auto timer = Stopwatch::process();
 			int rc = 0, savederrno = 0;
 			//Wait a bit before giving up if the peer isn't listening yet.
 			do {
@@ -738,7 +738,7 @@ public:
 		//Get the association id for successors (that connected to us).  We'll
 		//retry this up to a timeout because we're racing the inbound connects.
 		for (unsigned int i = machine_id_+1; i < assoc_.size(); ++i) {
-			Stopwatch timer;
+			auto timer = Stopwatch::process();
 			do {
 				sctp_paddrinfo info = {};
 				std::memcpy(&info.spinfo_address, &addresses_[i], sizeof(sockaddr_in));
