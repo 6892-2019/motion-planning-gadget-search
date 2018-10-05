@@ -76,11 +76,11 @@ bool is_possibly_mirrored_rotation_permutation(Iter first, Iter last) {
 	auto theirzero = std::distance(first, zeroit);
 
 	dynarray<T> exemplar(size);
-	std::copy(boost::counting_iterator<T>(0), boost::counting_iterator<T>(static_cast<T>(size)), exemplar.begin());
+	std::iota(exemplar.begin(), exemplar.end(), static_cast<T>(0));
 	std::rotate(exemplar.rbegin(), exemplar.rbegin()+theirzero, exemplar.rend());
 	if (std::equal(first, last, exemplar.begin(), exemplar.end()))
 		return true;
-	std::copy(boost::counting_iterator<T>(0), boost::counting_iterator<T>(static_cast<T>(size)), exemplar.begin());
+	std::iota(exemplar.begin(), exemplar.end(), static_cast<T>(0));
 	std::reverse(exemplar.begin(), exemplar.end());
 	std::rotate(exemplar.begin(), exemplar.begin()+(size-theirzero-1), exemplar.end());
 	if (std::equal(first, last, exemplar.begin(), exemplar.end()))
