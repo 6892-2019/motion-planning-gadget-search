@@ -63,6 +63,8 @@
       <in>pack.hpp</in>
       <in>pinning.cpp</in>
       <in>precompiled-instantiations.cpp</in>
+      <in>stopwatch.cpp</in>
+      <in>stopwatch.hpp</in>
       <in>stringutils.cpp</in>
       <in>worker.cpp</in>
     </df>
