@@ -15,6 +15,8 @@
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
 #include <jemalloc/jemalloc.h>
+#include <ctime>
+#include <fmt/time.h>
 #include <boost/process/child.hpp>
 #include <boost/process/io.hpp>
 #include <unistd.h>
@@ -27,6 +29,15 @@ using std::vector;
 using std::pair;
 using std::string;
 using std::unique_ptr;
+
+static std::string localhostname() {
+	char name[HOST_NAME_MAX+1];
+	if (gethostname(name, sizeof(name))) {
+		perror("gethostname");
+		std::exit(1); //environment is not sane
+	}
+	return name;
+}
 
 typedef Automaton<8u> automaton_type;
 typedef pair<const Pack*, Provenance> PackProv;
@@ -1142,15 +1153,6 @@ private:
 		return src + count;
 	}
 
-	static std::string localhostname() {
-		char name[HOST_NAME_MAX+1];
-		if (gethostname(name, sizeof(name))) {
-			perror("gethostname");
-			std::exit(1); //environment is not sane
-		}
-		return name;
-	}
-
 	static sockaddr_in get_address(const std::string& hostname) {
 		//This assumes there's only going to be one address, or at least that
 		//the first one is all we need.
@@ -1189,6 +1191,9 @@ automaton_type automatonFromArg(std::string_view arg) {
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	setlinebuf(stdout);
+
+	std::time_t start_time = std::time(nullptr);
+	fmt::print("{} starting at {:%F %T} ({}).\n", localhostname(), *std::gmtime(&start_time), start_time);
 
 	std::vector<std::string> hosts;
 	if (const char* nodes = std::getenv("SLURM_STEP_NODELIST")) {
