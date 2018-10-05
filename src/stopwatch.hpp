@@ -18,8 +18,14 @@ private:
 	using best_clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady,
 			std::chrono::high_resolution_clock,
 			std::chrono::steady_clock>;
+	/**
+	 * Approximates the time of process start, to be used as the base time in
+	 * Result::aboslute().  Static-initialized to best_clock::now();
+	 */
+	const static best_clock::time_point beginning_of_time;
 	struct StopwatchData {
 		StopwatchData(int getrusage_who);
+		StopwatchData(best_clock::time_point t, rusage r);
 		best_clock::time_point time;
 		rusage usage;
 	};
@@ -57,6 +63,13 @@ public:
 
 		unsigned long voluntarySwitches() const;
 		unsigned long involuntarySwitches() const;
+
+		/**
+		 * Returns a Result holding absolute values at the time elapsed() was
+		 * called (instead of a delta between elapsed() and the Stopwatch's
+		 * construction).
+		 */
+		Result absolute() const;
 	private:
 		StopwatchData start_, end_;
 

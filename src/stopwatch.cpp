@@ -7,6 +7,8 @@ static std::chrono::microseconds from_timeval(const timeval& tv) {
 	return std::chrono::seconds(tv.tv_sec) + std::chrono::microseconds(tv.tv_usec);
 }
 
+const Stopwatch::best_clock::time_point Stopwatch::beginning_of_time = best_clock::now();
+
 Stopwatch::Stopwatch(int getrusage_who) : data_(getrusage_who), getrusage_who_(getrusage_who) {}
 
 auto Stopwatch::Stopwatch::process() -> Stopwatch {
@@ -31,6 +33,7 @@ Stopwatch::StopwatchData::StopwatchData(int getrusage_who) : time(best_clock::no
 	usage = {};
 	getrusage(getrusage_who, &usage);
 }
+Stopwatch::StopwatchData::StopwatchData(best_clock::time_point t, rusage r) : time(t), usage(r) {}
 
 
 Stopwatch::Result::Result(StopwatchData start, StopwatchData end) : start_(start), end_(end) {}
@@ -132,4 +135,9 @@ unsigned long Stopwatch::Result::voluntarySwitches() const {
 }
 unsigned long Stopwatch::Result::involuntarySwitches() const {
 	return end_.usage.ru_nivcsw - start_.usage.ru_nivcsw;
+}
+
+Stopwatch::Result Stopwatch::Result::absolute() const {
+	rusage zero_usage = {};
+	return {StopwatchData(Stopwatch::beginning_of_time, zero_usage), end_};
 }
