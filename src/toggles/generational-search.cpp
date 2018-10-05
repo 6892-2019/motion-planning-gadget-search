@@ -1188,6 +1188,8 @@ automaton_type automatonFromArg(std::string_view arg) {
 }
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
+	setlinebuf(stdout);
+
 	std::vector<std::string> hosts;
 	if (const char* nodes = std::getenv("SLURM_STEP_NODELIST")) {
 		boost::process::ipstream pipe;
