@@ -1214,7 +1214,6 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	for (auto name : output_tokens)
 		outputs.emplace_back(name, automatonFromArg(name));
 
-	unique_ptr<GenerationalSearch> gs;
 	if (hosts.size() <= 1) {
 		//running locally (inside or outside of SLURM doesn't matter)
 		GenerationalSearch gs(inputs, outputs);
