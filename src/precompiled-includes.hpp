@@ -14,7 +14,6 @@
 #include <sparsehash/sparse_hash_map>
 #include "dynarray.hpp"
 #include "linear_set.hpp"
-#include "bounded_queue.hpp"
 #include "circular_deque.hpp"
 
 #include <algorithm>

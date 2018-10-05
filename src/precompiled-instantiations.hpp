@@ -29,8 +29,6 @@ AUTOMATA_EXTERN_TEMPLATE template class dynarray<std::pair<unsigned int, unsigne
 
 AUTOMATA_EXTERN_TEMPLATE template class linear_set<unsigned int>;
 
-AUTOMATA_EXTERN_TEMPLATE template class bounded_queue<std::function<void()>>;
-
 #include <boost/preprocessor/seq/for_each.hpp>
 //https://stackoverflow.com/a/35999754/3614835
 #define UNPACK_COMMA_TYPE( ... ) __VA_ARGS__
