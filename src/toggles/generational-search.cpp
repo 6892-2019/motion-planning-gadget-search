@@ -768,9 +768,9 @@ public:
 			do {
 				rc = sctp_connectx(socket_, (sockaddr*)&addresses_[i], 1, &assoc);
 				savederrno = errno;
-			} while (rc && savederrno == ECONNREFUSED && timer.elapsed().seconds() < 3);
+			} while (rc && savederrno == ECONNREFUSED && timer.elapsed().seconds() < 10);
 			if (rc) {
-				fmt::print("sctp_connectx: {} ({})\n", strerror(savederrno), savederrno);
+				fmt::print("sctp_connectx: {} ({}) to {}\n", strerror(savederrno), savederrno, hostnames_[i]);
 				std::exit(1);
 			}
 			assoc_[i] = assoc;
@@ -786,7 +786,7 @@ public:
 				socklen_t length = sizeof(info);
 				if (getsockopt(socket_, SOL_SCTP, SCTP_GET_PEER_ADDR_INFO, &info, &length) >= 0)
 					assoc_[i] = info.spinfo_assoc_id;
-			} while (assoc_[i] == std::numeric_limits<sctp_assoc_t>::max() && timer.elapsed().seconds() < 3);
+			} while (assoc_[i] == std::numeric_limits<sctp_assoc_t>::max() && timer.elapsed().seconds() < 10);
 			if (assoc_[i] == std::numeric_limits<sctp_assoc_t>::max()) {
 				fmt::print("{}: unable to get assoc id for {}\n", localhost, hostnames_[i]);
 				std::exit(1);
