@@ -15,9 +15,12 @@
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
 #include <jemalloc/jemalloc.h>
-#include <boost/process.hpp>
+#include <boost/process/child.hpp>
+#include <boost/process/io.hpp>
 #include <unistd.h>
+#include <netinet/in.h>
 #include <netinet/sctp.h>
+#include <netdb.h>
 
 using namespace automaton;
 using std::vector;
