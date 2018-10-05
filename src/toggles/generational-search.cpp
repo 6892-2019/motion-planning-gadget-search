@@ -687,6 +687,33 @@ public:
 			std::exit(1);
 		}
 
+		//By default the send and receive buffers can get to tens of gigabytes.
+		//We'll use 256MB (so we pass half that, see man socket(7)).  That's
+		//still probably too big, but the failure mode should be less severe.
+		//This is per-socket, not per-association.  Per-association limits would
+		//help us avoid blocking on a straggling node, but only if we had a
+		//separate send/recv thread per peer node.  (Note that RFC6458 says
+		//SO_SNDBUF is per-association.  Random mailing lists say it's different
+		//on the Linux SCTP implementation.  See also
+		///proc/sys/net/sctp/{snd,rcv}buf_policy.)
+		int buffer_size = 128*1024*1024;
+		for (auto opt : {SO_SNDBUF, SO_RCVBUF}) {
+			int old_size = 0;
+			socklen_t how_big_is_an_int = numeric_cast<socklen_t>(sizeof(old_size));
+			if (getsockopt(socket_, SOL_SOCKET, opt, &old_size, &how_big_is_an_int) < 0) {
+				auto savederrno = errno;
+				fmt::print("getsockopt {}: {}\n", opt, savederrno);
+				std::exit(1);
+			}
+			//Linux doubles it after setting it, so we multiply our new size by 2.
+			if (old_size < 2*buffer_size) continue;
+			if (setsockopt(socket_, SOL_SOCKET, opt, &buffer_size, sizeof(buffer_size)) < 0) {
+				auto savederrno = errno;
+				fmt::print("setsockopt {}: {}\n", opt, savederrno);
+				std::exit(1);
+			}
+		}
+
 		//We need this to get sndrcvinfo filled in later.
 		sctp_event_subscribe events = {};
 		events.sctp_data_io_event = 1;
