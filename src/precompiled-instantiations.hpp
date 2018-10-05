@@ -19,8 +19,6 @@ AUTOMATA_EXTERN_TEMPLATE template class boost::dynamic_bitset<std::size_t>;
 AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
 AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_map<std::tuple<unsigned int, unsigned int, bool>, unsigned int, boost::hash<std::tuple<unsigned int, unsigned int, bool>>>;
 
-AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_set<unsigned int>;
-
 AUTOMATA_EXTERN_TEMPLATE template class google::sparse_hash_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
 
 AUTOMATA_EXTERN_TEMPLATE template class dynarray<int>;

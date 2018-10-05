@@ -202,20 +202,6 @@ struct LazyEdgeEnumerator {
 	}
 };
 
-//live_states is a reasonable public function, but we only use it when removing
-//dead states, so we'll put it in detail for now
-/**
- * Returns a set of the live states of this automaton.  A state is live iff
- * it is contained in a path from the initial state to an accept state.
- * @return the set of live states
- */
-google::dense_hash_set<state_type> live_states(const AutomatonBase& a);
-
-std::pair<dynarray<state_type>, dynarray<state_type>> find_dead_state_renumbering(const AutomatonBase& a,
-		const decltype(live_states(a))& live);
-
-void determinize_into(const AutomatonBase& source, AutomatonBase& target);
-
 ExplodedAutomaton determinize_explode(const AutomatonBase& source);
 void removeDeadStates(ExplodedAutomaton& a);
 void renumber(ExplodedAutomaton& a, const dynarray<state_type>& numbering);

@@ -11,7 +11,6 @@
 #include <boost/container/small_vector.hpp>
 #include <boost/dynamic_bitset.hpp>
 #include <sparsehash/dense_hash_map>
-#include <sparsehash/dense_hash_set>
 #include <sparsehash/sparse_hash_set>
 #include <sparsehash/sparse_hash_map>
 #include "dynarray.hpp"
