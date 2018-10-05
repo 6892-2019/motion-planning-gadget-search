@@ -889,6 +889,9 @@ private:
 			processReady(s);
 		ready_buffer_.clear();
 
+		auto stopwatch = Stopwatch::thread();
+		unsigned int received = 0, pruned = 0, appended = 0;
+		std::size_t bytesReceived = 0, bytesPruned = 0, bytesAppended = 0;
 		while (true) {
 			AnyMsg msg = recv(buf.begin(), buf.size());
 
@@ -913,13 +916,12 @@ private:
 								hostnames_[machine_id_], c->msg, hostnames_[c->source]);
 				}
 			} else if (PackMsg* p = std::get_if<PackMsg>(&msg)) {
-				//the usual append stuff:
-				//TODO: maybe we can refactor this along with the nondistributed search's
+				//The standard append stuff.  Hard to usefully refactor with the
+				//normal search because they're looping a Finisher and we aren't.
+				++received;
+				auto size = packed_size(p->pack);
+				bytesReceived += size;
 				if (!closed_.count(p->pack, p->hash)) {
-					auto size = packed_size(p->pack);
-//					auto resize = p->end - p->pack;
-//					auto rehash = packed_hash(p->pack);
-//					fmt::print("{} {} {} {} {}\n", size, resize, p->hash, rehash, p->prov);
 					assert(size < pages_.page_size());
 					for (auto i : xrange(targets_.size())) {
 						const Target& t = targets_[i];
@@ -933,6 +935,11 @@ private:
 					closed_.insert(pack_starts); //TODO: use hash
 					curgen_.push_back(pack_starts);
 					provenance_.push_back(p->prov);
+					++appended;
+					bytesAppended += size;
+				} else {
+					++pruned;
+					bytesPruned += size;
 				}
 			} else { //TODO: unlikely
 				fmt::print("unhandled message type in recv_thread?!");
@@ -940,6 +947,17 @@ private:
 			}
 		}
 		break_infinite_loop:
+
+		auto elapsed = stopwatch.elapsed(), absolute = elapsed.absolute();
+		fmt::print("{} received {} packs ({} MB) in {}: "
+					"pruned {} ({} MB), appended {} ({} MB). "
+					"Closed size {}, resident {:.2f} GB (+{:.2f} GB). "
+					"{} seconds ({} user, {} system), {} switches ({} soft, {} hard).\n",
+				hostnames_[machine_id_], received, bytesReceived / (1024*1024), elapsed.hms(),
+				pruned, bytesPruned / (1024*1024), appended, bytesAppended / (1024 * 1024),
+				closed_.size(), absolute.highwaterGibibytes(), elapsed.highwaterGibibytes(),
+				elapsed.cpuSeconds(), elapsed.userSeconds(), elapsed.systemSeconds(),
+				elapsed.switches(), elapsed.voluntarySwitches(), elapsed.involuntarySwitches());
 
 		send.join();
 	}
