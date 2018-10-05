@@ -838,16 +838,30 @@ private:
 		//the compiler out by truncating it here.  (C++'s promotion rules will
 		//still promote it to int, but that should be undoable.)
 		std::uint8_t modulus = numeric_cast<std::uint8_t>(assoc_.size());
+		unsigned int packs = 0, loopbackPacks = 0;
+		std::size_t packBytes = 0, loopbackPackBytes = 0;
 		finisher.destructive_for_each_pack([&](PackProv& p) {
 			p.second.machineId = machine_id_; //produced here
+			auto size = packed_size(p.first);
 			auto hash = packed_hash(p.first);
 			auto shard = hash % modulus;
 			send_pack(hash, p.second, p.first, shard, buf);
+			++packs;
+			packBytes += size;
+			if (shard == machine_id_) {
+				++loopbackPacks;
+				loopbackPackBytes += size;
+			}
 		});
 
 		auto elapsed = stopwatch.elapsed();
-		fmt::print("{} finished sending packs in {} {} {}\n", hostnames_[machine_id_],
-				elapsed.hms(), elapsed.userSeconds(), elapsed.systemSeconds());
+		fmt::print("{} finished sending packs in {}. "
+					"{} packs ({} MB), {} loopback ({} MB); "
+					"{} seconds ({} user, {} system), {} switches ({} soft, {} hard).\n",
+				hostnames_[machine_id_], elapsed.hms(),
+				packs, packBytes / (1024*1024), loopbackPacks, loopbackPackBytes / (1024*1024),
+				elapsed.cpuSeconds(), elapsed.userSeconds(), elapsed.systemSeconds(),
+				elapsed.switches(), elapsed.voluntarySwitches(), elapsed.involuntarySwitches());
 
 		broadcast_finished();
 	}

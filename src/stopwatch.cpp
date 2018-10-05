@@ -123,6 +123,9 @@ double Stopwatch::Result::highwaterGibibytes() const {
 	return (double)(end_.usage.ru_maxrss - start_.usage.ru_maxrss) / (1024*1024);
 }
 
+unsigned long Stopwatch::Result::faults() const {
+	return softFaults() + hardFaults();
+}
 unsigned long Stopwatch::Result::softFaults() const {
 	return end_.usage.ru_minflt - start_.usage.ru_minflt;
 }
@@ -130,6 +133,9 @@ unsigned long Stopwatch::Result::hardFaults() const {
 	return end_.usage.ru_majflt - start_.usage.ru_majflt;
 }
 
+unsigned long Stopwatch::Result::switches() const {
+	return voluntarySwitches() + involuntarySwitches();
+}
 unsigned long Stopwatch::Result::voluntarySwitches() const {
 	return end_.usage.ru_nvcsw - start_.usage.ru_nvcsw;
 }

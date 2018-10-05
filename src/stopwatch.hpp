@@ -58,9 +58,11 @@ public:
 		unsigned long highwaterBytes() const;
 		double highwaterGibibytes() const;
 
+		unsigned long faults() const;
 		unsigned long softFaults() const;
 		unsigned long hardFaults() const;
 
+		unsigned long switches() const;
 		unsigned long voluntarySwitches() const;
 		unsigned long involuntarySwitches() const;
 
