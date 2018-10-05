@@ -112,3 +112,24 @@ double Stopwatch::Result::utilization() const {
 	//We can tolerate the potential loss of precision here.
 	return static_cast<double>(cpuNanos()) / static_cast<double>(nanos());
 }
+
+unsigned long Stopwatch::Result::highwaterBytes() const {
+	return (end_.usage.ru_maxrss - start_.usage.ru_maxrss) * 1024;
+}
+double Stopwatch::Result::highwaterGibibytes() const {
+	return (double)(end_.usage.ru_maxrss - start_.usage.ru_maxrss) / (1024*1024);
+}
+
+unsigned long Stopwatch::Result::softFaults() const {
+	return end_.usage.ru_minflt - start_.usage.ru_minflt;
+}
+unsigned long Stopwatch::Result::hardFaults() const {
+	return end_.usage.ru_majflt - start_.usage.ru_majflt;
+}
+
+unsigned long Stopwatch::Result::voluntarySwitches() const {
+	return end_.usage.ru_nvcsw - start_.usage.ru_nvcsw;
+}
+unsigned long Stopwatch::Result::involuntarySwitches() const {
+	return end_.usage.ru_nivcsw - start_.usage.ru_nivcsw;
+}

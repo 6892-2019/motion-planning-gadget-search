@@ -48,6 +48,15 @@ public:
 		unsigned long cpuNanos() const;
 
 		double utilization() const;
+
+		unsigned long highwaterBytes() const;
+		double highwaterGibibytes() const;
+
+		unsigned long softFaults() const;
+		unsigned long hardFaults() const;
+
+		unsigned long voluntarySwitches() const;
+		unsigned long involuntarySwitches() const;
 	private:
 		StopwatchData start_, end_;
 
