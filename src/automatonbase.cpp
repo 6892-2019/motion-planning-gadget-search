@@ -143,7 +143,7 @@ AutomatonBase::SymbolSet AutomatonBase::activeAlphabet() const {
 
 bool AutomatonBase::run(std::initializer_list<symbol_type> string) const {
 	//Breadth-first search.
-	std::unordered_set<state_type> current, next;
+	tsl::hopscotch_set<state_type> current, next;
 	current.insert(0); //TODO: assuming 0 is the initial state
 	for (unsigned int symbol : string) {
 		for (state_type c : current)

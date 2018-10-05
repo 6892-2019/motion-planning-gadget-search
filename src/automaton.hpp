@@ -68,7 +68,7 @@ public:
 private:
 	BackingMap map_;
 };
-using UnorderedConjMap = MapConjMap<std::unordered_map<std::pair<state_type, state_type>,
+using UnorderedConjMap = MapConjMap<tsl::hopscotch_map<std::pair<state_type, state_type>,
 		state_type, boost::hash<std::pair<state_type, state_type>>>>;
 using SparseConjMap = MapConjMap<google::sparse_hash_map<std::pair<state_type, state_type>,
 		state_type, boost::hash<std::pair<state_type, state_type>>>>;
