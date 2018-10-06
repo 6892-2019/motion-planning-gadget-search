@@ -9,6 +9,8 @@
 #define EXPR_HPP
 
 #include <iosfwd>
+#include <atomic>
+#include <boost/intrusive_ptr.hpp>
 
 namespace automaton {
 namespace impl {

@@ -24,7 +24,6 @@
 #include <regex>
 #include "algoutils.hpp"
 
-#include <atomic>
 #include <thread>
 
 #include <iostream>
@@ -32,7 +31,6 @@
 #include <iomanip>
 
 #include <memory>
-#include <boost/intrusive_ptr.hpp>
 #include <utility>
 #include <type_traits>
 #include <boost/integer.hpp>
