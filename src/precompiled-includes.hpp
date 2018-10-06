@@ -22,8 +22,6 @@
 #include <boost/range/irange.hpp>
 #include "algoutils.hpp"
 
-#include <thread>
-
 #include <iostream>
 #include <iomanip>
 
