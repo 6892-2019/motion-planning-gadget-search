@@ -11,6 +11,7 @@
 #include "precompiled.hpp"
 #include "automatonbase.hpp"
 #include "bitset.hpp"
+#include "n_copies_iterator.hpp"
 
 //uncomment the line below to enable debugging logging expressions
 //#define AUTOMATON_DEBUG(expr) do {expr;} while(0);
@@ -1008,18 +1009,13 @@ Automaton<N> maybe(const Automaton<N>& a) {
 }
 template<unsigned int N>
 Automaton<N> nCopies(const Automaton<N>& a, unsigned int count) {
-	std::vector<const Automaton<N>*> v(count, &a);
-	return cat(boost::make_indirect_iterator(v.begin()),
-					boost::make_indirect_iterator(v.end()));
+	n_copies_range r(a, count);
+	return cat(r.begin(), r.end());
 }
 template<unsigned int N>
 Automaton<N> nOrMore(const Automaton<N>& a, unsigned int min) {
 	if (min == 0) return star(a);
-	std::vector<const Automaton<N>*> v(min, &a);
-	Automaton<N> rest = star(a);
-	v.push_back(&rest);
-	return cat(boost::make_indirect_iterator(v.begin()),
-					boost::make_indirect_iterator(v.end()));
+	return cat(nCopies(a, min), star(a));
 }
 template<unsigned int N>
 Automaton<N> range(const Automaton<N>& a, unsigned int min, unsigned int max) {

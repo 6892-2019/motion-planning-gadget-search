@@ -216,6 +216,8 @@
           </incDir>
         </ccTool>
       </item>
+      <item path="src/n_copies_iterator.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/natural_map.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
           <incDir>

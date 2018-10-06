@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <random>
-#include <boost/iterator/indirect_iterator.hpp>
 #include <boost/range/iterator_range_core.hpp>
 #include <boost/range/irange.hpp>
 #include "algoutils.hpp"
