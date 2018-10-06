@@ -21,7 +21,6 @@
 #include <boost/iterator/indirect_iterator.hpp>
 #include <boost/range/iterator_range_core.hpp>
 #include <boost/range/irange.hpp>
-#include <regex>
 #include "algoutils.hpp"
 
 #include <thread>

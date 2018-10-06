@@ -4,6 +4,7 @@
 #include "canonicalize.hpp"
 #include "ops.hpp"
 #include "stringutils.hpp"
+#include <regex>
 
 using namespace automaton;
 
