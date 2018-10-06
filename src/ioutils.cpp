@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "ioutils.hpp"
+#include <fstream>
 
 using std::vector;
 using std::string;
