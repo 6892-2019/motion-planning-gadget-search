@@ -578,15 +578,17 @@ protected:
 					},
 					indirect_join);
 		}
+		Stopwatch::Result timing = stopwatch.elapsed();
+		//Can't report closed set size here because we haven't added yet.
+		fmt::print("Finished computing combine {} in {} ({}); "
+				"produced {}, globally pruned {}, locally pruned {}, "
+				"max resident {:.2f} GiB (+{:.2f}).\n",
+				generation_, timing.hms(), timing.utilization(), finisher.nextgen.size(),
+				finisher.globalClosedPruned, finisher.localClosedPruned,
+				timing.absolute().highwaterGibibytes(), timing.highwaterGibibytes());
+
 		curgen_.clear();
 		append(finisher);
-
-		Stopwatch::Result timing = stopwatch.elapsed();
-		//TODO: total size, summary stats of produced or the entire closed set?
-		fmt::print("Finished combine {} in {} ({}); "
-				"produced {}, globally pruned {}, locally pruned {}, closed size {}.\n",
-				generation_, timing.hms(), timing.utilization(), curgen_.size(),
-				finisher.globalClosedPruned, finisher.localClosedPruned, closed_.size());
 	}
 
 	void combine_once(const Pack* source, index_type sourceIndex, Finisher& finishAction) {
@@ -623,11 +625,14 @@ protected:
 					},
 					indirect_join);
 			std::size_t produced = finisher.nextgen.size();
-			newStart = append(finisher);
 			Stopwatch::Result timing = subgenwatch.elapsed();
-			fmt::print("Finished connect {}.{} in {} ({}); produced {}, globally pruned {}, locally pruned {}, closed size {}.\n",
-				generation_, subgeneration, timing.hms(), timing.utilization(),
-				produced, finisher.globalClosedPruned, finisher.localClosedPruned, closed_.size());
+			fmt::print("Finished computing connect {}.{} in {} ({}); "
+					"produced {}, globally pruned {}, locally pruned {}, "
+					"max resident {:.2f} GiB (+{:.2f}).\n",
+					generation_, subgeneration, timing.hms(), timing.utilization(),
+					produced, finisher.globalClosedPruned, finisher.localClosedPruned,
+					timing.absolute().highwaterGibibytes(), timing.highwaterGibibytes());
+			newStart = append(finisher);
 			++subgeneration;
 			totalProduced += produced;
 			totalGlobalPruned += finisher.globalClosedPruned;
@@ -640,14 +645,15 @@ protected:
 	}
 
 	virtual std::size_t append(Finisher& finisher) {
-//		auto stopwatch = Stopwatch::process();
-//		std::size_t sizeConsidered = 0, sizeCommitted = 0;
-//		auto oldClosedSize = closed_.size();
-
 		auto newStart = curgen_.size();
+
+		auto stopwatch = Stopwatch::process();
+		std::size_t sizeConsidered = 0, sizeCommitted = 0;
+		auto oldClosedSize = closed_.size();
+		auto considered = finisher.nextgen.size();
 		finisher.destructive_for_each_pack([&](PackProv& p) {
 			auto size = packed_size(p.first);
-//			sizeConsidered += size;
+			sizeConsidered += size;
 			auto hash = packed_hash(p.first);
 			//If we're globally pruning in Finisher, this should always succeed.
 			if (!closed_.count(p.first, hash)) {
@@ -664,15 +670,16 @@ protected:
 				closed_.insert(pack_starts); //TODO: use hash
 				curgen_.push_back(pack_starts);
 				provenance_.push_back(p.second);
-//				sizeCommitted += size;
+				sizeCommitted += size;
 			}
 		});
 
-//		Stopwatch::Result timing = stopwatch.elapsed();
-//		fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
-//				timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
-//				next.size(), sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
-//				((double)(closed_.size() - oldClosedSize))/next.size(), ((double)sizeCommitted)/sizeConsidered);
+		Stopwatch::Result timing = stopwatch.elapsed();
+		if (considered > 0) //cut down on log spam
+			fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
+					timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
+					considered, sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
+					((double)(closed_.size() - oldClosedSize))/(double)considered, ((double)sizeCommitted)/(double)sizeConsidered);
 		subgeneration_requested_ = curgen_.size() != newStart;
 		generation_requested_ |= subgeneration_requested_;
 		return newStart;
