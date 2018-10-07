@@ -885,6 +885,7 @@ private:
 	}
 
 	void recv_thread(Finisher& finisher) {
+		auto stopwatch = Stopwatch::thread();
 		//The recv thread attempts to insert received packs.  It also does some
 		//bookkeeping: it waits for all nodes to be ready before launching the
 		//send thread, and terminates when all nodes have finished sending packs.
@@ -898,16 +899,23 @@ private:
 			if (old) //TODO: unlikely
 				fmt::print("{} received duplicate or misaddressed ready from {}\n",
 						hostnames_[machine_id_], hostnames_[source]);
-			if (ready.all() && !send.joinable())
+			if (ready.all() && !send.joinable()) {
 				send = std::thread(&DistributedGenerationalSearch::send_thread, this, std::ref(finisher));
+				fmt::print("{} starting send thread, {} after recv\n",
+						hostnames_[machine_id_], stopwatch.elapsed().hms());
+			}
 		};
 
 		//See comment at ready_buffer_ declaration.
-		for (std::uint8_t s : ready_buffer_)
+		std::vector<std::string> already_ready;
+		for (std::uint8_t s : ready_buffer_) {
 			processReady(s);
+			already_ready.push_back(hostnames_[s]);
+		}
 		ready_buffer_.clear();
+		fmt::print("{} starting recv, {} nodes already ready: {}\n",
+				hostnames_[machine_id_], already_ready.size(), already_ready);
 
-		auto stopwatch = Stopwatch::thread();
 		unsigned int received = 0, pruned = 0, appended = 0;
 		std::size_t bytesReceived = 0, bytesPruned = 0, bytesAppended = 0;
 		while (true) {
@@ -917,6 +925,8 @@ private:
 				bool old;
 				switch (c->msg) {
 					case ControlMsg::READY:
+						fmt::print("{} received ready from {} after {}\n",
+								hostnames_[machine_id_], hostnames_[c->source], stopwatch.elapsed().hms());
 						processReady(c->source);
 						break;
 
@@ -981,7 +991,7 @@ private:
 	}
 
 	void broadcast_finished(bool ready_for_votes = false) {
-		fmt::print("{} finishing\n", hostnames_[machine_id_]);
+		auto stopwatch = Stopwatch::thread();
 		//Broadcast to all nodes that we're done sending packs.  This is ordered
 		//with respect to the packs because it's in the same stream.
 		for (auto i : xrange(assoc_.size())) {
@@ -991,10 +1001,19 @@ private:
 			//If we're finishing an earlier broadcast, skip messaging ourselves
 			if (machine_id_ == 0 && i == 0 && ready_for_votes) continue;
 			//If this is the first broadcast, stop after messaging ourselves.
-			if (machine_id_ == 0 && i > 0 && !ready_for_votes) break;
+			if (machine_id_ == 0 && i > 0 && !ready_for_votes) return;
+
+			auto individual = Stopwatch::thread();
 
 			send_control(ControlMsg::FINISHED, i);
+
+			auto individual_time = individual.elapsed();
+			if (individual_time.seconds() > 3)
+				fmt::print("{} took {} to send finished to {}\n",
+						hostnames_[machine_id_], individual_time.hms(), hostnames_[i]);
 		}
+
+		fmt::print("{} broadcast finish in {}\n", hostnames_[machine_id_], stopwatch.elapsed().hms());
 	}
 
 	void vote(bool want_subgen) {
@@ -1002,12 +1021,19 @@ private:
 	}
 
 	void count_votes() {
+		auto stopwatch = Stopwatch::thread();
 		boost::dynamic_bitset<std::size_t> voted(assoc_.size()), wants(assoc_.size());
 		while (true) {
 			ControlMsg m = recv_control();
 			unsigned int voter = m.source;
 			bool vote = m.msg == ControlMsg::VOTE_AYE;
-			fmt::print("vote: {} {} ({})\n", hostnames_[voter], vote, m.msg);
+
+			if (m.msg != ControlMsg::VOTE_AYE && m.msg != ControlMsg::VOTE_NAY) {//TODO: unlikely
+				fmt::print("bad vote {} from {}\n", m.msg, hostnames_[voter]);
+				continue; //maybe they'll vote again, properly?
+			}
+
+			fmt::print("vote: {} {} (after {})\n", hostnames_[voter], vote, stopwatch.elapsed().hms());
 			voted[voter] = true;
 			wants[voter] = vote;
 			if (voted.all())
@@ -1015,7 +1041,7 @@ private:
 		}
 
 		bool result = wants.any();
-		fmt::print("voting result is {}\n", result);
+		fmt::print("voting result is {}; voting took {}\n", result, stopwatch.elapsed().hms());
 		broadcast_control(result ? ControlMsg::RESULT_AYE : ControlMsg::RESULT_NAY);
 	}
 
