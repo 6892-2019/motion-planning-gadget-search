@@ -52,7 +52,7 @@ struct Puzzle {
 	vector<Coord> terminals;
 };
 
-using CoordSet = std::unordered_set<Coord, boost::hash<const Coord>>;
+using CoordSet = tsl::hopscotch_set<Coord, boost::hash<const Coord>>;
 void findPathsRecurse(const CoordSet& vertices, Coord target, vector<Coord>& path,
 		CoordSet& pathSet, vector<vector<Coord>>& results) {
 	if (path.back() == target) {

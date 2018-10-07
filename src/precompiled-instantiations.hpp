@@ -12,20 +12,12 @@ AUTOMATA_EXTERN_TEMPLATE template class std::vector<std::vector<bool>>;
 AUTOMATA_EXTERN_TEMPLATE template class std::vector<std::uint8_t>;
 AUTOMATA_EXTERN_TEMPLATE template class std::vector<std::pair<unsigned int, unsigned int>>;
 
-AUTOMATA_EXTERN_TEMPLATE template class std::unordered_set<unsigned int>;
-AUTOMATA_EXTERN_TEMPLATE template class std::unordered_set<std::size_t>;
-
-AUTOMATA_EXTERN_TEMPLATE template class std::unordered_map<linear_set<unsigned int>, unsigned int>;
-AUTOMATA_EXTERN_TEMPLATE template class std::unordered_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
-
 AUTOMATA_EXTERN_TEMPLATE template class std::tuple<unsigned int, unsigned int, bool>;
 
 AUTOMATA_EXTERN_TEMPLATE template class boost::dynamic_bitset<std::size_t>;
 
 AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
 AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_map<std::tuple<unsigned int, unsigned int, bool>, unsigned int, boost::hash<std::tuple<unsigned int, unsigned int, bool>>>;
-
-AUTOMATA_EXTERN_TEMPLATE template class google::dense_hash_set<unsigned int>;
 
 AUTOMATA_EXTERN_TEMPLATE template class google::sparse_hash_map<std::pair<unsigned int, unsigned int>, unsigned int, boost::hash<std::pair<unsigned int, unsigned int>>>;
 
@@ -36,8 +28,6 @@ AUTOMATA_EXTERN_TEMPLATE template class dynarray<std::pair<unsigned int, unsigne
 //TODO: dynarray<bitset> (symbol_mask_type)
 
 AUTOMATA_EXTERN_TEMPLATE template class linear_set<unsigned int>;
-
-AUTOMATA_EXTERN_TEMPLATE template class bounded_queue<std::function<void()>>;
 
 #include <boost/preprocessor/seq/for_each.hpp>
 //https://stackoverflow.com/a/35999754/3614835

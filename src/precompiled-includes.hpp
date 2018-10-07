@@ -2,8 +2,8 @@
 #include <array>
 #include <vector>
 #include <boost/circular_buffer.hpp>
-#include <unordered_set>
-#include <unordered_map>
+#include <hopscotch/hopscotch_set.h>
+#include <hopscotch/hopscotch_map.h>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -11,35 +11,21 @@
 #include <boost/container/small_vector.hpp>
 #include <boost/dynamic_bitset.hpp>
 #include <sparsehash/dense_hash_map>
-#include <sparsehash/dense_hash_set>
-#include <sparsehash/sparse_hash_set>
 #include <sparsehash/sparse_hash_map>
 #include "dynarray.hpp"
 #include "linear_set.hpp"
-#include "bounded_queue.hpp"
 #include "circular_deque.hpp"
 
 #include <algorithm>
 #include <random>
-#include <boost/iterator/counting_iterator.hpp>
-#include <boost/iterator/indirect_iterator.hpp>
 #include <boost/range/iterator_range_core.hpp>
 #include <boost/range/irange.hpp>
-#include <regex>
 #include "algoutils.hpp"
 
-#include <atomic>
-#include <thread>
-#include <future>
-#include <mutex>
-#include <condition_variable>
-
 #include <iostream>
-#include <fstream>
 #include <iomanip>
 
 #include <memory>
-#include <boost/intrusive_ptr.hpp>
 #include <utility>
 #include <type_traits>
 #include <boost/integer.hpp>
