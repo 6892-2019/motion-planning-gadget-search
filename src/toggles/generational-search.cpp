@@ -1145,8 +1145,11 @@ private:
 		sctp_sndrcvinfo info = {};
 		info.sinfo_assoc_id = assoc_[shard];
 		int sent = sctp_send(socket_, buf.begin(), len, &info, MSG_EOR);
-		if (sent < 0) //TODO: unlikely
-			perror("sctp_send while sending packs");
+		if (sent < 0) { //TODO: unlikely
+			auto savederrno = errno;
+			fmt::print("sctp_send while sending a pack of len {}, hash {}, prov {} to {}: {} ({})\n",
+					len, hash, prov, hostnames_[shard], strerror(savederrno), savederrno);
+		}
 		if (static_cast<std::size_t>(sent) < len) //TODO: unlikely
 			fmt::print("{} short pack write? wrote {} of {}\n", hostnames_[machine_id_], sent, len);
 	}
