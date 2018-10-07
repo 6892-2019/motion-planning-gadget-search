@@ -103,8 +103,8 @@ private:
 };
 
 struct Finisher {
-	Finisher(const ClosedSet* closed) : pages(1*1024*1024), cur(pages.allocate()), globalClosed(closed) {}
-	Finisher(const Finisher& f, tbb::split) : pages(1*1024*1024), cur(pages.allocate()), globalClosed(f.globalClosed) {}
+	Finisher(const ClosedSet* closed) : pages(1*1024*1024), cur(nullptr), globalClosed(closed) {}
+	Finisher(const Finisher& f, tbb::split) : pages(1*1024*1024), cur(nullptr), globalClosed(f.globalClosed) {}
 	vector<PackProv> nextgen;
 	PageHolder pages;
 	Pack* cur;
@@ -113,6 +113,8 @@ struct Finisher {
 	unsigned int globalClosedPruned = 0, localClosedPruned = 0;
 	std::size_t bytesAdopted = 0;
 	void operator()(automaton_type&& a, Provenance p) {
+		if (!cur) cur = pages.allocate();
+
 		canonicalize(a, a.active_alphabet_size());
 		Pack* new_cur = pack(a, cur, pages.current_end());
 		if (!new_cur) {
@@ -148,7 +150,7 @@ struct Finisher {
 			//You'd think this shouldn't happen, but it does, both due to global
 			//pruning and TBB's overzealous splitting.
 			assert(localClosed.empty());
-			assert(cur == pages.current_begin());
+			assert(cur == nullptr || cur == pages.current_begin());
 			assert(localClosedPruned == 0);
 			assert(bytesAdopted == 0);
 			nextgen = std::move(rhs.nextgen);
@@ -205,6 +207,7 @@ struct Finisher {
 	 */
 	template<class Callable>
 	void destructive_for_each_pack(Callable&& callable) {
+		if (!cur) return; //never lazy-init'd, so no packs
 		//These pointers will become dangling, so may as well clear this now.
 		//(I guess we could erase each element after visiting it...)
 		localClosed = {};
