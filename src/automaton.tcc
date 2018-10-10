@@ -324,6 +324,10 @@ bool Automaton<AlphabetSize>::isEmpty() {
 template<unsigned int AlphabetSize>
 void Automaton<AlphabetSize>::determinize() {
 	if (deterministic()) return;
+	MAYBE_UNUSED auto initial_active = active_alphabet_size();
+	MAYBE_UNUSED auto initial_states = state_size();
+	MAYBE_UNUSED auto initial_trans = transition_size();
+
 	//TODO: I can't see any way to do this in-place, but it might be better
 	//to store an edge list instead, clear, and commit back into *this, or pass
 	//*this but build an edge list, then clear and replay the edge list into *this.
@@ -332,7 +336,12 @@ void Automaton<AlphabetSize>::determinize() {
 	MAYBE_UNUSED std::size_t oldsize = state_size();
 	*this = std::move(a);
 	assert(deterministic());
-	AUTOMATON_DEBUG(std::cout << "determinize: " << oldsize << " -> " << state_size() << std::endl);
+
+	MAYBE_UNUSED double det_state_blowup = ((double)state_size()) / initial_states,
+			det_trans_blowup = ((double)transition_size()) / (double)initial_trans;
+//	fmt::print("{} {} {} -> {} {} ({:.1f}/{:.1f})\n",
+//			initial_active, initial_states, initial_trans,
+//			state_size(), transition_size(), det_state_blowup, det_trans_blowup);
 }
 
 template<unsigned int AlphabetSize>
@@ -377,6 +386,10 @@ void Automaton<AlphabetSize>::minimize() {
 		assert(deterministic());
 		return;
 	}
+	MAYBE_UNUSED auto initial_active = active_alphabet_size();
+	MAYBE_UNUSED auto initial_states = state_size();
+	MAYBE_UNUSED auto initial_trans = transition_size();
+
 	detail::ExplodedAutomaton exp = detail::determinize_explode(*this);
 	//All states in the result of determinize_explode are reachable.  If none of
 	//them are accepting, we're done.
@@ -384,6 +397,8 @@ void Automaton<AlphabetSize>::minimize() {
 		*this = empty<AlphabetSize>();
 		return;
 	}
+	MAYBE_UNUSED auto det_states = exp.state_size;
+	MAYBE_UNUSED auto det_trans = exp.edges.size();
 	//The Java library explicitly checks for the all-strings automaton here,
 	//but it doesn't seem to be necessary.
 	//Java totalizes the automaton here (then removes the added state in
@@ -399,8 +414,9 @@ void Automaton<AlphabetSize>::minimize() {
 		*this = epsilon<AlphabetSize>();
 		return;
 	}
+	MAYBE_UNUSED auto rds_states = exp.state_size;
+	MAYBE_UNUSED auto rds_trans = exp.edges.size();
 
-	MAYBE_UNUSED std::size_t oldsize = state_size();
 	dynarray<state_type> res = detail::hopcroft(exp);
 	clear();
 	this->deterministic_ = false; //for speed when imploding; we set it below
@@ -410,7 +426,16 @@ void Automaton<AlphabetSize>::minimize() {
 		implode(*this, exp);
 	deterministic_ = minimal_ = true;
 
-	AUTOMATON_DEBUG(std::cout << "minimize: " << oldsize << " -> " << state_size() << std::endl);
+	MAYBE_UNUSED double det_state_blowup = ((double)det_states) / initial_states,
+			det_trans_blowup = ((double)det_trans) / (double)initial_trans,
+			min_state_blowup = ((double)state_size()) / initial_states,
+			min_trans_blowup = ((double)transition_size()) / (double)initial_trans;
+//	fmt::print("{} {} {} -> {} {} ({:.1f}/{:.1f}) -> {} {} -> {} {} {} ({:.1f}/{:.1f})\n",
+//			initial_active, initial_states, initial_trans,
+//			det_states, det_trans, det_state_blowup, det_trans_blowup,
+//			rds_states, rds_trans,
+//			active_alphabet_size(), state_size(), transition_size(), min_state_blowup, min_trans_blowup);
+
 #ifndef NDEBUG
 	//make sure hopcroft didn't screw up
 	for (state_type s = 0; s < state_size(); ++s)
