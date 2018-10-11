@@ -236,6 +236,10 @@
           </incDir>
         </ccTool>
       </item>
+      <item path="src/nfa-optimize.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/nfa-optimize.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/nonogram/nonogram.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="1">
         </ccTool>
