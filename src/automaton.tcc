@@ -1,4 +1,5 @@
 #include "hopcroft.hpp"
+#include "nfa-optimize.hpp"
 #include <sparsehash/dense_hash_set>
 
 namespace automaton {
@@ -488,6 +489,22 @@ void Automaton<AlphabetSize>::canonicalize() {
 	renumberStates(enumerator.renumbering.begin());
 	prepareForEquals();
 	canonical_ = true;
+}
+
+template<unsigned int AlphabetSize>
+void Automaton<AlphabetSize>::optimize() {
+	if (deterministic()) {
+		minimize();
+		return;
+	}
+	detail::OptimizeResult res = detail::optimize_for_renumber(*this);
+	if (res.newSize == detail::OptimizeResult::ALL)
+		*this = all<AlphabetSize>();
+	else if (res.newSize == detail::OptimizeResult::EMPTY)
+		*this = empty<AlphabetSize>();
+	else if (res.newSize == state_size())
+		return;
+	compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
 }
 
 template<unsigned int AlphabetSize>

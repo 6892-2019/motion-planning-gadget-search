@@ -25,6 +25,16 @@ Automaton<N> minimizePreservesLanguage(const Automaton<N>& p) {
 	//TODO: generate and print witnesses
 	return q;
 }
+template<unsigned int N>
+Automaton<N> optimizePreservesLanguage(const Automaton<N>& p) {
+	CHECK_UNARY_FALSE(p.deterministic()); //optimize() is just minimize() if it's deterministic
+	auto q = p;
+	q.optimize();
+	auto cmp = compare_languages(p, q);
+	CHECK_UNARY(cmp.equal());
+	//TODO: generate and print witnesses
+	return q;
+}
 
 TEST_CASE("AutomatonTest_Clone") {
 	auto a = range<2>(lit<2>(0), 2, 6);
@@ -77,7 +87,9 @@ TEST_CASE("AutomatonTest_Determinize07") {
 	auto posMultOf3 = plus<2>(nCopies<2>(any<2>(), 3));
 	determinizePreservesLanguage(conj<2>(posMultOf3, nCopies<2>(any<2>(), 6))); //finitePosMultOf3
 }
-TEST_CASE("AutomatonTest_Determinize08") {
+
+namespace {
+Automaton<2> pathologicalZeroZeroAlt() {
 	//An automaton with pathologically many alternatives of 0, 0, to stress the
 	//set-paging stuff in determinize.
 	Automaton<2> a;
@@ -90,7 +102,12 @@ TEST_CASE("AutomatonTest_Determinize08") {
 		a.addTrans(0, 0, s);
 		a.addTrans(s, 0, 1);
 	}
-	determinizePreservesLanguage(a);
+	return a;
+}
+}
+
+TEST_CASE("AutomatonTest_Determinize08") {
+	determinizePreservesLanguage(pathologicalZeroZeroAlt());
 }
 
 TEST_CASE("AutomatonTest_Totalize") {
@@ -669,4 +686,9 @@ TEST_CASE("AutomatonTest_MakeWorking") {
 	CHECK_EQ(make_working(2)->alphabet_size(), 2);
 	CHECK_EQ(make_working(4)->alphabet_size(), 4);
 	CHECK_EQ(make_working(8)->alphabet_size(), 8);
+}
+
+TEST_CASE("AutomatonTest_Optimize01") {
+	auto opt = optimizePreservesLanguage(pathologicalZeroZeroAlt());
+	CHECK_EQ(opt.state_size(), 3);
 }

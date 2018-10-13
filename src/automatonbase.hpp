@@ -309,6 +309,7 @@ public:
 	virtual void determinize() = 0;
 	virtual void minimize() = 0;
 	virtual void canonicalize() = 0;
+	virtual void optimize() = 0;
 	virtual void swapStateNumbers(state_type a, state_type b) = 0;
 	virtual std::size_t working_hash() const = 0;
 	using AutomatonBase::addTrans;

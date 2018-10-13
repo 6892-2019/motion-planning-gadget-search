@@ -422,6 +422,13 @@ public:
 		canonical_ = true;
 	}
 
+	/**
+	 * If this automaton is known to be deterministic, minimizes it; otherwise,
+	 * tries to reduce the size of this automaton in ways that don't require
+	 * determinizing it.
+	 */
+	void optimize() override;
+
 private:
 	template<class RandomAccessIterator>
 	static symbol_mask_type renumberAlphabet(symbol_mask_type cur, RandomAccessIterator map) {
