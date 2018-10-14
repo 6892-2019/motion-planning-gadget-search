@@ -386,7 +386,7 @@ private:
 			std::vector<typename decltype(partitions_)::iterator> bounds = {
 				partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
 			}, newbounds;
-			for (symbol_type s = 0; s < alphabet_size_; ++s) {
+			for (symbol_type s : active_alphabet_) {
 				newbounds.clear();
 				for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
 					newbounds.push_back(bounds[i]);
