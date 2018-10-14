@@ -438,7 +438,9 @@ private:
 			list = splitters_.insert_after(list, i);
 		//initially all in the same splitter
 		partitionToSplitter_.assign(partitionBounds_.size(), head);
-		waiting_.push_back(head);
+		//All states might be in the same partition.
+		if (splitters_.has_next(head))
+			waiting_.push_back(head);
 	}
 
 	void initializeInv(std::vector<Edge>& edgelist) {
