@@ -692,3 +692,32 @@ TEST_CASE("AutomatonTest_Optimize01") {
 	auto opt = optimizePreservesLanguage(pathologicalZeroZeroAlt());
 	CHECK_EQ(opt.state_size(), 3);
 }
+
+TEST_CASE("AutomatonTest_Optimize02") {
+	Automaton<2> none;
+	none.addState();
+	none.addState();
+	none.addState();
+	none.addTrans(0, 0, 1);
+	none.addTrans(0, 0, 2);
+	auto opt = optimizePreservesLanguage(none);
+	CHECK_EQ(opt.state_size(), 1);
+	CHECK_UNARY_FALSE(opt.accept(0));
+}
+
+TEST_CASE("AutomatonTest_Optimize03") {
+	Automaton<2> every;
+	every.addState();
+	every.addState();
+	every.setAccept(0);
+	every.setAccept(1);
+	every.addTrans(0, 0, 0);
+	every.addTrans(0, 1, 0);
+	every.addTrans(0, 0, 1);
+	every.addTrans(0, 1, 1);
+	every.addTrans(1, 0, 1);
+	every.addTrans(1, 1, 1);
+	auto opt = optimizePreservesLanguage(every);
+	CHECK_EQ(opt.state_size(), 1);
+	CHECK_UNARY(opt.accept(0));
+}

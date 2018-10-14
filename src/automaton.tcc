@@ -504,7 +504,8 @@ void Automaton<AlphabetSize>::optimize() {
 		*this = empty<AlphabetSize>();
 	else if (res.newSize == state_size())
 		return;
-	compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
+	else
+		compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
 }
 
 template<unsigned int AlphabetSize>

@@ -363,18 +363,22 @@ private:
 		if (nonfinalIdx == partitions_.size())
 			return false;
 
+		//hopcroft builds the edge list first because we can cheaply check if a
+		//DFA is total.  NFA totality checking requires iterating the states, so
+		//doing it now lets us skip the edge list for all-strings automata.
+		auto staterange = xrange(state_size_);
+		bool crashed = active_alphabet_.size() < alphabet_size_ ||
+				std::any_of(staterange.begin(), staterange.end(), [&](state_type s){
+					return a_.outgoing(s).size() != alphabet_size_;
+				});
+		if ((finalIdx+1) == 0U && !crashed)
+			return false;
+
 		std::vector<Edge> edgelist;
-		edgelist.reserve(state_size_ * alphabet_size_ + 1);
+		edgelist.reserve(inv_.size() + 1); //we add a sentinel edge in initializeInv
 		a_.for_each_transition([&edgelist](state_type from, symbol_type on, state_type to) {
 			edgelist.push_back({from, on, to});
 		});
-		bool crashed = edgelist.size() != state_size_ * alphabet_size_;
-		//We need to know if we crashed (equivalently, if we're not total), and
-		//testing whether we're total requires iterating all the states anyway,
-		//so we'll wait until after building the edgelist on the assumption that
-		//trivial automata are uncommon.
-		if ((finalIdx+1) == 0U && !crashed)
-			return false;
 
 		if (crashed) {
 			//Because we didn't totalize, we need to manually partition
