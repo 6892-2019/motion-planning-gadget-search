@@ -750,3 +750,32 @@ TEST_CASE("AutomatonTest_Optimize05") {
 	CHECK_EQ(opt.state_size(), 1);
 	CHECK_UNARY(opt.accept(0));
 }
+
+TEST_CASE("AutomatonTest_Optimize06") {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	optimizePreservesLanguage(shuf);
+}
+
+TEST_CASE("AutomatonTest_Optimize07") {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	Automaton<8> enlarged(shuf);
+	optimizePreservesLanguage(enlarged);
+}
+
+TEST_CASE("AutomatonTest_Optimize08") {
+	auto noop = star(alt(lit<4>(0, 0), lit<4>(1, 1), lit<4>(2, 2), lit<4>(3, 3)));
+	auto ltr = alt(lit<4>(0, 1), lit<4>(3, 2)), rtl = alt(lit<4>(1, 0), lit<4>(2, 3));
+	auto parallelToggleBase = alt(epsilon<4>(), ltr, star(cat(ltr, rtl)), cat(ltr, star(cat(rtl, ltr))));
+	auto shuf = shuffleAccept(noop, parallelToggleBase);
+	Automaton<8> enlarged(shuf);
+	constexpr auto MISS = std::numeric_limits<AutomatonBase::state_type>::max();
+	auto renumbering = {MISS, MISS, 0u, 1u, MISS, 2u, 3u, MISS};
+	enlarged.renumberAlphabet(renumbering.begin());
+	optimizePreservesLanguage(enlarged);
+}
