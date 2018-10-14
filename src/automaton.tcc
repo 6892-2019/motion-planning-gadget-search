@@ -391,7 +391,14 @@ void Automaton<AlphabetSize>::minimize() {
 	MAYBE_UNUSED auto initial_states = state_size();
 	MAYBE_UNUSED auto initial_trans = transition_size();
 
-	detail::ExplodedAutomaton exp = detail::determinize_explode(*this);
+	auto max_states = std::max(initial_states * 3, 5000u);
+	auto max_bytes = 64*1024*1024;
+	std::optional<detail::ExplodedAutomaton> opt = detail::determinize_explode(*this, max_states, max_bytes);
+	if (!opt) {
+		optimize();
+		opt = detail::determinize_explode(*this); //no limits this time
+	}
+	detail::ExplodedAutomaton& exp = *opt;
 	//All states in the result of determinize_explode are reachable.  If none of
 	//them are accepting, we're done.
 	if (exp.accept.empty()) {

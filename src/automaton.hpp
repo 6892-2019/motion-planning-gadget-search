@@ -203,7 +203,9 @@ struct LazyEdgeEnumerator {
 	}
 };
 
-ExplodedAutomaton determinize_explode(const AutomatonBase& source);
+std::optional<ExplodedAutomaton> determinize_explode(const AutomatonBase& source,
+		state_type max_states = std::numeric_limits<state_type>::max(),
+		std::size_t max_bytes = std::numeric_limits<std::size_t>::max());
 void removeDeadStates(ExplodedAutomaton& a);
 void renumber(ExplodedAutomaton& a, const dynarray<state_type>& numbering);
 void implode(AutomatonBase& dest, const ExplodedAutomaton& source);
