@@ -418,8 +418,9 @@ private:
 
 		std::vector<Edge> edgelist;
 		edgelist.reserve(inv_.size() + 1); //we add a sentinel edge in initializeInv
-		a_.for_each_transition([&edgelist](state_type from, symbol_type on, state_type to) {
+		a_.for_each_transition([&](state_type from, symbol_type on, state_type to) {
 			edgelist.push_back({from, on, to});
+			++counts_[{0, on, from}];
 		});
 
 		if (crashed) {
@@ -458,8 +459,10 @@ private:
 			//signalling this separately, but as we won't actually run the loop
 			//we can skip some work.
 			return true;
+		//We depend on the first splitter being number 0 when we're initializing
+		//counts while building the edgelist, so check it.
+		assert(waiting_.front() == 0);
 		initializeStateToPartition();
-		initializeCounts();
 		initializeInv(edgelist);
 		//TODO: we can reassert this when inv_ is lazily sized
 //			assert(invEltsIdx == inv_.size());
@@ -489,22 +492,6 @@ private:
 		//All states might be in the same partition.
 		if (splitters_.has_next(head))
 			waiting_.push_back(head);
-	}
-
-	void initializeCounts() {
-		//Initially everything's in a single splitter.
-		assert(waiting_.size() == 1);
-		offset_type splitter = waiting_.front();
-		vector<state_type> countsPerSymbol(alphabet_size_);
-		for (state_type s : xrange(state_size_)) {
-			std::fill(countsPerSymbol.begin(), countsPerSymbol.end(), 0);
-			a_.for_each_transition(s, [&](symbol_type on, state_type to) {
-				++countsPerSymbol[on];
-			});
-			for (symbol_type a : active_alphabet_)
-				if (countsPerSymbol[a] > 0)
-					counts_[{splitter, a, s}] = countsPerSymbol[a];
-		}
 	}
 
 	void initializeInv(std::vector<Edge>& edgelist) {
