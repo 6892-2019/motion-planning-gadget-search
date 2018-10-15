@@ -108,11 +108,17 @@ private:
 public:
 	NFAOptimizer(const AutomatonBase& a) :
 			a_(a), state_size_(a.state_size()), alphabet_size_(a.alphabet_size()),
-			active_alphabet_(a.activeAlphabet()), partitions_(state_size_), partitionBounds_(),
-			stateToPartition_(state_size_), inv_(a.transition_size()),
-			invStart_(state_size_ * (alphabet_size_ + 1)), splitters_(state_size_),
-			waiting_(), partitionToSplitter_(), move_(state_size_), moveMarks_(state_size_),
-			moveSize_(), suspects_() {
+			transition_size_(a.transition_size()), active_alphabet_(a.activeAlphabet()),
+			partitions_(state_size_), partitionBounds_(), stateToPartition_(state_size_),
+			inv_(transition_size_), invStart_(state_size_ * (alphabet_size_ + 1)),
+			splitters_(state_size_), waiting_(), partitionToSplitter_(),
+			move_(state_size_), moveMarks_(state_size_), moveSize_(), suspects_(),
+			//hopscotch_map's arg is the bucket count, not the expected number of
+			//elements, so we need to divide by the max load factor.  (It will
+			//allocate in the default constructor, so we can't just call reserve
+			//in the ctor body.)
+			counts_((std::size_t)std::ceil(double(transition_size_)/0.88f))
+			{
 		active_alphabet_.sort();
 	}
 
@@ -128,6 +134,7 @@ private:
 	const AutomatonBase& a_;
 	state_type state_size_;
 	symbol_type alphabet_size_;
+	std::size_t transition_size_;
 	SymbolSet active_alphabet_;
 	//Every partition contains at least one state, so there can only be as
 	//many partitions as states.
@@ -417,7 +424,7 @@ private:
 			return false;
 
 		std::vector<Edge> edgelist;
-		edgelist.reserve(inv_.size() + 1); //we add a sentinel edge in initializeInv
+		edgelist.reserve(transition_size_ + 1); //we add a sentinel edge in initializeInv
 		a_.for_each_transition([&](state_type from, symbol_type on, state_type to) {
 			edgelist.push_back({from, on, to});
 			++counts_[{0, on, from}];
