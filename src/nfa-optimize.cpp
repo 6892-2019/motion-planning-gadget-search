@@ -495,9 +495,16 @@ private:
 		//Initially everything's in a single splitter.
 		assert(waiting_.size() == 1);
 		offset_type splitter = waiting_.front();
-		for (state_type s : xrange(state_size_))
+		vector<state_type> countsPerSymbol(alphabet_size_);
+		for (state_type s : xrange(state_size_)) {
+			std::fill(countsPerSymbol.begin(), countsPerSymbol.end(), 0);
+			a_.for_each_transition(s, [&](symbol_type on, state_type to) {
+				++countsPerSymbol[on];
+			});
 			for (symbol_type a : active_alphabet_)
-				counts_.insert_or_assign({splitter, a, s}, a_.step(s, a).size());
+				if (countsPerSymbol[a] > 0)
+					counts_[{splitter, a, s}] = countsPerSymbol[a];
+		}
 	}
 
 	void initializeInv(std::vector<Edge>& edgelist) {
