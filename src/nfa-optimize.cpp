@@ -479,8 +479,6 @@ private:
 	void initializeStateToPartition() {
 		for (state_type p = 0; p < partitionBounds_.size(); ++p) {
 			auto bounds = partitionBounds_[p];
-			//Sort for locality when accessing stateToPartition_.
-			std::sort(partitions_.begin() + bounds.first, partitions_.begin() + bounds.second);
 			for (state_type i = bounds.first; i != bounds.second; ++i)
 				stateToPartition_[partitions_[i]] = {p, i};
 		}
