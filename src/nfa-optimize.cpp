@@ -153,6 +153,14 @@ private:
 	boost::dynamic_bitset<std::size_t> moveMarks_;
 	std::vector<state_type> moveSize_;
 	std::vector<state_type> suspects_;
+	//The counts map is necessary for O(m log n) runtime.  For each splitter and
+	//symbol, we store the number of occurences of each state in the inverse of
+	//all states in the splitter under that symbol.  A count not in the map is
+	//zero (and we erase when a count reaches zero).  The sum of the counts
+	//across all symbols is transition_size_.  We continue to store counts for
+	//singleton splitters because they might get refined later.
+	using count_key = std::tuple<offset_type, symbol_type, state_type>;
+	tsl::hopscotch_map<count_key, state_type, boost::hash<count_key>> counts_;
 
 	void coreLoop() {
 		while (!waiting_.empty()) {
@@ -160,8 +168,7 @@ private:
 			for (symbol_type a : active_alphabet_) {
 				collect(refiner, a);
 				refine();
-				//TODO: If we maintain the counts we can skip the scan here.
-				collect(remainder, a);
+				collect(refiner, remainder, a);
 				refine();
 			}
 		}
@@ -192,18 +199,50 @@ private:
 		return {refiner, remainder};
 	}
 
-	void collect(offset_type splitter, symbol_type symbol) {
-		//TODO: if we build counts, we'd do it here
+	void collect(offset_type refiner, symbol_type symbol) {
 		moveMarks_.reset();
 		suspects_.clear();
 		//This was copied in from hopcroft, except that we iterate over every
 		//partition in the splitter.
-		for (offset_type offset = splitter; offset != NodeList::INV; offset = splitters_.next(offset)) {
+		for (offset_type offset = refiner; offset != NodeList::INV; offset = splitters_.next(offset)) {
+			state_type part = splitters_[offset];
+			for (state_type target : partition(part))
+				for (state_type source : inverseStep(target, symbol)) {
+					++counts_[{refiner, symbol, source}];
+					if (moveMarks_.test_set(source))
+						continue; //some other transition already caused this state to move
+					state_type invPart = stateToPartition_[source].first;
+					//TODO: if partitionSize(invPart) == 1, we shouldn't bother
+					//adding it to suspects (and checking it later).  This might
+					//be important for no-op re-minimization of large automata,
+					//to avoid unnecessarily growing suspects_.  (Test first.)
+					if (moveSize_[invPart] == 0) //only add to suspects if not already present
+						suspects_.push_back(invPart);
+					move_[partitionBounds_[invPart].first + (moveSize_[invPart]++)] = source;
+					assert(moveSize_[invPart] <= partitionSize(invPart));
+				}
+		}
+	}
+
+	void collect(offset_type refiner, offset_type remainder, symbol_type symbol) {
+		moveMarks_.reset();
+		suspects_.clear();
+		//This was copied in from hopcroft, except that we iterate over every
+		//partition in the splitter.
+		for (offset_type offset = refiner; offset != NodeList::INV; offset = splitters_.next(offset)) {
 			state_type part = splitters_[offset];
 			for (state_type target : partition(part))
 				for (state_type source : inverseStep(target, symbol)) {
 					if (moveMarks_.test_set(source))
 						continue; //some other transition already caused this state to move
+					auto rem_count = counts_.find({remainder, symbol, source});
+					assert(rem_count != counts_.end()); //can't be 0/absent
+					rem_count.value() -= counts_[{refiner, symbol, source}];
+					if (rem_count->second > 0)
+						continue; //not in E^-1(B) - E^-1(S - B)
+					else
+						counts_.erase(rem_count); //and proceed to move
+
 					state_type invPart = stateToPartition_[source].first;
 					//TODO: if partitionSize(invPart) == 1, we shouldn't bother
 					//adding it to suspects (and checking it later).  This might
@@ -223,6 +262,9 @@ private:
 			if (moveSize_[part] < partitionSize(part))
 				split(part);
 				//hopcroft would add to the waiting set here, but we did that in split().
+				//For the first collect (wrt B), only D_1 can be split in the
+				//next collect (wrt S-B), per Paige/Tarjan (Lemma 3 (3)).  We
+				//could remember the D_1 here and filter collect's suspects.
 			moveSize_[part] = 0;
 		}
 	}
@@ -410,8 +452,14 @@ private:
 			moveSize_.push_back(0);
 		}
 
-		initializeStateToPartition();
 		initializeSplitters();
+		if (waiting_.empty())
+			//We're all-strings on some but not all symbols.  It isn't worth
+			//signalling this separately, but as we won't actually run the loop
+			//we can skip some work.
+			return true;
+		initializeStateToPartition();
+		initializeCounts();
 		initializeInv(edgelist);
 		//TODO: we can reassert this when inv_ is lazily sized
 //			assert(invEltsIdx == inv_.size());
@@ -441,6 +489,15 @@ private:
 		//All states might be in the same partition.
 		if (splitters_.has_next(head))
 			waiting_.push_back(head);
+	}
+
+	void initializeCounts() {
+		//Initially everything's in a single splitter.
+		assert(waiting_.size() == 1);
+		offset_type splitter = waiting_.front();
+		for (state_type s : xrange(state_size_))
+			for (symbol_type a : active_alphabet_)
+				counts_.insert_or_assign({splitter, a, s}, a_.step(s, a).size());
 	}
 
 	void initializeInv(std::vector<Edge>& edgelist) {
