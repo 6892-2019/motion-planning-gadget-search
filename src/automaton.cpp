@@ -353,7 +353,7 @@ void implodeRenumber(AutomatonBase& dest, const ExplodedAutomaton& source, const
 //A fastpath for automata with 64 or fewer states, based on bitsets stored
 //directly in the hash map.
 template<class AddStateAction, class AddTransAction>
-void determinize_64_fastpath(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans) {
+bool determinize_64_fastpath(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans) {
 	const state_type state_size = source.state_size();
 	const symbol_type alphabet_size = source.alphabet_size();
 	using state_bitset = automaton::bitset<64>;
@@ -394,6 +394,7 @@ void determinize_64_fastpath(const AutomatonBase& source, AddStateAction addStat
 			addTrans(current_state, s, it->second);
 		}
 	}
+	return true;
 }
 
 //The only complete/good implementation of monotonic_buffer_resource is in
@@ -404,7 +405,7 @@ void determinize_64_fastpath(const AutomatonBase& source, AddStateAction addStat
 class monotonic_buffer_resource {
 private:
 	void* buf_;
-	std::size_t remaining_, nextSize_;
+	std::size_t remaining_, nextSize_, totalSize_;
 	//We might do extra allocations here, but it's much easier to avoid freeing
 	//future pointers and avoid clownshoes by keeping metadata separate (instead
 	//of a singly-linked header list).
@@ -412,11 +413,11 @@ private:
 public:
 	//We don't bother with an upstream resource.
 	explicit monotonic_buffer_resource(std::size_t initial_size) :
-			buf_(nullptr), remaining_(0), nextSize_(initial_size) {}
+			buf_(nullptr), remaining_(0), nextSize_(initial_size), totalSize_(0) {}
 	//This constructor takes an existing buffer and doesn't free it.  This might
 	//be a std::array, for example.  We avoid freeing by just not remembering it.
 	monotonic_buffer_resource(void* buffer, std::size_t buffer_size) :
-			buf_(buffer), remaining_(buffer_size), nextSize_(buffer_size*2) {}
+			buf_(buffer), remaining_(buffer_size), nextSize_(buffer_size*2), totalSize_(0) {}
 
 	void* allocate(std::size_t bytes, std::size_t alignment = alignof(std::max_align_t)) {
 		return do_allocate(bytes, alignment);
@@ -430,6 +431,16 @@ public:
 	T* allocate(std::size_t count, std::size_t alignment = alignof(T)) {
 		std::size_t bytes = count*sizeof(T); //TODO: overflow
 		return static_cast<T*>(allocate(bytes, alignment));
+	}
+
+	/**
+	 * Returns the total bytes managed by this object (even if they haven't been
+	 * returned from allocate() yet).  This only counts the memory that will be
+	 * freed when this object is destroyed, so if a stack buffer was passed to
+	 * the constructor, it is not counted.
+	 */
+	std::size_t total_allocated() {
+		return totalSize_;
 	}
 protected: //private after a DR, but they'd be protected if we used Boost.Container's impls
 	void* do_allocate(std::size_t bytes, std::size_t alignment = alignof(std::max_align_t)) {
@@ -445,6 +456,7 @@ protected: //private after a DR, but they'd be protected if we used Boost.Contai
 		pages_.emplace_back(std::malloc(actual));
 		buf_ = pages_.back().get();
 		remaining_ = actual;
+		totalSize_ += actual;
 		nextSize_ = actual * 2; //TODO: tune growth factor
 
 		void* p = attempt(bytes, alignment);
@@ -536,7 +548,9 @@ public:
 };
 
 template<class AddStateAction, class AddTransAction>
-void determinize(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans) {
+bool determinize(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans,
+		state_type max_states = std::numeric_limits<state_type>::max(),
+		std::size_t max_bytes = std::numeric_limits<std::size_t>::max()) {
 	if (source.state_size() <= 64)
 		return determinize_64_fastpath(source, addState, addTrans);
 	const state_type state_size = source.state_size();
@@ -589,6 +603,10 @@ void determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 			source.for_each_transition(f, [nexts](symbol_type symbol, state_type dest) {
 				nexts[symbol].push_back(dest);
 			});
+		//As long as vectorish assumes allocations are infallible, there's no
+		//better way than to check periodically whether we've allocated too much.
+		if (alloc.total_allocated() > max_bytes)
+			return false;
 		for (symbol_type s = 0; s < alphabet_size; ++s) {
 			vectorish& next = nexts[s];
 			if (next.empty())
@@ -601,6 +619,8 @@ void determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 				bool accepting = std::any_of(next.begin(), next.end(),
 						[&source](state_type state) {return source.accept(state);});
 				addState(accepting);
+				if (newStates > max_states)
+					return false;
 				next.release();
 				worklist.push_back(*it);
 			} else
@@ -608,6 +628,7 @@ void determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 			addTrans(current_state, s, it->second);
 		}
 	}
+	return true;
 }
 
 void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
@@ -623,18 +644,24 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 		});
 }
 
-ExplodedAutomaton determinize_explode(const AutomatonBase& source) {
+std::optional<ExplodedAutomaton> determinize_explode(const AutomatonBase& source,
+		state_type max_states, std::size_t max_bytes) {
 	std::vector<Edge> edges;
 	std::vector<state_type> accept;
 	state_type stateSize = 0;
-	determinize(source, [&accept, &stateSize](bool b) {
+	bool success = determinize(source, [&accept, &stateSize](bool b) {
 			if (b) accept.push_back(stateSize);
 			++stateSize;
 		},
 		[&edges](auto from, auto on, auto to){
 			edges.push_back({from, on, to});
-		});
-	return {edges, accept, stateSize, source.alphabet_size()};
+		}, max_states, max_bytes);
+	if (!success)
+		return std::nullopt;
+	//std;:optional construction disagrees with aggregates
+	std::optional<ExplodedAutomaton> opt;
+	opt = {std::move(edges), std::move(accept), stateSize, source.alphabet_size()};
+	return opt;
 }
 
 struct Tarjan {
