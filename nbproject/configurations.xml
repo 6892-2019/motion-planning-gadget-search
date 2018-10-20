@@ -4,6 +4,7 @@
     <df root="src" name="0">
       <df name="benchmark">
         <in>benchmark-minimize.cpp</in>
+        <in>benchmark-optimize.cpp</in>
         <in>benchmark-pack.cpp</in>
       </df>
       <df name="fuzz">
@@ -26,14 +27,11 @@
         <in>bounded_queue-test.cpp</in>
         <in>circular_deque-test.cpp</in>
         <in>expr-test.cpp</in>
-        <in>polyvariant-automaton-test.cpp</in>
-        <in>polyvariant-test.cpp</in>
         <in>regex-test.cpp</in>
         <in>util-test.cpp</in>
         <in>util.cpp</in>
       </df>
       <df name="toggles">
-        <in>benchmark-toggles.cpp</in>
         <in>canonicalize.cpp</in>
         <in>dump-known-gadgets.cpp</in>
         <in>gadgetdefs.cpp</in>
@@ -43,7 +41,6 @@
         <in>provenance.cpp</in>
         <in>provenance.hpp</in>
         <in>test-gadgetdefs.cpp</in>
-        <in>toggles.cpp</in>
       </df>
       <in>alphabet.cpp</in>
       <in>automaton-instantiations-0.cpp</in>
@@ -58,16 +55,13 @@
       <in>hopcroft.cpp</in>
       <in>hopcroft.hpp</in>
       <in>ioutils.cpp</in>
-      <in>main.cpp</in>
-      <in>natural_map.cpp</in>
       <in>natural_map.hpp</in>
       <in>natural_set.cpp</in>
+      <in>nfa-optimize.cpp</in>
       <in>pack-detail.hpp</in>
       <in>pack.cpp</in>
       <in>pack.hpp</in>
-      <in>packedautomaton.cpp</in>
       <in>pinning.cpp</in>
-      <in>polyvariant.hpp</in>
       <in>precompiled-instantiations.cpp</in>
       <in>stringutils.cpp</in>
       <in>worker.cpp</in>
@@ -93,8 +87,7 @@
         <rebuildPropChanged>false</rebuildPropChanged>
       </toolsSet>
       <flagsDictionary>
-        <element flagsID="0" commonFlags="-std=c++1z -Og -march=native -pedantic"/>
-        <element flagsID="1" commonFlags="-std=c++1z -march=native -pedantic"/>
+        <element flagsID="0" commonFlags="-std=c++1z -march=native -pedantic"/>
       </flagsDictionary>
       <codeAssistance>
       </codeAssistance>
@@ -104,7 +97,7 @@
           <buildCommand>ninja -f debug.ninja</buildCommand>
           <cleanCommand>ninja -f debug.ninja -t clean</cleanCommand>
           <executablePath></executablePath>
-          <ccTool flags="1">
+          <ccTool flags="0">
             <standard>11</standard>
             <incDir>
               <pElem>build/debug/include</pElem>
@@ -146,7 +139,7 @@
         </ccTool>
       </folder>
       <item path="src/alphabet.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
+        <ccTool flags="0">
           <incDir>
             <pElem>../nauty</pElem>
             <pElem>.</pElem>
@@ -157,13 +150,9 @@
       </item>
       <item path="src/automaton-instantiations-1.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/automaton-instantiations.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/automaton-io.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/automaton.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/automaton.tcc" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/automatonbase.cpp" ex="false" tool="1" flavor2="0">
       </item>
@@ -172,9 +161,12 @@
             tool="1"
             flavor2="0">
       </item>
-      <item path="src/benchmark/benchmark-pack.cpp" ex="false" tool="1" flavor2="0">
+      <item path="src/benchmark/benchmark-optimize.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
       </item>
-      <item path="src/bitset-instantiations.hpp" ex="false" tool="3" flavor2="0">
+      <item path="src/benchmark/benchmark-pack.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/bitset.cpp" ex="false" tool="1" flavor2="0">
       </item>
@@ -182,10 +174,8 @@
       </item>
       <item path="src/circular_deque.hpp" ex="false" tool="3" flavor2="0">
       </item>
-      <item path="src/circular_deque.tcc" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
+        <ccTool flags="0">
           <incDir>
             <pElem>../nauty</pElem>
             <pElem>.</pElem>
@@ -202,24 +192,7 @@
       <item path="src/hopcroft.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/ioutils.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
-          <incDir>
-            <pElem>../nauty</pElem>
-            <pElem>.</pElem>
-          </incDir>
-        </ccTool>
-      </item>
-      <item path="src/main.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="0">
-          <incDir>
-            <pElem>.</pElem>
-          </incDir>
-        </ccTool>
-      </item>
-      <item path="src/n_copies_iterator.hpp" ex="false" tool="3" flavor2="0">
-      </item>
-      <item path="src/natural_map.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
           <incDir>
             <pElem>../nauty</pElem>
             <pElem>.</pElem>
@@ -229,7 +202,7 @@
       <item path="src/natural_map.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/natural_set.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
+        <ccTool flags="0">
           <incDir>
             <pElem>../nauty</pElem>
             <pElem>.</pElem>
@@ -238,14 +211,12 @@
       </item>
       <item path="src/nfa-optimize.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/nfa-optimize.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/nonogram/nonogram.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
+        <ccTool flags="0">
         </ccTool>
       </item>
       <item path="src/nonogram/puzzle.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
+        <ccTool flags="0">
         </ccTool>
       </item>
       <item path="src/pack-detail.hpp" ex="false" tool="3" flavor2="0">
@@ -254,15 +225,11 @@
       </item>
       <item path="src/pack.hpp" ex="false" tool="3" flavor2="0">
       </item>
-      <item path="src/packedautomaton.cpp" ex="false" tool="1" flavor2="0">
-      </item>
       <item path="src/pathpuzzles/pathpuzzles.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
+        <ccTool flags="0">
         </ccTool>
       </item>
       <item path="src/pinning.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/polyvariant.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/precompiled-instantiations.cpp" ex="false" tool="1" flavor2="0">
       </item>
@@ -292,20 +259,11 @@
       </item>
       <item path="src/test/expr-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/test/polyvariant-automaton-test.cpp"
-            ex="false"
-            tool="1"
-            flavor2="0">
-      </item>
-      <item path="src/test/polyvariant-test.cpp" ex="false" tool="1" flavor2="0">
-      </item>
       <item path="src/test/regex-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/util-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/util.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/benchmark-toggles.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/canonicalize.cpp" ex="false" tool="1" flavor2="0">
       </item>
@@ -327,10 +285,6 @@
       <item path="src/toggles/provenance.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/test-gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/toggles.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="1">
-        </ccTool>
       </item>
       <item path="src/worker.cpp" ex="false" tool="1" flavor2="0">
       </item>
