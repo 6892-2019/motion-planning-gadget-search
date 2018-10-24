@@ -106,7 +106,7 @@ class NFAOptimizer {
 private:
 	using offset_type = NodeList::offset_type;
 public:
-	NFAOptimizer(const AutomatonBase& a) :
+	NFAOptimizer(const AutomatonBase& a, bool reverse) :
 			a_(a), state_size_(a.state_size()), alphabet_size_(a.alphabet_size()),
 			transition_size_(a.transition_size()), active_alphabet_(a.activeAlphabet()),
 			partitions_(state_size_), partitionBounds_(), stateToPartition_(state_size_),
@@ -117,7 +117,8 @@ public:
 			//elements, so we need to divide by the max load factor.  (It will
 			//allocate in the default constructor, so we can't just call reserve
 			//in the ctor body.)
-			counts_((std::size_t)std::ceil(double(transition_size_)/0.88f))
+			counts_((std::size_t)std::ceil(double(transition_size_)/0.88f)),
+			reversed_(reverse)
 			{
 		active_alphabet_.sort();
 	}
@@ -168,6 +169,8 @@ private:
 	//singleton splitters because they might get refined later.
 	using count_key = std::tuple<offset_type, symbol_type, state_type>;
 	tsl::hopscotch_map<count_key, state_type, boost::hash<count_key>> counts_;
+	//If true, we reverse the automaton (so we find a left-equivalence).
+	bool reversed_;
 
 	void coreLoop() {
 		while (!waiting_.empty()) {
@@ -402,11 +405,20 @@ private:
 	bool buildInverseAndInitializePartitions() {
 		unsigned int nonfinalIdx = 0, finalIdx = static_cast<unsigned int>(partitions_.size() - 1);
 		//TODO: for_each_accept?
-		for (state_type s = 0; s < state_size_; ++s) {
-			if (a_.accept(s))
-				partitions_[finalIdx--] = s;
-			else
-				partitions_[nonfinalIdx++] = s;
+		if (!reversed_) {
+			for (state_type s = 0; s < state_size_; ++s) {
+				if (a_.accept(s))
+					partitions_[finalIdx--] = s;
+				else
+					partitions_[nonfinalIdx++] = s;
+			}
+		} else {
+			for (state_type s = 0; s < state_size_; ++s) {
+				if (s == 0) //reverse: exchange initial and final states
+					partitions_[finalIdx--] = s;
+				else
+					partitions_[nonfinalIdx++] = s;
+			}
 		}
 		assert(nonfinalIdx == finalIdx+1 && "didn't partition all the states somehow");
 		if (nonfinalIdx == partitions_.size())
@@ -415,20 +427,35 @@ private:
 		//hopcroft builds the edge list first because we can cheaply check if a
 		//DFA is total.  NFA totality checking requires iterating the states, so
 		//doing it now lets us skip the edge list for all-strings automata.
-		auto staterange = xrange(state_size_);
-		bool crashed = active_alphabet_.size() < alphabet_size_ ||
-				std::any_of(staterange.begin(), staterange.end(), [&](state_type s){
-					return a_.outgoing(s).size() != alphabet_size_;
-				});
+		bool crashed = true; //conservative, reverse uses this as we can't cheaply check
+		if (!reversed_) {
+			auto staterange = xrange(state_size_);
+			crashed = active_alphabet_.size() < alphabet_size_ ||
+					std::any_of(staterange.begin(), staterange.end(), [&](state_type s){
+						return a_.outgoing(s).size() != alphabet_size_;
+					});
+		}
 		if ((finalIdx+1) == 0U && !crashed)
 			return false;
 
 		std::vector<Edge> edgelist;
 		edgelist.reserve(transition_size_ + 1); //we add a sentinel edge in initializeInv
-		a_.for_each_transition([&](state_type from, symbol_type on, state_type to) {
-			edgelist.push_back({from, on, to});
-			++counts_[{0, on, from}];
-		});
+		boost::dynamic_bitset<std::size_t> noncrashing(state_size_ * alphabet_size_);
+
+		if (!reversed_) {
+			a_.for_each_transition([&](state_type from, symbol_type on, state_type to) {
+				edgelist.push_back({from, on, to});
+				++counts_[{0, on, from}];
+				noncrashing.set(from * alphabet_size_ + on);
+			});
+		} else {
+			//We do the actual reversal just by renaming the lambda's parameters.
+			a_.for_each_transition([&](state_type to, symbol_type on, state_type from) { //reverse
+				edgelist.push_back({from, on, to});
+				++counts_[{0, on, from}];
+				noncrashing.set(from * alphabet_size_ + on);
+			});
+		}
 
 		if (crashed) {
 			//Because we didn't totalize, we need to manually partition
@@ -440,9 +467,10 @@ private:
 				newbounds.clear();
 				for (typename decltype(bounds)::size_type i = 0; i < bounds.size() - 1; ++i) {
 					newbounds.push_back(bounds[i]);
-					newbounds.push_back(std::partition(bounds[i], bounds[i+1], [this, s](state_type state) {
-						//if we crash
-						return a_.step(state, s).empty();
+					newbounds.push_back(std::partition(bounds[i], bounds[i+1], [&](state_type state) {
+						//If !reversed_, we could use a_.step(state, s).empty()
+						//instead of building noncrashing.
+						return noncrashing.test(state * alphabet_size_ + s);
 					}));
 					newbounds.push_back(bounds[i+1]);
 				}
@@ -519,8 +547,8 @@ private:
 	}
 };
 
-OptimizeResult optimize_for_renumber(const AutomatonBase& a) {
-	return NFAOptimizer(a).optimize();
+OptimizeResult optimize_for_renumber(const AutomatonBase& a, bool reverse) {
+	return NFAOptimizer(a, reverse).optimize();
 }
 
 //dynarray<state_type> optimize_for_compress(AutomatonBase& a) {

@@ -17,7 +17,7 @@ struct OptimizeResult {
 /**
  * Returns an OptimizeResult that can be used to renumber the given automaton.
  */
-OptimizeResult optimize_for_renumber(const AutomatonBase& a);
+OptimizeResult optimize_for_renumber(const AutomatonBase& a, bool reverse);
 //TODO: I think we just use OptimizeResult::remap, and discovering ALL/EMPTY early is also handy.
 //We can revisit if also computing survivorsFrom turns out to be a problem.
 ///**

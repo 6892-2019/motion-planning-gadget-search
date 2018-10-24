@@ -291,7 +291,13 @@ inline range_for_pair<detail::EdgeRangeFront, detail::EdgeRangeSentinel> Automat
 	return make_range_for_pair(detail::EdgeRangeFront(this, from), detail::EdgeRangeSentinel(this, from));
 }
 
-
+enum class OptimizeKind {
+	RIGHT,
+	LEFT,
+	RIGHT_LEFT,
+	LEFT_RIGHT,
+//	OPTIMAL, //if we implement the optimal algorithm for using both right and left equivalence
+};
 class WorkingAutomaton : public AutomatonBase {
 public:
 	WorkingAutomaton();
@@ -309,7 +315,7 @@ public:
 	virtual void determinize() = 0;
 	virtual void minimize() = 0;
 	virtual void canonicalize() = 0;
-	virtual void optimize() = 0;
+	virtual void optimize(OptimizeKind how = OptimizeKind::RIGHT) = 0;
 	virtual void swapStateNumbers(state_type a, state_type b) = 0;
 	virtual std::size_t working_hash() const = 0;
 	using AutomatonBase::addTrans;
@@ -421,6 +427,26 @@ std::unique_ptr<WorkingAutomaton> shuffleAccept(WorkingAutomaton&& left, Working
 		unsigned int alphabet_size);
 
 } //namespace automaton
+
+
+
+namespace fmt {
+template<>
+struct formatter<automaton::OptimizeKind> : formatter<string_view> {
+	template<typename FormatContext>
+	auto format(automaton::OptimizeKind k, FormatContext& ctx) {
+		string_view name = "(unknown OptimizeKind)"; //I guess we should jam the numeric value in here?
+		switch (k) {
+			case automaton::OptimizeKind::RIGHT: name = "RIGHT"; break;
+			case automaton::OptimizeKind::LEFT: name = "LEFT"; break;
+			case automaton::OptimizeKind::RIGHT_LEFT: name = "RIGHT_LEFT"; break;
+			case automaton::OptimizeKind::LEFT_RIGHT: name = "LEFT_RIGHT"; break;
+		}
+		return formatter<string_view>::format(name, ctx);
+	}
+};
+} //namespace fmt
+
 
 #endif /* AUTOMATONBASE_HPP */
 

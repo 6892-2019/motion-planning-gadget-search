@@ -489,6 +489,29 @@ void Automaton<AlphabetSize>::compressRenumber(state_type newSize, const state_t
 }
 
 template<unsigned int AlphabetSize>
+void Automaton<AlphabetSize>::mergeRenumber(state_type newSize, const state_type* survivorFrom, const state_type* remapping) {
+	//For each state, copy/append its transitions into survivorFrom[remapping[s]].
+	//We don't renumber the transitions because compressRenumber will.
+	for (state_type source : xrange(state_size())) {
+		if (remapping[source] == std::numeric_limits<state_type>::max()) continue;
+		state_type target = survivorFrom[remapping[source]];
+		if (source == target) continue;
+		for (auto& st : transitions_[source]) {
+			for (auto& tt : transitions_[target])
+				if (st.next_ == tt.next_) {
+					tt.symbols_ |= st.symbols_;
+					goto continue_outer;
+				}
+			transitions_[target].push_back(st);
+			continue_outer: ;
+		}
+		transitions_[source].clear();
+	}
+
+	compressRenumber(newSize, survivorFrom, remapping);
+}
+
+template<unsigned int AlphabetSize>
 void Automaton<AlphabetSize>::canonicalize() {
 	if (canonical()) {
 		assert(deterministic());
@@ -505,20 +528,39 @@ void Automaton<AlphabetSize>::canonicalize() {
 }
 
 template<unsigned int AlphabetSize>
-void Automaton<AlphabetSize>::optimize() {
+void Automaton<AlphabetSize>::optimize(OptimizeKind how) {
 	if (deterministic()) {
 		minimize();
 		return;
 	}
-	detail::OptimizeResult res = detail::optimize_for_renumber(*this);
-	if (res.newSize == detail::OptimizeResult::ALL)
-		*this = all<AlphabetSize>();
-	else if (res.newSize == detail::OptimizeResult::EMPTY)
-		*this = empty<AlphabetSize>();
-	else if (res.newSize == state_size())
-		return;
-	else
-		compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
+
+	switch (how) {
+		case OptimizeKind::RIGHT:
+		case OptimizeKind::LEFT: {
+			detail::OptimizeResult res = detail::optimize_for_renumber(*this, how == OptimizeKind::LEFT);
+			if (res.newSize == detail::OptimizeResult::ALL)
+				*this = all<AlphabetSize>();
+			else if (res.newSize == detail::OptimizeResult::EMPTY)
+				*this = empty<AlphabetSize>();
+			else if (res.newSize == state_size())
+				return;
+			else {
+				if (how == OptimizeKind::RIGHT)
+					compressRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
+				else
+					mergeRenumber(res.newSize, res.survivorsFrom.begin(), res.remap.begin());
+			}
+		}
+			break;
+		case OptimizeKind::RIGHT_LEFT:
+			optimize(OptimizeKind::RIGHT);
+			optimize(OptimizeKind::LEFT);
+			break;
+		case OptimizeKind::LEFT_RIGHT:
+			optimize(OptimizeKind::LEFT);
+			optimize(OptimizeKind::RIGHT);
+			break;
+	}
 }
 
 template<unsigned int AlphabetSize>

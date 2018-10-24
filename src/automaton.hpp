@@ -378,6 +378,13 @@ private:
 	 */
 	void compressRenumber(state_type newSize, const state_type* survivorFrom, const state_type* remapping);
 
+	/**
+	 * Like compressRenumber, but merges transitions using the remapping (that
+	 * is, all transitions are placed on the remap target state).  Useful for
+	 * left-equivalences, where the transitions may be spread across states.
+	 */
+	void mergeRenumber(state_type newSize, const state_type* survivorFrom, const state_type* remapping);
+
 public:
 	/**
 	 * Renumbers states to bring this automaton into a canonical form. Canonical
@@ -429,7 +436,7 @@ public:
 	 * tries to reduce the size of this automaton in ways that don't require
 	 * determinizing it.
 	 */
-	void optimize() override;
+	void optimize(OptimizeKind how = OptimizeKind::RIGHT) override;
 
 private:
 	template<class RandomAccessIterator>

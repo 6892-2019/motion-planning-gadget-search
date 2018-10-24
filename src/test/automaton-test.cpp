@@ -4,6 +4,15 @@
 #include "automaton.hpp"
 #include "util.hpp"
 
+namespace automaton {
+doctest::String toString(OptimizeKind kind) {
+	std::array<char, 32> buf;
+	auto end = fmt::format_to_n(buf.data(), buf.size()-1, "{}", kind);
+	*end.out = '\0';
+	return doctest::String(buf.data());
+}
+} //namespace automaton
+
 using namespace automaton;
 using namespace automaton::impl;
 
@@ -25,15 +34,43 @@ Automaton<N> minimizePreservesLanguage(const Automaton<N>& p) {
 	//TODO: generate and print witnesses
 	return q;
 }
+static std::array<OptimizeKind, 4> optimize_kinds = {
+	OptimizeKind::RIGHT,
+	OptimizeKind::LEFT,
+	OptimizeKind::RIGHT_LEFT,
+	OptimizeKind::LEFT_RIGHT
+};
+//Sometimes we care which kind is used because we're going to check its size/etc.,
+//while other times we just want to check that the language is preserved over
+//all kinds.  We always do all of them, but return only one, if requested.
+//TODO: template hackery to return a std::array of size matching the number of OptimizeKind arguments passed
 template<unsigned int N>
-Automaton<N> optimizePreservesLanguage(const Automaton<N>& p) {
+void optimizePreservesLanguage(const Automaton<N>& p) {
 	CHECK_UNARY_FALSE(p.deterministic()); //optimize() is just minimize() if it's deterministic
-	auto q = p;
-	q.optimize();
-	auto cmp = compare_languages(p, q);
-	CHECK_UNARY(cmp.equal());
-	//TODO: generate and print witnesses
-	return q;
+	for (OptimizeKind how : optimize_kinds) {
+		CAPTURE(how);
+		auto q = p;
+		q.optimize(how);
+		auto cmp = compare_languages(p, q);
+		CHECK_UNARY(cmp.equal());
+		//TODO: generate and print witnesses
+	}
+}
+template<unsigned int N>
+Automaton<N> optimizePreservesLanguage(const Automaton<N>& p, OptimizeKind requestedReturn) {
+	CHECK_UNARY_FALSE(p.deterministic()); //optimize() is just minimize() if it's deterministic
+	Automaton<N> rv;
+	for (OptimizeKind how : optimize_kinds) {
+		CAPTURE(how);
+		auto q = p;
+		q.optimize(how);
+		auto cmp = compare_languages(p, q);
+		CHECK_UNARY(cmp.equal());
+		//TODO: generate and print witnesses
+		if (how == requestedReturn)
+			rv = std::move(q);
+	}
+	return rv;
 }
 
 TEST_CASE("AutomatonTest_Clone") {
@@ -689,7 +726,7 @@ TEST_CASE("AutomatonTest_MakeWorking") {
 }
 
 TEST_CASE("AutomatonTest_Optimize01") {
-	auto opt = optimizePreservesLanguage(pathologicalZeroZeroAlt());
+	auto opt = optimizePreservesLanguage(pathologicalZeroZeroAlt(), OptimizeKind::RIGHT);
 	CHECK_EQ(opt.state_size(), 3);
 }
 
@@ -700,7 +737,7 @@ TEST_CASE("AutomatonTest_Optimize02") {
 	none.addState();
 	none.addTrans(0, 0, 1);
 	none.addTrans(0, 0, 2);
-	auto opt = optimizePreservesLanguage(none);
+	auto opt = optimizePreservesLanguage(none, OptimizeKind::RIGHT);
 	CHECK_EQ(opt.state_size(), 1);
 	CHECK_UNARY_FALSE(opt.accept(0));
 }
@@ -712,7 +749,7 @@ TEST_CASE("AutomatonTest_Optimize03") {
 	none.addState();
 	none.addTrans(0, 0, 1);
 	none.addTrans(0, 0, 2);
-	auto opt = optimizePreservesLanguage(none);
+	auto opt = optimizePreservesLanguage(none, OptimizeKind::RIGHT);
 	CHECK_EQ(opt.state_size(), 1);
 	CHECK_UNARY_FALSE(opt.accept(0));
 }
@@ -729,7 +766,7 @@ TEST_CASE("AutomatonTest_Optimize04") {
 	every.addTrans(0, 1, 1);
 	every.addTrans(1, 0, 1);
 	every.addTrans(1, 1, 1);
-	auto opt = optimizePreservesLanguage(every);
+	auto opt = optimizePreservesLanguage(every, OptimizeKind::RIGHT);
 	CHECK_EQ(opt.state_size(), 1);
 	CHECK_UNARY(opt.accept(0));
 }
@@ -746,7 +783,7 @@ TEST_CASE("AutomatonTest_Optimize05") {
 	every.addTrans(0, 1, 1);
 	every.addTrans(1, 0, 1);
 	every.addTrans(1, 1, 1);
-	auto opt = optimizePreservesLanguage(every);
+	auto opt = optimizePreservesLanguage(every, OptimizeKind::RIGHT);
 	CHECK_EQ(opt.state_size(), 1);
 	CHECK_UNARY(opt.accept(0));
 }
@@ -778,4 +815,21 @@ TEST_CASE("AutomatonTest_Optimize08") {
 	auto renumbering = {MISS, MISS, 0u, 1u, MISS, 2u, 3u, MISS};
 	enlarged.renumberAlphabet(renumbering.begin());
 	optimizePreservesLanguage(enlarged);
+}
+
+TEST_CASE("AutomatonTest_Optimize09") {
+	//This is the automaton from the Ilie/etc papers that can be reduced left
+	//or right, but not both.
+	Automaton<4> a;
+	for (int i = 0; i < 5; ++i)
+		a.addState();
+	a.setAccept(4);
+	a.addTrans(0, 0, 1);
+	a.addTrans(0, 0, 2);
+	a.addTrans(0, 1, 3);
+	a.addTrans(1, 2, 4);
+	a.addTrans(2, 3, 4);
+	a.addTrans(3, 2, 4);
+	auto opt = optimizePreservesLanguage(a, OptimizeKind::RIGHT);
+	CHECK_EQ(opt.state_size(), 4);
 }
