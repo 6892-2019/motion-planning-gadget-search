@@ -80,7 +80,7 @@ struct formatter<Provenance> {
 		if (p.isInput())
 			return format_to(ctx.begin(), "input {:d}", p.second);
 		if (p.isCombine())
-			return format_to(ctx.begin(), "combine {:d},{:d} at {:d} with {:d} at {:d}, connect {:d} at {:d} start {:d}",
+			return format_to(ctx.begin(), "combine {:d},{:d} at {:d} with {:d} at {:d}, connect {:d} start {:d}",
 					p.machineId, p.first, p.leftSplice, p.second, p.rightRotation, p.connectPoint, p.root);
 		return format_to(ctx.begin(), "connect {:d},{:d} start {:d}",
 					p.machineId, p.first, p.connectPoint, p.root);

@@ -10,140 +10,34 @@
 #include "maybe_owning_ptr.hpp"
 #include "stringutils.hpp"
 #include "automaton-io.hpp"
+#include "stopwatch.hpp"
+#include <thread>
 #include <tbb/parallel_reduce.h>
 #include <tbb/blocked_range.h>
 #include <jemalloc/jemalloc.h>
+#include <ctime>
+#include <fmt/time.h>
+#include <boost/process/child.hpp>
+#include <boost/process/io.hpp>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <netinet/sctp.h>
+#include <netdb.h>
 
 using namespace automaton;
 using std::vector;
 using std::pair;
 using std::string;
 using std::unique_ptr;
-using std::chrono::duration_cast;
 
-class Stopwatch {
-private:
-	//https://stackoverflow.com/a/37440647/3614835
-	using best_clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady,
-			std::chrono::high_resolution_clock,
-			std::chrono::steady_clock>;
-	struct StopwatchData {
-		StopwatchData() : time(best_clock::now()) {
-			usage = {};
-			getrusage(RUSAGE_SELF, &usage);
-		}
-		best_clock::time_point time;
-		rusage usage;
-	};
-public:
-	class Result {
-	public:
-		Result(StopwatchData start, StopwatchData end) : start_(start), end_(end) {}
-		template<class Duration>
-		Duration elapsed() {
-			return duration_cast<Duration>(end_.time - start_.time);
-		}
-		unsigned long seconds() {
-			return elapsed<std::chrono::seconds>().count();
-		}
-		unsigned long millis() {
-			return elapsed<std::chrono::milliseconds>().count();
-		}
-		unsigned long micros() {
-			return elapsed<std::chrono::microseconds>().count();
-		}
-		unsigned long nanos() {
-			return elapsed<std::chrono::nanoseconds>().count();
-		}
-		std::string hms() {
-			auto diff = end_.time - start_.time;
-			auto hours = duration_cast<std::chrono::hours>(diff);
-			auto minutes = duration_cast<std::chrono::minutes>(diff) - hours;
-			auto seconds = duration_cast<std::chrono::seconds>(diff) - hours - minutes;
-			return std::to_string(hours.count()) + "h" + std::to_string(minutes.count()) + "m" + std::to_string(seconds.count()) + "s";
-		}
-
-		template<class Duration>
-		Duration userTime() {
-			return duration_cast<Duration>(from_timeval(end_.usage.ru_utime) - from_timeval(start_.usage.ru_utime));
-		}
-		unsigned long userSeconds() {
-			return userTime<std::chrono::seconds>().count();
-		}
-		unsigned long userMillis() {
-			return userTime<std::chrono::milliseconds>().count();
-		}
-		unsigned long userMicros() {
-			return userTime<std::chrono::microseconds>().count();
-		}
-		unsigned long userNanos() {
-			return userTime<std::chrono::nanoseconds>().count();
-		}
-		template<class Duration>
-		Duration systemTime() {
-			return duration_cast<Duration>(from_timeval(end_.usage.ru_stime) - from_timeval(start_.usage.ru_stime));
-		}
-		unsigned long systemSeconds() {
-			return systemTime<std::chrono::seconds>().count();
-		}
-		unsigned long systemMillis() {
-			return systemTime<std::chrono::milliseconds>().count();
-		}
-		unsigned long systemMicros() {
-			return systemTime<std::chrono::microseconds>().count();
-		}
-		unsigned long systemNanos() {
-			return systemTime<std::chrono::nanoseconds>().count();
-		}
-		template<class Duration>
-		Duration cpuTime() {
-			return userTime<Duration>() + systemTime<Duration>();
-		}
-		unsigned long cpuSeconds() {
-			return cpuTime<std::chrono::seconds>().count();
-		}
-		unsigned long cpuMillis() {
-			return cpuTime<std::chrono::milliseconds>().count();
-		}
-		unsigned long cpuMicros() {
-			return cpuTime<std::chrono::microseconds>().count();
-		}
-		unsigned long cpuNanos() {
-			return cpuTime<std::chrono::nanoseconds>().count();
-		}
-
-		double utilization() {
-			//We can tolerate the potential loss of precision here.
-			return static_cast<double>(cpuNanos()) / static_cast<double>(nanos());
-		}
-	private:
-		StopwatchData start_, end_;
-	};
-
-	Stopwatch() : data_() {}
-	/**
-	 * Resets the start point.
-	 */
-	void reset() {
-		data_ = StopwatchData();
+static std::string localhostname() {
+	char name[HOST_NAME_MAX+1];
+	if (gethostname(name, sizeof(name))) {
+		perror("gethostname");
+		std::exit(1); //environment is not sane
 	}
-	/**
-	 * Returns a Result describing the elapsed time and other metrics.  Doesn't
-	 * modify this Stopwatch, so can be called repeatedly to measure from the
-	 * same start point.
-	 */
-	Result elapsed() const {
-		//Imply to the compiler that it should make the system calls ASAP.
-		auto end = StopwatchData();
-		return {data_, end};
-	}
-private:
-	StopwatchData data_;
-
-	static std::chrono::microseconds from_timeval(timeval& tv) {
-		return std::chrono::seconds(tv.tv_sec) + std::chrono::microseconds(tv.tv_usec);
-	}
-};
+	return name;
+}
 
 typedef Automaton<8u> automaton_type;
 typedef pair<const Pack*, Provenance> PackProv;
@@ -167,9 +61,7 @@ struct Target {
 
 class PageHolder {
 public:
-	PageHolder(std::size_t desiredPageSize) : pageSize_(nallocx(desiredPageSize, 0)) {
-		allocate();
-	}
+	PageHolder(std::size_t desiredPageSize) : pageSize_(nallocx(desiredPageSize, 0)) {}
 	std::byte* current_begin() const {
 		return pages_.back().get();
 	}
@@ -193,6 +85,17 @@ public:
 		//doesn't include the PageHolder itself
 		return page_size() * page_count();
 	}
+
+	std::size_t size() const {
+		return pages_.size();
+	}
+	std::pair<std::byte*, std::byte*> page_bounds(std::size_t p) const {
+		if (pages_[p]) return {pages_[p].get(), pages_[p].get() + page_size()};
+		return {nullptr, nullptr};
+	}
+	void release(std::size_t p) {
+		pages_[p].reset();
+	}
 private:
 	//should maybe be a small_vector?
 	std::vector<std::unique_ptr<std::byte, free_deleter>> pages_;
@@ -200,8 +103,8 @@ private:
 };
 
 struct Finisher {
-	Finisher(const ClosedSet* closed) : pages(16*1024*1024), cur(pages.allocate()), globalClosed(closed) {}
-	Finisher(const Finisher& f, tbb::split) : pages(16*1024*1024), cur(pages.allocate()), globalClosed(f.globalClosed) {}
+	Finisher(const ClosedSet* closed) : pages(1*1024*1024), cur(nullptr), globalClosed(closed) {}
+	Finisher(const Finisher& f, tbb::split) : pages(1*1024*1024), cur(nullptr), globalClosed(f.globalClosed) {}
 	vector<PackProv> nextgen;
 	PageHolder pages;
 	Pack* cur;
@@ -210,6 +113,8 @@ struct Finisher {
 	unsigned int globalClosedPruned = 0, localClosedPruned = 0;
 	std::size_t bytesAdopted = 0;
 	void operator()(automaton_type&& a, Provenance p) {
+		if (!cur) cur = pages.allocate();
+
 		canonicalize(a, a.active_alphabet_size());
 		Pack* new_cur = pack(a, cur, pages.current_end());
 		if (!new_cur) {
@@ -245,7 +150,7 @@ struct Finisher {
 			//You'd think this shouldn't happen, but it does, both due to global
 			//pruning and TBB's overzealous splitting.
 			assert(localClosed.empty());
-			assert(cur == pages.current_begin());
+			assert(cur == nullptr || cur == pages.current_begin());
 			assert(localClosedPruned == 0);
 			assert(bytesAdopted == 0);
 			nextgen = std::move(rhs.nextgen);
@@ -256,15 +161,16 @@ struct Finisher {
 			globalClosedPruned += rhs.globalClosedPruned;
 			localClosedPruned += rhs.localClosedPruned;
 			bytesAdopted += rhs.bytesAdopted;
+			return;
 		}
 
-//		Stopwatch stopwatch;
+//		auto stopwatch = Stopwatch::process();
 //		auto oldbytes = bytesAdopted;
 //		auto oldcount = nextgen.size();
 
 		//If we're globally pruning, we did it already.
 		assert(((bool)globalClosed) == ((bool)rhs.globalClosed));
-		for (PackProv& p : rhs.nextgen) {
+		rhs.destructive_for_each_pack([&](PackProv& p) {
 			//We can either copy survivors to our PageHolder, or linear-search
 			//for and adopt their pages.  Assuming we committed packs in order,
 			//we'd only need to keep track of which is the current page and
@@ -284,7 +190,7 @@ struct Finisher {
 				bytesAdopted += size;
 			} else
 				++localClosedPruned;
-		}
+		});
 		globalClosedPruned += rhs.globalClosedPruned;
 		localClosedPruned += rhs.localClosedPruned;
 		//deliberately don't merge bytesAdopted
@@ -293,6 +199,37 @@ struct Finisher {
 //		fmt::print("Finisher::join took {}ms; left {} ({}), right {} ({}), now {} ({}).\n",
 //				timing.millis(), oldcount, oldbytes, rhs.nextgen.size(), rhs.bytesAdopted,
 //				nextgen.size(), bytesAdopted);
+	}
+
+	/**
+	 * Call the given callable for every PackProv in this->nextgen, freeing
+	 * pages when possible.
+	 */
+	template<class Callable>
+	void destructive_for_each_pack(Callable&& callable) {
+		if (!cur) return; //never lazy-init'd, so no packs
+		//These pointers will become dangling, so may as well clear this now.
+		//(I guess we could erase each element after visiting it...)
+		localClosed = {};
+		cur = nullptr;
+
+		//We're assuming the packs are in the same order in the pages.
+		std::size_t pagenumber = 0;
+		auto pagebounds = pages.page_bounds(pagenumber);
+
+		for (auto i = nextgen.begin(), end = nextgen.end(); i != end;) {
+			callable(*i);
+			++i;
+			if (i == end || !(pagebounds.first <= i->first && i->first < pagebounds.second)) {
+				pages.release(pagenumber);
+				++pagenumber;
+				if (pagenumber < pages.size())
+					pagebounds = pages.page_bounds(pagenumber);
+			}
+		}
+		//dangling, so clear it now
+		nextgen.clear();
+		nextgen.shrink_to_fit();
 	}
 };
 
@@ -601,17 +538,19 @@ public:
 			fmt::print("target {}: {}\n", targets_.size()-1, name);
 		}
 	}
+	virtual ~GenerationalSearch() = default;
 	void advance() {
-		Stopwatch stopwatch;
+		auto stopwatch = Stopwatch::process();
+		subgeneration_requested_ = generation_requested_ = false;
 		do_combine();
 		do_connect();
 		Stopwatch::Result timing = stopwatch.elapsed();
 		fmt::print("Finished generation {} in {} ({}); produced {}, closed size {}.\n",
 				generation_, timing.hms(), timing.utilization(), curgen_.size(), closed_.size());
 		++generation_;
-		if (curgen_.empty()) std::exit(0);
+		if (!generation_requested_) std::exit(0);
 	}
-private:
+protected:
 	PageHolder pages_;
 	std::byte* cur_;
 	vector<const Pack*> curgen_; //non-owning, stored in pages_ and already in closed_
@@ -620,9 +559,10 @@ private:
 	vector<Input> inputs_;
 	vector<Target> targets_;
 	unsigned int generation_ = 0;
+	bool subgeneration_requested_ = false, generation_requested_ = false;
 
 	void do_combine() {
-		Stopwatch stopwatch;
+		auto stopwatch = Stopwatch::process();
 		Finisher finisher(&closed_);
 		if (generation_ == 0) {
 			assert(closed_.empty());
@@ -641,15 +581,17 @@ private:
 					},
 					indirect_join);
 		}
-		curgen_.clear();
-		append(finisher.nextgen);
-
 		Stopwatch::Result timing = stopwatch.elapsed();
-		//TODO: total size, summary stats of produced or the entire closed set?
-		fmt::print("Finished combine {} in {} ({}); "
-				"produced {}, globally pruned {}, locally pruned {}, closed size {}.\n",
-				generation_, timing.hms(), timing.utilization(), curgen_.size(),
-				finisher.globalClosedPruned, finisher.localClosedPruned, closed_.size());
+		//Can't report closed set size here because we haven't added yet.
+		fmt::print("Finished computing combine {} in {} ({}); "
+				"produced {}, globally pruned {}, locally pruned {}, "
+				"max resident {:.2f} GiB (+{:.2f}).\n",
+				generation_, timing.hms(), timing.utilization(), finisher.nextgen.size(),
+				finisher.globalClosedPruned, finisher.localClosedPruned,
+				timing.absolute().highwaterGibibytes(), timing.highwaterGibibytes());
+
+		curgen_.clear();
+		append(finisher);
 	}
 
 	void combine_once(const Pack* source, index_type sourceIndex, Finisher& finishAction) {
@@ -664,17 +606,17 @@ private:
 	}
 
 	void do_connect() {
-		Stopwatch connectwatch;
+		auto connectwatch = Stopwatch::process();
 		std::size_t newStart = 0;
 		unsigned int subgeneration = 0;
 		std::size_t totalProduced = 0, totalGlobalPruned = 0, totalLocalPruned = 0;
-		while (curgen_.size() != newStart) {
-			Stopwatch subgenwatch;
+		while (subgeneration_requested_) {
+			auto subgenwatch = Stopwatch::process();
 			Finisher finisher(&closed_);
 			index_type sourceIndexBase = numeric_cast<index_type>(provenance_.size()-(curgen_.size()-newStart));
 			parallel_reduce(tbb::blocked_range<std::size_t>(newStart, curgen_.size()),
 					maybe_owning_ptr<Finisher>(&finisher, false),
-					[](const maybe_owning_ptr<Finisher>& f){return maybe_owning_ptr<Finisher>(new Finisher(*f, tbb::split{}), true);},
+					indirect_split,
 					[&](const tbb::blocked_range<std::size_t>& r, maybe_owning_ptr<Finisher>& finish) {
 						for (std::size_t i = r.begin(); i < r.end(); ++i) {
 							index_type sourceIndex = numeric_cast<index_type>(sourceIndexBase + (i-newStart));
@@ -684,15 +626,16 @@ private:
 							connect(inflated, sourceIndex, locations, *finish);
 						}
 					},
-					[](const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr<Finisher>& rhs) {
-						lhs->join(*rhs);
-					});
+					indirect_join);
 			std::size_t produced = finisher.nextgen.size();
-			newStart = append(finisher.nextgen);
 			Stopwatch::Result timing = subgenwatch.elapsed();
-			fmt::print("Finished connect {}.{} in {} ({}); produced {}, globally pruned {}, locally pruned {}, closed size {}.\n",
-				generation_, subgeneration, timing.hms(), timing.utilization(),
-				produced, finisher.globalClosedPruned, finisher.localClosedPruned, closed_.size());
+			fmt::print("Finished computing connect {}.{} in {} ({}); "
+					"produced {}, globally pruned {}, locally pruned {}, "
+					"max resident {:.2f} GiB (+{:.2f}).\n",
+					generation_, subgeneration, timing.hms(), timing.utilization(),
+					produced, finisher.globalClosedPruned, finisher.localClosedPruned,
+					timing.absolute().highwaterGibibytes(), timing.highwaterGibibytes());
+			newStart = append(finisher);
 			++subgeneration;
 			totalProduced += produced;
 			totalGlobalPruned += finisher.globalClosedPruned;
@@ -704,15 +647,16 @@ private:
 				totalProduced, totalGlobalPruned, totalLocalPruned);
 	}
 
-	std::size_t append(std::vector<PackProv>& next) {
-//		Stopwatch stopwatch;
-//		std::size_t sizeConsidered = 0, sizeCommitted = 0;
-//		auto oldClosedSize = closed_.size();
-
+	virtual std::size_t append(Finisher& finisher) {
 		auto newStart = curgen_.size();
-		for (PackProv& p : next) {
+
+		auto stopwatch = Stopwatch::process();
+		std::size_t sizeConsidered = 0, sizeCommitted = 0;
+		auto oldClosedSize = closed_.size();
+		auto considered = finisher.nextgen.size();
+		finisher.destructive_for_each_pack([&](PackProv& p) {
 			auto size = packed_size(p.first);
-//			sizeConsidered += size;
+			sizeConsidered += size;
 			auto hash = packed_hash(p.first);
 			//If we're globally pruning in Finisher, this should always succeed.
 			if (!closed_.count(p.first, hash)) {
@@ -729,18 +673,543 @@ private:
 				closed_.insert(pack_starts); //TODO: use hash
 				curgen_.push_back(pack_starts);
 				provenance_.push_back(p.second);
-//				sizeCommitted += size;
+				sizeCommitted += size;
 			}
-			//TODO: we could reduce peak memory by freeing pages from the
-			//Finisher feeding us after we're done copying off of them.
+		});
+
+		Stopwatch::Result timing = stopwatch.elapsed();
+		if (considered > 0) //cut down on log spam
+			fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
+					timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
+					considered, sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
+					((double)(closed_.size() - oldClosedSize))/(double)considered, ((double)sizeCommitted)/(double)sizeConsidered);
+		subgeneration_requested_ = curgen_.size() != newStart;
+		generation_requested_ |= subgeneration_requested_;
+		return newStart;
+	}
+};
+
+class DistributedGenerationalSearch : public GenerationalSearch {
+public:
+	DistributedGenerationalSearch(vector<pair<std::string_view, automaton_type>>& inputs,
+			vector<pair<std::string_view, automaton_type>>& targets,
+			std::vector<std::string>& hosts)
+			: GenerationalSearch(inputs, targets), hostnames_(hosts) {
+		std::sort(hostnames_.begin(), hostnames_.end());
+		std::string localhost = localhostname();
+		machine_id_ = numeric_cast<decltype(machine_id_)>(
+				std::find(hostnames_.begin(), hostnames_.end(), localhost) - hostnames_.begin());
+		assoc_.assign(hostnames_.size(), std::numeric_limits<sctp_assoc_t>::max());
+
+		addresses_.reserve(hostnames_.size());
+		for (const auto& name : hostnames_)
+			addresses_.push_back(get_address(name));
+
+		socket_ = socket(AF_INET, SOCK_SEQPACKET, IPPROTO_SCTP);
+		if (socket_ < 0) {
+			perror("socket");
+			std::exit(1);
 		}
 
-//		Stopwatch::Result timing = stopwatch.elapsed();
-//		fmt::print("append took {}ms; curgen {} -> {}, closed {} -> {}; considered {} ({}), committed {} ({}), ratio {} ({}).\n",
-//				timing.millis(), newStart, curgen_.size(), oldClosedSize, closed_.size(),
-//				next.size(), sizeConsidered, closed_.size() - oldClosedSize, sizeCommitted,
-//				((double)(closed_.size() - oldClosedSize))/next.size(), ((double)sizeCommitted)/sizeConsidered);
+		//By default the send and receive buffers can get to tens of gigabytes.
+		//We'll use 256MB (so we pass half that, see man socket(7)).  That's
+		//still probably too big, but the failure mode should be less severe.
+		//This is per-socket, not per-association.  Per-association limits would
+		//help us avoid blocking on a straggling node, but only if we had a
+		//separate send/recv thread per peer node.  (Note that RFC6458 says
+		//SO_SNDBUF is per-association.  Random mailing lists say it's different
+		//on the Linux SCTP implementation.  See also
+		///proc/sys/net/sctp/{snd,rcv}buf_policy.)
+		int buffer_size = 128*1024*1024;
+		for (auto opt : {SO_SNDBUF, SO_RCVBUF}) {
+			int old_size = 0;
+			socklen_t how_big_is_an_int = numeric_cast<socklen_t>(sizeof(old_size));
+			if (getsockopt(socket_, SOL_SOCKET, opt, &old_size, &how_big_is_an_int) < 0) {
+				auto savederrno = errno;
+				fmt::print("getsockopt {}: {}\n", opt, savederrno);
+				std::exit(1);
+			}
+			//Linux doubles it after setting it, so we multiply our new size by 2.
+			if (old_size < 2*buffer_size) continue;
+			if (setsockopt(socket_, SOL_SOCKET, opt, &buffer_size, sizeof(buffer_size)) < 0) {
+				auto savederrno = errno;
+				fmt::print("setsockopt {}: {}\n", opt, savederrno);
+				std::exit(1);
+			}
+		}
+
+		//We need this to get sndrcvinfo filled in later.
+		sctp_event_subscribe events = {};
+		events.sctp_data_io_event = 1;
+		if (setsockopt(socket_, SOL_SCTP, SCTP_EVENTS, &events, sizeof(events)) < 0) {
+			perror("setsockopt SCTP_EVENTS");
+			std::exit(1);
+		}
+		int fragment_interleave = 0;
+		if (setsockopt(socket_, SOL_SCTP, SCTP_FRAGMENT_INTERLEAVE, &fragment_interleave, sizeof(fragment_interleave)) < 0) {
+			perror("setsockopt SCTP_FRAGMENT_INTERLEAVE");
+			std::exit(1);
+		}
+
+		sockaddr_in bind_addr;
+		memset(&bind_addr, 0, sizeof(bind_addr));
+		bind_addr.sin_family = AF_INET;
+		bind_addr.sin_port = htons(12000);
+		bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		if (bind(socket_, (sockaddr*)&bind_addr, sizeof(bind_addr)) < 0) {
+			perror("bind");
+			std::exit(1);
+		}
+
+		if (listen(socket_, 1) < 0) {
+			perror("listen");
+			std::exit(1);
+		}
+
+		//Form an association to ourselves and all machines preceding us.
+		//(Connecting to a node that we've already associated with is an error
+		//that doesn't fill in the association id, so we can't just do the
+		//obvious all-to-all here.)
+		for (unsigned int i = 0; i <= machine_id_; ++i) {
+			sctp_assoc_t assoc;
+			auto timer = Stopwatch::process();
+			int rc = 0, savederrno = 0;
+			//Wait a bit before giving up if the peer isn't listening yet.
+			do {
+				rc = sctp_connectx(socket_, (sockaddr*)&addresses_[i], 1, &assoc);
+				savederrno = errno;
+			} while (rc && savederrno == ECONNREFUSED && timer.elapsed().seconds() < 10);
+			if (rc) {
+				fmt::print("sctp_connectx: {} ({}) to {}\n", strerror(savederrno), savederrno, hostnames_[i]);
+				std::exit(1);
+			}
+			assoc_[i] = assoc;
+		}
+
+		//Get the association id for successors (that connected to us).  We'll
+		//retry this up to a timeout because we're racing the inbound connects.
+		for (unsigned int i = machine_id_+1; i < assoc_.size(); ++i) {
+			auto timer = Stopwatch::process();
+			do {
+				sctp_paddrinfo info = {};
+				std::memcpy(&info.spinfo_address, &addresses_[i], sizeof(sockaddr_in));
+				socklen_t length = sizeof(info);
+				if (getsockopt(socket_, SOL_SCTP, SCTP_GET_PEER_ADDR_INFO, &info, &length) >= 0)
+					assoc_[i] = info.spinfo_assoc_id;
+			} while (assoc_[i] == std::numeric_limits<sctp_assoc_t>::max() && timer.elapsed().seconds() < 10);
+			if (assoc_[i] == std::numeric_limits<sctp_assoc_t>::max()) {
+				fmt::print("{}: unable to get assoc id for {}\n", localhost, hostnames_[i]);
+				std::exit(1);
+			}
+		}
+
+		//Set the default context for received messages to the sender's machine id.
+		for (unsigned int i = 0; i < assoc_.size(); ++i) {
+			sctp_assoc_value defctx = {assoc_[i], i};
+			if (setsockopt(socket_, SOL_SCTP, SCTP_CONTEXT, &defctx, sizeof(defctx)) < 0) {
+				perror("setsockopt SCTP_CONTEXT");
+				std::exit(1);
+			}
+		}
+
+		fmt::print("{} successfully associated with {}\n", localhost, hostnames_);
+	}
+
+protected:
+	std::size_t append(Finisher& finisher) override {
+		auto newStart = curgen_.size();
+		broadcast_control(ControlMsg::READY);
+		std::thread recv(&DistributedGenerationalSearch::recv_thread, this, std::ref(finisher));
+		recv.join();
+
+		if (machine_id_ == 0) {
+			broadcast_finished(true); //finish the broadcast
+			vote(curgen_.size() != newStart);
+			count_votes();
+		} else
+			vote(curgen_.size() != newStart);
+		subgeneration_requested_ = learn_result();
+
+		generation_requested_ |= subgeneration_requested_;
+		fmt::print("{} result is {}\n", hostnames_[machine_id_], subgeneration_requested_);
 		return newStart;
+	}
+
+private:
+	int socket_;
+	std::vector<sctp_assoc_t> assoc_;
+	std::uint8_t machine_id_;
+	std::vector<std::string> hostnames_;
+	std::vector<sockaddr_in> addresses_;
+	//A buffer for ready messages that arrive in learn_result.  The recv thread
+	//processes these before anything else.  This is not explicitly synchronized,
+	//but learn_result returns before the recv thread starts (in the next
+	//subgeneration), and the recv thread is joined before learn_result is called.
+	//If not for the ready message, we'd have to buffer (variable-length) packs.
+	//(We're storing just the source here, as that's all we care about.)
+	std::vector<std::uint8_t> ready_buffer_;
+
+	void send_thread(Finisher& finisher) {
+		//The send thread just blasts packs.
+
+		auto stopwatch = Stopwatch::thread();
+		//TODO: ideally we'd have iovec support so we didn't need this.
+		dynarray<std::byte> buf(1*1024*1024);
+		//Division instructions are faster when the divisor is small, so help
+		//the compiler out by truncating it here.  (C++'s promotion rules will
+		//still promote it to int, but that should be undoable.)
+		std::uint8_t modulus = numeric_cast<std::uint8_t>(assoc_.size());
+		unsigned int packs = 0, loopbackPacks = 0;
+		std::size_t packBytes = 0, loopbackPackBytes = 0;
+		finisher.destructive_for_each_pack([&](PackProv& p) {
+			p.second.machineId = machine_id_; //produced here
+			auto size = packed_size(p.first);
+			auto hash = packed_hash(p.first);
+			auto shard = hash % modulus;
+			send_pack(hash, p.second, p.first, shard, buf);
+			++packs;
+			packBytes += size;
+			if (shard == machine_id_) {
+				++loopbackPacks;
+				loopbackPackBytes += size;
+			}
+		});
+
+		auto elapsed = stopwatch.elapsed();
+		fmt::print("{} finished sending packs in {}. "
+					"{} packs ({} MB), {} loopback ({} MB); "
+					"{} seconds ({} user, {} system), {} switches ({} soft, {} hard).\n",
+				hostnames_[machine_id_], elapsed.hms(),
+				packs, packBytes / (1024*1024), loopbackPacks, loopbackPackBytes / (1024*1024),
+				elapsed.cpuSeconds(), elapsed.userSeconds(), elapsed.systemSeconds(),
+				elapsed.switches(), elapsed.voluntarySwitches(), elapsed.involuntarySwitches());
+
+		broadcast_finished();
+	}
+
+	void recv_thread(Finisher& finisher) {
+		auto stopwatch = Stopwatch::thread();
+		//The recv thread attempts to insert received packs.  It also does some
+		//bookkeeping: it waits for all nodes to be ready before launching the
+		//send thread, and terminates when all nodes have finished sending packs.
+		//We don't use the Finisher at all except to pass it to the send thread.
+		std::thread send; //declared here, but not started until ready.all()
+		boost::dynamic_bitset<std::size_t> ready(assoc_.size()), finished(assoc_.size());
+		dynarray<std::byte> buf(1*1024*1024);
+
+		auto processReady = [&](std::uint8_t source) {
+			bool old = ready.test_set(source);
+			if (old) //TODO: unlikely
+				fmt::print("{} received duplicate or misaddressed ready from {}\n",
+						hostnames_[machine_id_], hostnames_[source]);
+			if (ready.all() && !send.joinable()) {
+				send = std::thread(&DistributedGenerationalSearch::send_thread, this, std::ref(finisher));
+				fmt::print("{} starting send thread, {} after recv\n",
+						hostnames_[machine_id_], stopwatch.elapsed().hms());
+			}
+		};
+
+		//See comment at ready_buffer_ declaration.
+		std::vector<std::string> already_ready;
+		for (std::uint8_t s : ready_buffer_) {
+			processReady(s);
+			already_ready.push_back(hostnames_[s]);
+		}
+		ready_buffer_.clear();
+		fmt::print("{} starting recv, {} nodes already ready: {}\n",
+				hostnames_[machine_id_], already_ready.size(), already_ready);
+
+		unsigned int received = 0, pruned = 0, appended = 0;
+		std::size_t bytesReceived = 0, bytesPruned = 0, bytesAppended = 0;
+		while (true) {
+			AnyMsg msg = recv(buf.begin(), buf.size());
+
+			if (ControlMsg* c = std::get_if<ControlMsg>(&msg)) {
+				bool old;
+				switch (c->msg) {
+					case ControlMsg::READY:
+						fmt::print("{} received ready from {} after {}\n",
+								hostnames_[machine_id_], hostnames_[c->source], stopwatch.elapsed().hms());
+						processReady(c->source);
+						break;
+
+					case ControlMsg::FINISHED:
+						old = finished.test_set(c->source);
+						if (old) //TODO: unlikely
+							fmt::print("{} received duplicate or misaddressed finished from {}\n",
+									hostnames_[machine_id_], hostnames_[c->source]);
+						if (finished.all())
+							goto break_infinite_loop;
+						break;
+
+					default:
+						fmt::print("{} ignoring unexpected control message {} from {}\n",
+								hostnames_[machine_id_], c->msg, hostnames_[c->source]);
+				}
+			} else if (PackMsg* p = std::get_if<PackMsg>(&msg)) {
+				//The standard append stuff.  Hard to usefully refactor with the
+				//normal search because they're looping a Finisher and we aren't.
+				++received;
+				auto size = packed_size(p->pack);
+				bytesReceived += size;
+				if (!closed_.count(p->pack, p->hash)) {
+					assert(size < pages_.page_size());
+					for (auto i : xrange(targets_.size())) {
+						const Target& t = targets_[i];
+						if (t.packed_hash == p->hash || t.mirror_packed_hash == p->hash)
+							fmt::print("found target {}: {}\n", i, p->prov);
+					}
+					if (pages_.current_end() - cur_ < size)
+						cur_ = pages_.allocate();
+					Pack* pack_starts = cur_;
+					cur_ = std::copy(p->pack, p->pack + size, cur_);
+					closed_.insert(pack_starts); //TODO: use hash
+					curgen_.push_back(pack_starts);
+					provenance_.push_back(p->prov);
+					++appended;
+					bytesAppended += size;
+				} else {
+					++pruned;
+					bytesPruned += size;
+				}
+			} else { //TODO: unlikely
+				fmt::print("unhandled message type in recv_thread?!");
+				std::exit(1);
+			}
+		}
+		break_infinite_loop:
+
+		auto elapsed = stopwatch.elapsed(), absolute = elapsed.absolute();
+		fmt::print("{} received {} packs ({} MB) in {}: "
+					"pruned {} ({} MB), appended {} ({} MB). "
+					"Closed size {}, resident {:.2f} GB (+{:.2f} GB). "
+					"{} seconds ({} user, {} system), {} switches ({} soft, {} hard).\n",
+				hostnames_[machine_id_], received, bytesReceived / (1024*1024), elapsed.hms(),
+				pruned, bytesPruned / (1024*1024), appended, bytesAppended / (1024 * 1024),
+				closed_.size(), absolute.highwaterGibibytes(), elapsed.highwaterGibibytes(),
+				elapsed.cpuSeconds(), elapsed.userSeconds(), elapsed.systemSeconds(),
+				elapsed.switches(), elapsed.voluntarySwitches(), elapsed.involuntarySwitches());
+
+		send.join();
+	}
+
+	void broadcast_finished(bool ready_for_votes = false) {
+		auto stopwatch = Stopwatch::thread();
+		//Broadcast to all nodes that we're done sending packs.  This is ordered
+		//with respect to the packs because it's in the same stream.
+		for (auto i : xrange(assoc_.size())) {
+			//Node 0 has special handling.  At first we only message ourselves.
+			//Then when we're ready to accept votes (after receiving finished
+			//messages from all other nodes), we complete the broadcast.
+			//If we're finishing an earlier broadcast, skip messaging ourselves
+			if (machine_id_ == 0 && i == 0 && ready_for_votes) continue;
+			//If this is the first broadcast, stop after messaging ourselves.
+			if (machine_id_ == 0 && i > 0 && !ready_for_votes) return;
+
+			auto individual = Stopwatch::thread();
+
+			send_control(ControlMsg::FINISHED, i);
+
+			auto individual_time = individual.elapsed();
+			if (individual_time.seconds() > 3)
+				fmt::print("{} took {} to send finished to {}\n",
+						hostnames_[machine_id_], individual_time.hms(), hostnames_[i]);
+		}
+
+		fmt::print("{} broadcast finish in {}\n", hostnames_[machine_id_], stopwatch.elapsed().hms());
+	}
+
+	void vote(bool want_subgen) {
+		send_control(want_subgen ? ControlMsg::VOTE_AYE : ControlMsg::VOTE_NAY, 0);
+	}
+
+	void count_votes() {
+		auto stopwatch = Stopwatch::thread();
+		boost::dynamic_bitset<std::size_t> voted(assoc_.size()), wants(assoc_.size());
+		while (true) {
+			ControlMsg m = recv_control();
+			unsigned int voter = m.source;
+			bool vote = m.msg == ControlMsg::VOTE_AYE;
+
+			if (m.msg != ControlMsg::VOTE_AYE && m.msg != ControlMsg::VOTE_NAY) {//TODO: unlikely
+				fmt::print("bad vote {} from {}\n", m.msg, hostnames_[voter]);
+				continue; //maybe they'll vote again, properly?
+			}
+
+			fmt::print("vote: {} {} (after {})\n", hostnames_[voter], vote, stopwatch.elapsed().hms());
+			voted[voter] = true;
+			wants[voter] = vote;
+			if (voted.all())
+				break;
+		}
+
+		bool result = wants.any();
+		fmt::print("voting result is {}; voting took {}\n", result, stopwatch.elapsed().hms());
+		broadcast_control(result ? ControlMsg::RESULT_AYE : ControlMsg::RESULT_NAY);
+	}
+
+	bool learn_result() {
+		while (true) {
+			ControlMsg m = recv_control();
+			//See comment at ready_buffer_ declaration.
+			if (m.msg == ControlMsg::READY) {
+				ready_buffer_.push_back(m.source);
+				continue;
+			}
+			if (m.source != 0 || (m.msg != ControlMsg::RESULT_AYE && m.msg != ControlMsg::RESULT_NAY)) //TODO: unlikely
+				fmt::print("{} got bad result message {} from {}\n", hostnames_[machine_id_], m.msg, hostnames_[m.source]);
+			return m.msg == ControlMsg::RESULT_AYE;
+		}
+	}
+
+	struct Msg {
+		sctp_assoc_t assoc;
+		std::uint8_t source;
+		//Other things we could put here if we start using them:
+//		std::uint16_t stream;
+//		std::uint32_t ppid;
+	};
+	struct PackMsg : Msg {
+		std::size_t hash;
+		Provenance prov;
+		std::byte* pack;
+		std::byte* end; //for redundant checks against packed_size
+	};
+	struct ControlMsg : Msg {
+		//ready to receive packs
+		constexpr static std::byte READY = std::byte{0};
+		//finished sending packs
+		constexpr static std::byte FINISHED = std::byte{1};
+		constexpr static std::byte VOTE_AYE = std::byte{2};
+		constexpr static std::byte VOTE_NAY = std::byte{3};
+		constexpr static std::byte RESULT_AYE = std::byte{4};
+		constexpr static std::byte RESULT_NAY = std::byte{5};
+		std::byte msg;
+	};
+	using AnyMsg = std::variant<PackMsg, ControlMsg>;
+
+	AnyMsg recv(std::byte* buf, std::size_t len) {
+		sctp_sndrcvinfo info = {};
+		int flags = 0;
+		unsigned int total_read = 0;
+		//Partial reads are explicitly possible if the stack is "short on buffers".
+		//We disabled interleaving on this socket.
+		while (!(flags & MSG_EOR)) {
+			//TODO: if the buffer's empty, complain and/or discard the partial packet
+			int delta_read = sctp_recvmsg(socket_, buf+total_read, len-total_read,
+					nullptr, nullptr, //we ignore the socket address in favor of the assoc id
+					&info, &flags);
+			if (delta_read < 0) //TODO: unlikely
+				perror("sctp_recvmsg");
+			total_read += delta_read;
+		}
+
+		if (total_read < 1) { //unlikely
+			fmt::print("{} received message too short {} from {}\n", hostnames_[machine_id_],
+					total_read, hostnames_[info.sinfo_context]);
+			std::exit(1); //dunno what to do here
+		}
+
+		if (total_read == 1) {
+			ControlMsg m = {};
+			common_msg_init(m, info);
+			m.msg = buf[0];
+			//TODO: check m.msg is valid message type
+			return m;
+		}
+
+		if (total_read < sizeof(PackMsg::hash) + sizeof(PackMsg::prov) + 4 /* min pack size */) { //unlikely
+			fmt::print("{} received message too short {} from {}\n", hostnames_[machine_id_],
+					total_read, hostnames_[info.sinfo_context]);
+			std::exit(1); //dunno what to do here
+		}
+
+		PackMsg m;
+		common_msg_init(m, info);
+		m.end = buf + total_read;
+		buf = unbuild(buf, &m.hash, sizeof(m.hash));
+		m.pack = unbuild(buf, &m.prov, sizeof(m.prov));
+		return m;
+	}
+	ControlMsg recv_control() {
+		std::byte buf;
+		AnyMsg m = recv(&buf, sizeof(buf));
+		if (auto pcm = std::get_if<ControlMsg>(&m))
+			return *pcm;
+		fmt::print("{} received pack when expecting control message\n", hostnames_[machine_id_]);
+		std::exit(1);
+	}
+
+	void send_control(std::byte msg, unsigned long dest) {
+		sctp_sndrcvinfo info = {};
+		info.sinfo_assoc_id = assoc_[dest];
+		int sent = sctp_send(socket_, &msg, sizeof(msg), &info, MSG_EOR);
+		if (sent < numeric_cast<int>(sizeof(msg))) {//TODO: unlikely
+			auto savederrno = errno;
+			fmt::print("Problem sending control message {} from {} to {}: {} {}\n",
+					msg, hostnames_[machine_id_], hostnames_[dest], msg, strerror(savederrno));
+		}
+	}
+	void broadcast_control(std::byte msg) {
+		for (auto i : xrange(assoc_.size()))
+			send_control(msg, i);
+	}
+
+	static void common_msg_init(Msg& m, sctp_sndrcvinfo& info) {
+		m.assoc = info.sinfo_assoc_id;
+		m.source = numeric_cast<std::uint8_t>(info.sinfo_context);
+	}
+
+	void send_pack(std::size_t hash, Provenance prov, const std::byte* pack,
+			unsigned long shard, dynarray<std::byte>& buf) {
+		auto size = packed_size(pack);
+		if (size + sizeof(hash) + sizeof(prov) > buf.size()) //TODO: unlikely macro
+			fmt::print("{} skipping oversized pack {}\n", hostnames_[machine_id_], size);
+
+		auto next = build(buf.begin(), &hash, sizeof(hash));
+		next = build(next, &prov, sizeof(prov));
+		next = build(next, pack, size);
+		std::size_t len = static_cast<std::size_t>(next - buf.begin());
+
+		sctp_sndrcvinfo info = {};
+		info.sinfo_assoc_id = assoc_[shard];
+		int sent = sctp_send(socket_, buf.begin(), len, &info, MSG_EOR);
+		if (sent < 0) { //TODO: unlikely
+			auto savederrno = errno;
+			fmt::print("sctp_send while sending a pack of len {}, hash {}, prov {} to {}: {} ({})\n",
+					len, hash, prov, hostnames_[shard], strerror(savederrno), savederrno);
+		}
+		if (static_cast<std::size_t>(sent) < len) //TODO: unlikely
+			fmt::print("{} short pack write? wrote {} of {}\n", hostnames_[machine_id_], sent, len);
+	}
+
+	static std::byte* build(std::byte* dest, const void* src, int count) {
+		std::memcpy(dest, src, count);
+		return dest + count;
+	}
+	static std::byte* unbuild(std::byte* src, void* dest, int count) {
+		std::memcpy(dest, src, count);
+		return src + count;
+	}
+
+	static sockaddr_in get_address(const std::string& hostname) {
+		//This assumes there's only going to be one address, or at least that
+		//the first one is all we need.
+		addrinfo hints = {};
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_SEQPACKET;
+		hints.ai_protocol = IPPROTO_SCTP;
+		hints.ai_flags = AI_NUMERICSERV;
+		addrinfo* infos;
+		int rc = getaddrinfo(hostname.c_str(), "12000", &hints, &infos);
+		if (rc) {
+			fmt::print("getaddrinfo: {}\n", gai_strerror(rc));
+			std::exit(1);
+		}
+		sockaddr_in ret = {};
+		std::memcpy(&ret, infos->ai_addr, sizeof(sockaddr_in));
+		freeaddrinfo(infos);
+		return ret;
 	}
 };
 
@@ -760,8 +1229,23 @@ automaton_type automatonFromArg(std::string_view arg) {
 }
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
-	vector<pair<std::string_view, automaton_type>> inputs, outputs;
+	setlinebuf(stdout);
 
+	std::time_t start_time = std::time(nullptr);
+	fmt::print("{} starting at {:%F %T} ({}).\n", localhostname(), *std::gmtime(&start_time), start_time);
+
+	std::vector<std::string> hosts;
+	if (const char* nodes = std::getenv("SLURM_STEP_NODELIST")) {
+		boost::process::ipstream pipe;
+		std::string command = fmt::format("scontrol show hostnames {}", nodes);
+		boost::process::child child(command, boost::process::std_out > pipe);
+		std::string line;
+		while (pipe && std::getline(pipe, line) && !line.empty())
+			hosts.push_back(line);
+		child.wait();
+	}
+
+	vector<pair<std::string_view, automaton_type>> inputs, outputs;
 	std::vector<std::string_view> input_tokens = split_view(argv[1], ','),
 			output_tokens = split_view(argv[2], ',');
 	for (auto name : input_tokens)
@@ -769,9 +1253,16 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	for (auto name : output_tokens)
 		outputs.emplace_back(name, automatonFromArg(name));
 
-	GenerationalSearch gs(inputs, outputs);
-	for (int generation = 1; ; ++generation)
-		gs.advance();
+	if (hosts.size() <= 1) {
+		//running locally (inside or outside of SLURM doesn't matter)
+		GenerationalSearch gs(inputs, outputs);
+		for (int generation = 1; ; ++generation)
+			gs.advance();
+	} else {
+		DistributedGenerationalSearch gs(inputs, outputs, hosts);
+		for (int generation = 1; ; ++generation)
+			gs.advance();
+	}
 
 	return 0;
 }
