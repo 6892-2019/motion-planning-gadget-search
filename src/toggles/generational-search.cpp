@@ -240,17 +240,30 @@ void indirect_join(const maybe_owning_ptr<Finisher>& lhs, const maybe_owning_ptr
 	lhs->join(*rhs);
 }
 
+using StatePair = pair<AutomatonBase::state_type, AutomatonBase::state_type>;
+using StatePairSet = tsl::hopscotch_set<StatePair, boost::hash<StatePair>>;
 template<class Iter>
-void setInitialStatesToAcceptingStatesInRange(automaton_type& a, Iter first, Iter last) {
+StatePairSet setInitialStatesToAcceptingStatesInRange(automaton_type& a, Iter first, Iter last, const StatePairSet& epsilonEdges) {
 	using state_type = automaton_type::state_type;
+	StatePairSet pairs;
 	state_type s = a.addState();
 	for (state_type t : make_range_for_pair(first, last))
-		if (a.accept(t))
+		if (a.accept(t)) {
 			a.addEpsilon(s, t);
+			//we're going to swap 0 and s below
+			pairs.emplace(0, t);
+		}
 	a.swapStateNumbers(0, s);
+	for (StatePair p : epsilonEdges) {
+		//remap 0 to s (s is new so we don't have to check for it)
+		auto first = p.first == 0 ? s : p.first;
+		auto second = p.second == 0 ? s : p.second;
+		pairs.emplace(first, second);
+	}
+	return pairs;
 }
 
-bool enjoin(automaton_type& a, automaton_type::symbol_type l, automaton_type::symbol_type m) {
+bool enjoin(automaton_type& a, automaton_type::symbol_type l, automaton_type::symbol_type m, StatePairSet& epsilonEdges) {
 	using state_type = automaton_type::state_type;
 	bool progress, changed = false;
 	//TODO: instead of fixpoint iteration, we should put the changed state s
@@ -263,14 +276,20 @@ bool enjoin(automaton_type& a, automaton_type::symbol_type l, automaton_type::sy
 			for (state_type d : dests) {
 				assert(a.accept(d));
 				for (state_type e : a.step(d, m))
-					progress |= a.addEpsilon(s, e);
+					if (a.addEpsilon(s, e)) {
+						progress = true;
+						epsilonEdges.emplace(s, e);
+					}
 			}
 
 			dests = a.step(s, m);
 			for (state_type d : dests) {
 				assert(a.accept(d));
 				for (state_type e : a.step(d, l))
-					progress |= a.addEpsilon(s, e);
+					if (a.addEpsilon(s, e)) {
+						progress = true;
+						epsilonEdges.emplace(s, e);
+					}
 			}
 		}
 		changed |= progress;
@@ -378,11 +397,82 @@ auto predecessorless_accept_components(const automaton_type& a, const SCCs& sccs
 			});
 }
 
+bool transitiveEpsilonClosure(automaton_type& a, StatePairSet& epsilonEdges) {
+	using state_type = automaton_type::state_type;
+	//Build an adjacency list so we can quickly find the possible second edges.
+	//TODO: pmr would be handy here to amortize the vector allocations
+	tsl::hopscotch_map<state_type, vector<state_type>> adjacency;
+	for (pair<state_type, state_type> p : epsilonEdges)
+		adjacency[p.first].push_back(p.second);
+
+	tsl::hopscotch_map<state_type, vector<state_type>> nextAdjacency;
+	StatePairSet nextEdges;
+	bool progress = false;
+	for (pair<state_type, state_type> p : epsilonEdges)
+		for (state_type dest : adjacency[p.second])
+			if (!epsilonEdges.count({p.first, dest})) {
+				a.addEpsilon(p.first, dest);
+				progress = true; //even if addEpsilon did nothing, consider more edges next iteration
+				//Can't add to epsilonEdges because insert invalidates iterators,
+				//We could add to adjacency because if addEpsilon did something,
+				//we know p.first and dest both != p.second, so there's no risk
+				//of reallocating the vector from under us, but it's still
+				//convenient to build a separate map.
+				nextEdges.emplace(p.first, dest);
+				nextAdjacency[p.first].push_back(dest);
+			}
+	if (!progress)
+		return false;
+
+	//In remaining iterations, we must use edges added in the previous iteration
+	//to actually change anything.  That means we need to read the old variables
+	//while (maybe) building new ones.
+	tsl::hopscotch_map<state_type, vector<state_type>> prevAdjacency;
+	StatePairSet prevEdges;
+	while (progress) {
+		progress = false;
+		prevAdjacency.swap(nextAdjacency);
+		prevEdges.swap(nextEdges);
+		//Update the edge set and adjacency list with last iteration's edges.
+		epsilonEdges.insert(prevEdges.begin(), prevEdges.end());
+		for (auto it = prevAdjacency.begin(), end = prevAdjacency.end(); it != end; ++it) {
+			auto& target = adjacency[it->first];
+			target.insert(target.begin(), it->second.begin(), it->second.end());
+		}
+		nextAdjacency.clear();
+		nextEdges.clear();
+
+		for (pair<state_type, state_type> p : prevEdges)
+			for (state_type dest : adjacency[p.second])
+				if (!epsilonEdges.count({p.first, dest})) {
+					a.addEpsilon(p.first, dest);
+					progress = true;
+					nextEdges.emplace(p.first, dest);
+					nextAdjacency[p.first].push_back(dest);
+				}
+		for (pair<state_type, state_type> p : epsilonEdges) {
+			auto it = prevAdjacency.find(p.second);
+			if (it == prevAdjacency.end()) continue;
+			for (state_type dest : it->second)
+				if (!epsilonEdges.count({p.first, dest})) {
+					a.addEpsilon(p.first, dest);
+					progress = true;
+					nextEdges.emplace(p.first, dest);
+					nextAdjacency[p.first].push_back(dest);
+				}
+		}
+	}
+	return true;
+}
+
 void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, const Provenance* combineData, //could also be optional<Provenance>
 		unsigned int locations, unsigned int connectPoint, Finisher& finisher) {
 	automaton_type connected = a;
-	enjoin(connected, connectPoint, (connectPoint+1) % locations); //TODO: maybe branch instead of modulo
-	acceptingClosure(connected, locations);
+	StatePairSet epsilonEdges;
+	enjoin(connected, connectPoint, (connectPoint+1) % locations, epsilonEdges);
+	acceptingClosure(connected, locations, [&epsilonEdges](automaton_type::state_type a, automaton_type::state_type b) {
+		epsilonEdges.emplace(a, b);
+	});
 	auto alphamap = connect_alphamap(locations, connectPoint);
 	connected.renumberAlphabet(alphamap.begin());
 
@@ -406,7 +496,10 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, const Proven
 
 					automaton_type op = connected;
 //					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
-					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(roots[c]), sccs.end(roots[c]));
+					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(roots[c]), sccs.end(roots[c]), epsilonEdges);
+					auto beforesize = connected.transition_size();
+					transitiveEpsilonClosure(connected, epsilonEdges);
+					fmt::print("transclose added {}\n", connected.transition_size() - beforesize);
 					op.minimize();
 					automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
 					if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
