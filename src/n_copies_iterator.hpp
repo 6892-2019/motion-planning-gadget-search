@@ -166,11 +166,11 @@ private:
 	//overflow-aware bounds checks, we'll just promote to a larger signed type.
 	using bounds_check_type = std::int64_t;
 	void check_offset_dereferenceable(bounds_check_type offset) const {
-		bounds_check_type actual = pos_ + offset;
+		[[maybe_unused]] bounds_check_type actual = pos_ + offset;
 		assert(0 <= actual && actual < bound_);
 	}
 	void check_offset_inbounds(bounds_check_type offset) const {
-		bounds_check_type actual = pos_ + offset;
+		[[maybe_unused]] bounds_check_type actual = pos_ + offset;
 		assert(0 <= actual && actual <= bound_);
 	}
 };
