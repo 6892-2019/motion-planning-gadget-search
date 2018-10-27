@@ -147,6 +147,26 @@ TEST_CASE("AutomatonTest_Determinize08") {
 	determinizePreservesLanguage(pathologicalZeroZeroAlt());
 }
 
+namespace {
+//Builds an NFA where at least one DFA state has a corresponding NFA state set
+//of the given size.
+Automaton<2> hitNFAStateSetSize(unsigned int size) {
+	Automaton<2> a;
+	for (unsigned int i = 0; a.state_size() < size; ++i) {
+		a.addState();
+		a.setAccept(i);
+		a.addTrans(0, 0, i);
+	}
+	return a;
+}
+}
+
+TEST_CASE("AutomatonTest_Determinize09") {
+	determinizePreservesLanguage(hitNFAStateSetSize(254));
+	determinizePreservesLanguage(hitNFAStateSetSize(255));
+	determinizePreservesLanguage(hitNFAStateSetSize(256));
+}
+
 TEST_CASE("AutomatonTest_Totalize") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone

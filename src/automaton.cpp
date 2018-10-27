@@ -476,52 +476,53 @@ private:
 	}
 };
 
+template<typename value_type>
 class vectorish {
 	constexpr static std::size_t minimum_alloc_size = 16;
 	monotonic_buffer_resource& alloc_;
 	//begin_ points 1 ahead of the start of the memory block to allow space for
 	//the size in the data()/raw representation.
-	state_type* begin_;
-	state_type* end_;
-	state_type* capacity_;
+	value_type* begin_;
+	value_type* end_;
+	value_type* capacity_;
 public:
 	vectorish(monotonic_buffer_resource& alloc) : alloc_(alloc) {
-		state_type* p = alloc_.allocate<state_type>(minimum_alloc_size);
+		value_type* p = alloc_.allocate<value_type>(minimum_alloc_size);
 		begin_ = p + 1; //leave space for size in data() representation
 		end_ = begin_;
 		capacity_ = p + minimum_alloc_size;
 	}
-	state_type size() {
-		return static_cast<state_type>(end_ - begin_);
+	value_type size() {
+		return static_cast<value_type>(end_ - begin_);
 	}
 	bool empty() {
 		return size() == 0;
 	}
-	state_type* begin() {
+	value_type* begin() {
 		return begin_;
 	}
-	state_type* end() {
+	value_type* end() {
 		return end_;
 	}
-	state_type* data() {
+	value_type* data() {
 		*(begin_ - 1) = size();
 		return begin_ - 1;
 	}
-	void push_back(state_type state) {
+	void push_back(value_type state) {
 		if (end_ == capacity_) {
 			std::size_t cap = capacity_ - (begin_-1);
 			std::size_t newcap = std::max(cap * 2, minimum_alloc_size);
-			state_type* p = alloc_.allocate<state_type>(newcap);
+			value_type* p = alloc_.allocate<value_type>(newcap);
 			end_ = std::copy(begin(), end(), p+1);
 			//Just futureproofing in case we change to, e.g., a pool resource.
-			alloc_.deallocate(begin_ - 1, cap * sizeof(state_type));
+			alloc_.deallocate(begin_ - 1, cap * sizeof(value_type));
 			begin_ = p + 1;
 			capacity_ = p + newcap;
 		}
 		*end_++ = state;
 	}
 	//for erase-unique idiom, that's it
-	void eraseAfter(state_type* newEnd) {
+	void eraseAfter(value_type* newEnd) {
 		end_ = newEnd;
 	}
 	void clear() {
@@ -533,7 +534,7 @@ public:
 	void release() {
 		assert((*(begin_-1) == size()) && "releasing without setting size; shouldn't you have called data() first?");
 		if (end_ == capacity_) {
-			state_type* p = alloc_.allocate<state_type>(minimum_alloc_size);
+			value_type* p = alloc_.allocate<value_type>(minimum_alloc_size);
 			begin_ = p + 1; //leave space for size in data() representation
 			end_ = begin_;
 			capacity_ = p + minimum_alloc_size;
@@ -547,8 +548,8 @@ public:
 	}
 };
 
-template<class AddStateAction, class AddTransAction>
-bool determinize(const AutomatonBase& source, AddStateAction addState, AddTransAction addTrans,
+template<typename nfa_state, class AddStateAction, class AddTransAction>
+bool determinize(const AutomatonBase& source, AddStateAction&& addState, AddTransAction&& addTrans,
 		state_type max_states = std::numeric_limits<state_type>::max(),
 		std::size_t max_bytes = std::numeric_limits<std::size_t>::max()) {
 	if (source.state_size() <= 64)
@@ -560,38 +561,38 @@ bool determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 
 	//A set is a sorted sequence of state_type, with a preceding state_type
 	//storing the set's size.
-	auto set_begin = [](state_type* set) {
+	auto set_begin = [](nfa_state* set) {
 		return set+1;
 	};
-	auto set_end = [&](state_type* set) {
+	auto set_end = [&](nfa_state* set) {
 		return set_begin(set) + *set;
 	};
 
-	auto set_equal = [&](state_type* left, state_type* right) {
+	auto set_equal = [&](nfa_state* left, nfa_state* right) {
 		//TODO: this could be *left == *right && !memcmp(left, right, *left + 1);
 		//^we have to check the size first so we don't read off the end of a page
 		return std::equal(set_begin(left), set_end(left), set_begin(right), set_end(right));
 	};
-	auto set_hash = [](state_type* set) {
+	auto set_hash = [](nfa_state* set) {
 		//this includes the size of the set as the first element of the hash
 		return farmhash::Hash(reinterpret_cast<char*>(set), (*set + 1) * sizeof(*set));
 	};
-	tsl::hopscotch_map<state_type*, state_type,
+	tsl::hopscotch_map<nfa_state*, state_type,
 			decltype(std::ref(set_hash)), decltype(std::ref(set_equal)),
-			std::allocator<std::pair<state_type*, state_type>>, //TODO: pmr?
+			std::allocator<std::pair<nfa_state*, state_type>>, //TODO: pmr?
 			30, true /* store the hash */> newstate(state_size,
 			std::ref(set_hash), std::ref(set_equal));
-	circular_deque<std::pair<state_type*, state_type>, 16> worklist;
+	circular_deque<std::pair<nfa_state*, state_type>, 16> worklist;
 
 	//We have one open/pending set of next states per symbol.
-	vectorish* nexts = alloc.allocate<vectorish>(alphabet_size);
+	vectorish<nfa_state>* nexts = alloc.allocate<vectorish<nfa_state>>(alphabet_size);
 	for (symbol_type i = 0; i < alphabet_size; ++i)
-		::new (nexts+i) vectorish(alloc);
+		::new (nexts+i) vectorish<nfa_state>(alloc);
 
 	//Insert the initial state.
 	state_type newStates = 0;
 	nexts[0].push_back(0);
-	state_type* first_set = nexts[0].data();
+	nfa_state* first_set = nexts[0].data();
 	newstate.insert({first_set, newStates});
 	worklist.push_back({first_set, newStates++});
 	addState(source.accept(0));
@@ -599,16 +600,16 @@ bool determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 
 	while (!worklist.empty()) {
 		auto [current_set, current_state] = worklist.pop_back();
-		for (state_type f : make_range_for_pair(set_begin(current_set), set_end(current_set)))
+		for (nfa_state f : make_range_for_pair(set_begin(current_set), set_end(current_set)))
 			source.for_each_transition(f, [nexts](symbol_type symbol, state_type dest) {
-				nexts[symbol].push_back(dest);
+				nexts[symbol].push_back(numeric_cast<nfa_state>(dest));
 			});
 		//As long as vectorish assumes allocations are infallible, there's no
 		//better way than to check periodically whether we've allocated too much.
 		if (alloc.total_allocated() > max_bytes)
 			return false;
 		for (symbol_type s = 0; s < alphabet_size; ++s) {
-			vectorish& next = nexts[s];
+			vectorish<nfa_state>& next = nexts[s];
 			if (next.empty())
 				continue; //all NFA states crashed
 			std::sort(next.begin(), next.end());
@@ -617,7 +618,7 @@ bool determinize(const AutomatonBase& source, AddStateAction addState, AddTransA
 			if (inserted) {
 				newStates++;
 				bool accepting = std::any_of(next.begin(), next.end(),
-						[&source](state_type state) {return source.accept(state);});
+						[&source](nfa_state state) {return source.accept(state);});
 				addState(accepting);
 				if (newStates > max_states)
 					return false;
@@ -635,13 +636,21 @@ void determinize_into(const AutomatonBase& source, AutomatonBase& target) {
 	assert(source.alphabet_size() == target.alphabet_size());
 	assert(target.state_size() == 0);
 	target.reserve(source.state_size()); //a reasonable lower bound for connected automata
-	determinize(source, [&target](bool b){
-			state_type newState = target.addState();
-			if (b) target.setAccept(newState);
-		}, [&target](auto from, auto on, auto to) {
-			target.addTrans(from, on, to);
-			assert(target.deterministic());
-		});
+	auto addStateAction = [&target](bool b) {
+		state_type newState = target.addState();
+		if (b) target.setAccept(newState);
+	};
+	auto addTransAction = [&target](auto from, auto on, auto to) {
+		target.addTrans(from, on, to);
+		assert(target.deterministic());
+	};
+	state_type incomingSize = source.state_size();
+	if (incomingSize < std::numeric_limits<std::uint8_t>::max())
+		determinize<std::uint8_t>(source, addStateAction, addTransAction);
+	else if (incomingSize < std::numeric_limits<std::uint16_t>::max())
+		determinize<std::uint16_t>(source, addStateAction, addTransAction);
+	else
+		determinize<std::uint32_t>(source, addStateAction, addTransAction);
 }
 
 std::optional<ExplodedAutomaton> determinize_explode(const AutomatonBase& source,
@@ -649,13 +658,22 @@ std::optional<ExplodedAutomaton> determinize_explode(const AutomatonBase& source
 	std::vector<Edge> edges;
 	std::vector<state_type> accept;
 	state_type stateSize = 0;
-	bool success = determinize(source, [&accept, &stateSize](bool b) {
-			if (b) accept.push_back(stateSize);
-			++stateSize;
-		},
-		[&edges](auto from, auto on, auto to){
-			edges.push_back({from, on, to});
-		}, max_states, max_bytes);
+	auto addStateAction = [&accept, &stateSize](bool b) {
+		if (b) accept.push_back(stateSize);
+		++stateSize;
+	};
+	auto addTransAction = [&edges](auto from, auto on, auto to) {
+		edges.push_back({from, on, to});
+	};
+
+	bool success;
+	state_type incomingSize = source.state_size();
+	if (incomingSize < std::numeric_limits<std::uint8_t>::max())
+		success = determinize<std::uint8_t>(source, addStateAction, addTransAction, max_states, max_bytes);
+	else if (incomingSize < std::numeric_limits<std::uint16_t>::max())
+		success = determinize<std::uint16_t>(source, addStateAction, addTransAction, max_states, max_bytes);
+	else
+		success = determinize<std::uint32_t>(source, addStateAction, addTransAction, max_states, max_bytes);
 	if (!success)
 		return std::nullopt;
 	//std;:optional construction disagrees with aggregates
