@@ -378,6 +378,80 @@ auto predecessorless_accept_components(const automaton_type& a, const SCCs& sccs
 			});
 }
 
+void loopbackOptimization(automaton_type& a) {
+	using state_type = automaton_type::state_type;
+	using symbol_type = automaton_type::symbol_type;
+	using halfedge = std::pair<symbol_type, state_type>;
+	using stuff = std::vector<halfedge>; //sorted
+	auto active = a.activeAlphabet();
+	tsl::hopscotch_map<stuff, state_type, boost::hash<stuff>> edgeToState;
+	tsl::hopscotch_map<state_type, stuff> stateToEdge;
+	//TODO: somehow share the stuff vectors between maps
+	//maybe make stateToEdge an array and let the map point into it (though we
+	//might reallocate it when adding new loopback states, so it would need to
+	//be indices instead of pointers/iterators)
+
+	stuff edgeset;
+	for (state_type s : xrange(a.state_size())) {
+		if (a.accept(s)) continue; //TODO: make this a for_each_nonaccept loop
+		edgeset.clear();
+		a.for_each_transition(s, [&](symbol_type a, state_type d){edgeset.emplace_back(a, d);});
+		std::sort(edgeset.begin(), edgeset.end());
+		edgeset.erase(std::unique(edgeset.begin(), edgeset.end()), edgeset.end());
+		//If there are two states with precisely the same outgoing edgeset, it
+		//doesn't matter which we use, but we should probably merge them too.
+		edgeToState.insert_or_assign(edgeset, s);
+		stateToEdge.insert_or_assign(s, edgeset); //TODO: move edgeset when we figure out how to share it
+	}
+
+	//For each accepting state, find the state(s) it goes to on each symbol and
+	//see if they have loopback edges.  If so, delete that loopback edge and try
+	//to replace it.  TODO: what if there are two loopback edges to the same state?  should work?
+
+	//Can't safely do for_each_accept here as we'll be adding states.
+	for (state_type p : xrange(a.state_size())) {
+		if (!a.accept(p)) continue;
+		for (symbol_type s : active) {
+			for (state_type q : a.step(p, s)) {
+				const auto& candidateEdges = stateToEdge[q];
+				halfedge loopback(s, p);
+				//TODO: move this into the if once NetBeans supports that
+				auto it = std::find(candidateEdges.begin(), candidateEdges.end(), loopback);
+				if (it != candidateEdges.end()) {
+					edgeset = candidateEdges;
+					edgeset.erase(edgeset.begin() + (it - candidateEdges.begin()));
+					auto it2 = edgeToState.find(edgeset);
+					if (it2 != edgeToState.end()) {
+						state_type qn = it2->second;
+						//Replace p's transition to q on s with a transition to qn on s.
+						//Then find/create a state having solely the loopback edge
+						//and give p a transition to it on s.
+						a.removeTrans(p, s, q);
+						a.addTrans(p, s, qn);
+
+						edgeset.clear();
+						edgeset.emplace_back(s, p);
+						it2 = edgeToState.find(edgeset);
+						if (it2 == edgeToState.end()) {
+							state_type n = a.addState();
+							a.addTrans(n, s, p);
+							it2 = edgeToState.insert_or_assign(edgeset, n).first;
+							stateToEdge.insert_or_assign(n, edgeset);
+						}
+						a.addTrans(p, s, it2->second);
+//						fmt::print("hit: replaced {} {} {} with {} and {}\n", p, s, q, qn, it2->second);
+						//No use looking at further states on this symbol.
+						//TODO: am I sure?
+						break;
+					} else {
+//						fmt::print("missed, TODO better message\n");
+					}
+				}
+			}
+		}
+	}
+}
+
 void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, const Provenance* combineData, //could also be optional<Provenance>
 		unsigned int locations, unsigned int connectPoint, Finisher& finisher) {
 	automaton_type connected = a;
@@ -407,6 +481,8 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, const Proven
 					automaton_type op = connected;
 //					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
 					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(roots[c]), sccs.end(roots[c]));
+					op.optimize();
+					loopbackOptimization(op);
 					op.minimize();
 					automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
 					if (active.size() <= 1) continue; //there are no interesting 1-symbol automata

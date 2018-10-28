@@ -288,6 +288,13 @@ public:
 
 	bool addTrans(state_type from, symbol_type symbol, state_type to) override;
 
+	/**
+	 * Removes the given transition from this automaton if present.
+	 * @return true iff this automaton was modified (the transition existed and
+	 * was removed)
+	 */
+	bool removeTrans(state_type from, symbol_type symbol, state_type to);
+
 	bool setAccept(state_type state, bool accepts = true) override;
 
 	void clear() override;

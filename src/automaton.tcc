@@ -225,6 +225,24 @@ bool Automaton<AlphabetSize>::addTrans(state_type from, symbol_type symbol, stat
 }
 
 template<unsigned int AlphabetSize>
+bool Automaton<AlphabetSize>::removeTrans(state_type from, symbol_type symbol, state_type to) {
+	assert(from < state_size());
+	assert(to < state_size());
+	assert(symbol < alphabet_size_v);
+	for (auto t = transitions_[from].begin(), end = transitions_[from].end(); t != end; ++t)
+		if (t->next_ == to) {
+			if (!t->symbols_[symbol])
+				return false;
+			t->symbols_.reset(symbol);
+			if (t->symbols_.none())
+				transitions_[from].erase(t);
+			minimal_ = canonical_ = false;
+			return true;
+		}
+	return false;
+}
+
+template<unsigned int AlphabetSize>
 bool Automaton<AlphabetSize>::setAccept(state_type state, bool accepts) {
 	bool old = accept_.test(state);
 	accept_.set(state, accepts);
