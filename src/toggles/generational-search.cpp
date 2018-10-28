@@ -397,7 +397,6 @@ void loopbackOptimization(automaton_type& a) {
 		edgeset.clear();
 		a.for_each_transition(s, [&](symbol_type a, state_type d){edgeset.emplace_back(a, d);});
 		std::sort(edgeset.begin(), edgeset.end());
-		edgeset.erase(std::unique(edgeset.begin(), edgeset.end()), edgeset.end());
 		//If there are two states with precisely the same outgoing edgeset, it
 		//doesn't matter which we use, but we should probably merge them too.
 		edgeToState.insert_or_assign(edgeset, s);
@@ -408,6 +407,10 @@ void loopbackOptimization(automaton_type& a) {
 	//see if they have loopback edges.  If so, delete that loopback edge and try
 	//to replace it.  TODO: what if there are two loopback edges to the same state?  should work?
 
+	auto origsize = a.state_size();
+	auto orighash = a.hash();
+//	if (origsize == 704)
+//		fmt::print("hash {}\n", a.hash());
 	//Can't safely do for_each_accept here as we'll be adding states.
 	for (state_type p : xrange(a.state_size())) {
 		if (!a.accept(p)) continue;
@@ -420,6 +423,7 @@ void loopbackOptimization(automaton_type& a) {
 				if (it != candidateEdges.end()) {
 					edgeset = candidateEdges;
 					edgeset.erase(edgeset.begin() + (it - candidateEdges.begin()));
+					if (edgeset.empty()) continue; //q is already a loopback-only state, nothing to do
 					auto it2 = edgeToState.find(edgeset);
 					if (it2 != edgeToState.end()) {
 						state_type qn = it2->second;
@@ -430,7 +434,7 @@ void loopbackOptimization(automaton_type& a) {
 						a.addTrans(p, s, qn);
 
 						edgeset.clear();
-						edgeset.emplace_back(s, p);
+						edgeset.push_back(loopback);
 						it2 = edgeToState.find(edgeset);
 						if (it2 == edgeToState.end()) {
 							state_type n = a.addState();
@@ -438,18 +442,25 @@ void loopbackOptimization(automaton_type& a) {
 							it2 = edgeToState.insert_or_assign(edgeset, n).first;
 							stateToEdge.insert_or_assign(n, edgeset);
 						}
+//						if (q == it2->second && origsize == 704)
+//							fmt::print("huh? {} {}\n", candidateEdges, edgeset);
 						a.addTrans(p, s, it2->second);
+//						if (origsize == 704)
 //						fmt::print("hit: replaced {} {} {} with {} and {}\n", p, s, q, qn, it2->second);
 						//No use looking at further states on this symbol.
 						//TODO: am I sure?
 						break;
 					} else {
-//						fmt::print("missed, TODO better message\n");
+//						if (origsize == 704)
+//						fmt::print("missed: {} {} {}\n", p, s, q);
 					}
 				}
 			}
 		}
 	}
+	a.removeDeadStates();
+	if (orighash == 15316814311055915622ULL)
+		std::cout << a << std::endl;
 }
 
 void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, const Provenance* combineData, //could also be optional<Provenance>
@@ -481,7 +492,7 @@ void connect_at(const automaton_type& a, std::uint32_t gadgetIndex, const Proven
 					automaton_type op = connected;
 //					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
 					setInitialStatesToAcceptingStatesInRange(op, sccs.begin(roots[c]), sccs.end(roots[c]));
-					op.optimize();
+//					op.optimize();
 					loopbackOptimization(op);
 					op.minimize();
 					automaton::AutomatonBase::SymbolSet active = op.activeAlphabet();
