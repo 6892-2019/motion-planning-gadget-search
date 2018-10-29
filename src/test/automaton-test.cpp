@@ -159,12 +159,36 @@ Automaton<2> hitNFAStateSetSize(unsigned int size) {
 	}
 	return a;
 }
+
+//Builds an NFA such that one NFA state set (including duplicate states) has
+//size exactly 256, which we must not confuse for zero.  (If we do, we'll
+//conclude there are no transitions on 1 in the automaton, thus changing the
+//language.)
+Automaton<2> tempSetSizeWraps() {
+	Automaton<2> a;
+	a.reserve(131);
+	for (int i = 0; i < 131; ++i) {
+		a.addState();
+		a.setAccept(i);
+	}
+	a.addTrans(0, 0, 1);
+	a.addTrans(0, 0, 2);
+	for (unsigned int i = 3; i < a.state_size(); ++i) {
+		a.addTrans(1, 1, i);
+		a.addTrans(2, 1, i);
+	}
+	return a;
 }
+} //anonymous namespace
 
 TEST_CASE("AutomatonTest_Determinize09") {
 	determinizePreservesLanguage(hitNFAStateSetSize(254));
 	determinizePreservesLanguage(hitNFAStateSetSize(255));
 	determinizePreservesLanguage(hitNFAStateSetSize(256));
+}
+
+TEST_CASE("AutomatonTest_Determinize10") {
+	determinizePreservesLanguage(tempSetSizeWraps());
 }
 
 TEST_CASE("AutomatonTest_Totalize") {

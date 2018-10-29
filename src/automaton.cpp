@@ -492,11 +492,11 @@ public:
 		end_ = begin_;
 		capacity_ = p + minimum_alloc_size;
 	}
-	value_type size() {
-		return static_cast<value_type>(end_ - begin_);
+	std::size_t size() {
+		return static_cast<std::size_t>(end_ - begin_);
 	}
 	bool empty() {
-		return size() == 0;
+		return begin_ == end_;
 	}
 	value_type* begin() {
 		return begin_;
@@ -505,7 +505,10 @@ public:
 		return end_;
 	}
 	value_type* data() {
-		*(begin_ - 1) = size();
+		//We are assuming we have already erase-uniqued, so our size is bounded
+		//by the NFA state size, and because we use < max(), we can fit all of
+		//e.g., 0-254 into one size 255 set.
+		*(begin_ - 1) = numeric_cast<value_type>(size());
 		return begin_ - 1;
 	}
 	void push_back(value_type state) {
