@@ -436,7 +436,8 @@ public:
 	 * tries to reduce the size of this automaton in ways that don't require
 	 * determinizing it.
 	 */
-	void optimize(OptimizeKind how = OptimizeKind::RIGHT) override;
+	void optimize(OptimizeKind how) override;
+	using WorkingAutomaton::optimize;
 
 private:
 	template<class RandomAccessIterator>

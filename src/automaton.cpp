@@ -78,6 +78,10 @@ WorkingAutomaton::WorkingAutomaton(WorkingAutomaton&&) = default;
 WorkingAutomaton& WorkingAutomaton::operator=(const WorkingAutomaton&) = default;
 WorkingAutomaton& WorkingAutomaton::operator=(WorkingAutomaton&&) = default;
 
+void WorkingAutomaton::optimize() {
+	optimize(OptimizeKind::RIGHT);
+}
+
 bool WorkingAutomaton::addTrans(state_type from, SymbolSet on, state_type to) {
 	//std::all_of short-circuits and std::accumulate takes binary ops, so
 	//we'll just use the loop.
