@@ -133,6 +133,7 @@ const pair<string_view, string_view> gadget_aliases[] = {
 	{"split"sv, "3-split"sv},
 	{"1-toggle"sv, "parallel-1-toggle"sv},
 	{"crossover-2-toggle"sv, "crossing-2-toggle"sv},
+	{"det-split"sv, "deterministic-split"sv},
 };
 string_view translate_alias(string_view name) {
 	for (auto [from, to] : gadget_aliases)
@@ -219,6 +220,21 @@ const GadgetLine dichotomizer[] = {
 	{1, 1, 0, 0},
 	{2, 2, 3, 0},
 };
+const GadgetLine deterministic_split[] = {
+	{0, 0, 1, 1}, {0, 2, 0, 1},
+	{1, 0, 2, 0}, {1, 1, 0, 0},
+};
+
+//gadgets 1 and 2 from https://coauthor.csail.mit.edu/6.890/m/gYp2jGJ75FL6ZchTS
+//(3 is the deterministic split and 4 is the 3-spinner)
+const GadgetLine bu2s3l_1[] = {
+	{0, 0, 1, 1}, {0, 1, 0, 1}, {0, 2, 0, 1},
+	{1, 0, 2, 0},
+};
+const GadgetLine bu2s3l_2[] = {
+	{0, 0, 1, 1}, {0, 1, 0, 1}, {0, 2, 0, 1},
+	{1, 0, 2, 0}, {1, 1, 2, 0}, {1, 2, 1, 0},
+};
 
 const tuple<string_view, const GadgetLine*, const GadgetLine*> simple_gadgets[] = {
 	{"diode"sv, std::begin(diode), std::end(diode)},
@@ -239,6 +255,9 @@ const tuple<string_view, const GadgetLine*, const GadgetLine*> simple_gadgets[] 
 	{"seven-lock"sv, std::begin(seven_lock), std::end(seven_lock)},
 	{"seven-tripwire"sv, std::begin(seven_tripwire), std::end(seven_tripwire)},
 	{"dichotomizer"sv, std::begin(dichotomizer), std::end(dichotomizer)},
+	{"deterministic-split"sv, std::begin(deterministic_split), std::end(deterministic_split)},
+	{"bu2s3l_1"sv, std::begin(bu2s3l_1), std::end(bu2s3l_1)},
+	{"bu2s3l_2"sv, std::begin(bu2s3l_2), std::end(bu2s3l_2)},
 };
 
 unsigned int parse_locations(unsigned int alphabet_size, const std::cmatch& match) {
