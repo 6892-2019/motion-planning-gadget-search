@@ -32,6 +32,7 @@
       </df>
       <df name="toggles">
         <in>canonicalize.cpp</in>
+        <in>create_db.sql</in>
         <in>dump-known-gadgets.cpp</in>
         <in>gadgetdefs.cpp</in>
         <in>gadgetdefs.hpp</in>
@@ -268,6 +269,8 @@
       <item path="src/test/util.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/canonicalize.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/create_db.sql" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/dump-known-gadgets.cpp" ex="false" tool="1" flavor2="0">
       </item>
