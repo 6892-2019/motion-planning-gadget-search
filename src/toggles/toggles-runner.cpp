@@ -2,6 +2,8 @@
 #include "automaton.hpp"
 #include "canonicalize.hpp"
 #include "ops.hpp"
+#include "hopscotch/hopscotch_set.h"
+#include "hopscotch/hopscotch_map.h"
 #include "msgpack.hpp"
 #include <cstdio>
 
@@ -14,14 +16,14 @@ using namespace std::literals::string_view_literals;
 
 class GadgetBuilder {
 public:
-	GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type preinitialized_states) : gadget(make_working(alphabet_size)) {
+	GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type preinitialized_states = 0) : gadget(make_working(alphabet_size)) {
 		for (WorkingAutomaton::state_type i = 0; i < preinitialized_states; ++i)
 			translateState(i);
 	}
 	GadgetBuilder& trans(WorkingAutomaton::state_type start, WorkingAutomaton::symbol_type from,
 			WorkingAutomaton::symbol_type to, WorkingAutomaton::state_type end) {
-		assert(gadget->accept(start));
-		assert(gadget->accept(end));
+		assert(gadget->accept(translateState(start)));
+		assert(gadget->accept(translateState(end)));
 		WorkingAutomaton::state_type t = gadget->addState();
 		gadget->addTrans(translateState(start), from, t);
 		gadget->addTrans(t, to, translateState(end));
@@ -45,7 +47,7 @@ private:
 	vector<WorkingAutomaton::state_type> gadgetStateToAutomatonState;
 
 	WorkingAutomaton::state_type translateState(WorkingAutomaton::state_type gadgetState) {
-		while (gadgetState < gadgetStateToAutomatonState.size()) {
+		while (gadgetState >= gadgetStateToAutomatonState.size()) {
 			gadgetStateToAutomatonState.push_back(gadget->addState());
 			gadget->setAccept(gadgetStateToAutomatonState.back());
 		}
@@ -108,15 +110,297 @@ private:
 	}
 };
 
-//{"type": "slls", "uedges": [[0, 0, 1, 1]], "dedges": [[0, 0, 0, 0]]}
-//unique_ptr<WorkingAutomaton> inflate_edgelist(json gadget, unsigned int alphabetSize) {
-//	GadgetBuilder b(alphabetSize);
-//
-//	return b.build();
-//}
+struct GadgetEdge {
+	WorkingAutomaton::state_type start;
+	WorkingAutomaton::symbol_type from;
+	WorkingAutomaton::symbol_type to;
+	WorkingAutomaton::state_type end;
+	GadgetEdge reverse() const {return {end, to, from, start};}
+	MSGPACK_DEFINE_ARRAY(start, from, to, end)
+};
+bool operator==(const GadgetEdge& l, const GadgetEdge& r) {
+	return std::tie(l.start, l.from, l.to, l.end) == std::tie(r.start, r.from, r.to, r.end);
+}
+bool operator!=(const GadgetEdge& l, const GadgetEdge& r) {
+	return !(l == r);
+}
+bool operator<(const GadgetEdge& l, const GadgetEdge& r) {
+	return std::tie(l.start, l.from, l.to, l.end) < std::tie(r.start, r.from, r.to, r.end);
+}
+namespace std {
+template<>
+struct hash<GadgetEdge> {
+	size_t operator()(const GadgetEdge& e) const {
+		//TODO: this is a bad hash function
+		size_t x = e.start;
+		x = 31*x + e.from;
+		x = 31*x + e.to;
+		x = 31*x + e.end;
+		return x;
+	}
+};
+}
 
-int canonicalizeF(int a, int b) {
-	return a + b;
+/**
+ * A gadget in SLLS format is two lists of undirected and directed GadgetEdges.
+ * Undirected edges also represent their reverse edge.
+ * (SLLS stands for "state, location, location, state".)
+ */
+struct SLLS {
+	std::vector<GadgetEdge> uedges, dedges;
+	MSGPACK_DEFINE_MAP(uedges, dedges)
+};
+
+unique_ptr<WorkingAutomaton> inflate_slls(SLLS gadget, unsigned int alphabetSize = 0) {
+	if (!alphabetSize) {
+		//Size-to-fit by finding the largest used symbol.
+		for (auto e : gadget.uedges)
+			alphabetSize = std::max({alphabetSize, e.from, e.to});
+		for (auto e : gadget.dedges)
+			alphabetSize = std::max({alphabetSize, e.from, e.to});
+		++alphabetSize;
+	}
+	GadgetBuilder b(alphabetSize);
+	for (auto e : gadget.uedges)
+		b.trans(e.start, e.from, e.to, e.end).trans(e.end, e.to, e.from, e.start);
+	for (auto e : gadget.dedges)
+		b.trans(e.start, e.from, e.to, e.end);
+	return b.build();
+}
+
+SLLS deflate_slls(const AutomatonBase& a) {
+	SLLS gadget;
+	auto state_size = a.state_size(), accept_size = a.accept_size();
+	auto activealpha = a.activeAlphabet();
+	if (accept_size == 2)
+		//Accept size should be 1 (stateless, e.g., nops and splits) or >= 3
+		//(2+ states, plus one for superposition).
+		throw std::logic_error("accept size 2?!");
+
+	unsigned int gadgetStates = 0;
+	tsl::hopscotch_map<AutomatonBase::state_type, unsigned int> autoToGadget; //maps automaton states to gadget states
+	tsl::hopscotch_set<GadgetEdge> edges;
+	for (AutomatonBase::state_type start = 0; start < state_size; ++start) {
+		if (!a.accept(start)) continue;
+		if (accept_size == 1 && start == 0) continue; //ignore superposition pseudostate
+		for (AutomatonBase::symbol_type from : activealpha) {
+			auto middle = a.stepDeterministic(start, from);
+			if (middle) {
+				assert(!a.accept(*middle));
+				for (AutomatonBase::symbol_type to : activealpha) {
+					auto end = a.stepDeterministic(*middle, to);
+					if (end) {
+						assert(a.accept(*end));
+						if (accept_size == 1 && *end == 0) continue; //ignore superposition pseudostate
+						//TODO: are nops not in the database?  their SL graph is empty, and we minimize both states and locations...
+						if (start == *end && from == to) continue; //skip nop edges
+						//If either is missing, the insert invalidates iterators, so there's not
+						//much point in using them.
+						if (!autoToGadget.count(start))
+							autoToGadget[start] = gadgetStates++;
+						if (!autoToGadget.count(*end))
+							autoToGadget[*end] = gadgetStates++;
+						edges.insert(GadgetEdge{autoToGadget[start], from, to, autoToGadget[*end]});
+					}
+				}
+			}
+		}
+	}
+
+	for (const GadgetEdge& e : edges) {
+		if (!edges.count(e.reverse()))
+			gadget.dedges.push_back(e);
+		else if (e < e.reverse()) //only the lesser of the pair
+			gadget.uedges.push_back(e);
+	}
+	fmt::print(stderr, "{}\n", edges.size());
+	assert(2*gadget.uedges.size() + gadget.dedges.size() == edges.size());
+	return gadget;
+}
+
+/**
+ * A gadget in database row format is a 4-tuple of the count of states,
+ * locations, undirected edges and directed edges, followed by an edge list.
+ * Each endpoint (s,l) is encoded as one integer s*locations+l, stored as a
+ * varint.  The undirected edges (if any) proceed the directed edges (if any).
+ * Edges are sorted in natural tuple order before being compressed; undirected
+ * edges are encoded as the lesser of the pair of edges they represent.
+ */
+struct Row {
+	unsigned int states, locations, uedges, dedges;
+	std::vector<std::byte> edges;
+	MSGPACK_DEFINE_ARRAY(states, locations, uedges, dedges, edges)
+};
+
+
+// TODO: unify this with pack-detail.hpp's PackReader/Writer
+#define VARINT_ONE 244
+#define VARINT_TWO 252
+#define VARINT_THREE 253
+#define VARINT_FOUR 254
+#define VARINT_FIVE 255
+
+class PackWriter {
+public:
+	PackWriter() : data() {}
+	PackWriter& write8(unsigned int value) {
+		assert((value & 0xFFU) == value);
+		writeBytes<1>(value);
+		return *this;
+	}
+	PackWriter& write16(unsigned int value) {
+		assert((value & 0xFFFFU) == value);
+		writeBytes<2>(value);
+		return *this;
+	}
+	PackWriter& write24(unsigned int value) {
+		assert((value & 0xFFFFFFU) == value);
+		writeBytes<3>(value);
+		return *this;
+	}
+	PackWriter& write32(unsigned int value) {
+		assert((value & 0xFFFFFFFFU) == value);
+		writeBytes<4>(value);
+		return *this;
+	}
+	PackWriter& writeBytes(unsigned int value, unsigned int count) {
+		switch (count) {
+			case 1: return write8(value);
+			case 2: return write16(value);
+			case 3: return write24(value);
+			case 4: return write32(value);
+			default:
+				assert(false);
+				__builtin_unreachable();
+		}
+	}
+	PackWriter& writeVarint(unsigned int value) {
+		//inspired by https://sqlite.org/src4/doc/trunk/www/varint.wiki but
+		//only with 32-bit range, so recovering a few more small values.
+		if (value <= VARINT_ONE)
+			write8(value);
+		else if (value <= (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE - 1) {
+			write8((value - VARINT_ONE) / 256 + VARINT_ONE + 1);
+			write8((value - VARINT_ONE) % 256);
+		} else if (value <= (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE - 1 + 65536) {
+			write8(VARINT_THREE);
+			write8((value - ((VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE)) / 256);
+			write8((value - ((VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE)) % 256);
+		} else if (value <= 16777215) {
+			write8(VARINT_FOUR);
+			write24(value);
+		} else {
+			write8(VARINT_FIVE);
+			write32(value);
+		}
+		return *this;
+	}
+
+	vector<std::byte> data;
+private:
+	template<unsigned int N>
+	void writeBytes(unsigned int value) {
+		std::array<std::byte, N> array;
+		std::memcpy(array.begin(), &value, N);
+		data.insert(data.end(), array.begin(), array.end());
+	}
+};
+
+class PackReader {
+public:
+	PackReader(const vector<std::byte>& data) : data_(data) {}
+	unsigned int read8() {
+		return readBytes<1>();
+	}
+	unsigned int read16() {
+		return readBytes<2>();
+	}
+	unsigned int read24() {
+		return readBytes<3>();
+	}
+	unsigned int read32() {
+		return readBytes<4>();
+	}
+	unsigned int readBytes(unsigned int count) {
+		switch (count) {
+			case 1: return read8();
+			case 2: return read16();
+			case 3: return read24();
+			case 4: return read32();
+			default:
+				assert(false);
+				__builtin_unreachable();
+		}
+	}
+	unsigned int readVarint() {
+		unsigned int first = read8();
+		if (first <= VARINT_ONE)
+			return first;
+		if (first <= VARINT_TWO) {
+			unsigned int second = read8();
+			return VARINT_ONE + 256*(first - VARINT_ONE - 1) + second;
+		}
+		if (first == VARINT_THREE) {
+			unsigned int second = read8();
+			unsigned int third = read8();
+			return (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE + 256*second + third;
+		}
+		if (first == VARINT_FOUR)
+			return read24();
+		if (first == VARINT_FIVE)
+			return read32();
+		__builtin_unreachable();
+	}
+
+	bool eof() const {return cur_ == data_.size();}
+private:
+	template<unsigned int N>
+	unsigned int readBytes() {
+		unsigned int value = 0;
+		if constexpr (N == 3) {
+			//If we won't read off the end by doing so, it's much faster to load
+			//an aligned dword and mask off the bytes we want.
+			if (cur_ + 4 <= data_.size()) {
+				std::memcpy(&value, data_.data()+cur_, 4);
+				value &= 0x00FFFFFF;
+				cur_ += N;
+				return value;
+			}
+		}
+
+		if (cur_ + N > data_.size())
+			throw std::out_of_range("while unpacking");
+		std::memcpy(&value, data_.data()+cur_, N);
+		cur_ += N;
+		return value;
+	}
+	const vector<std::byte>& data_;
+	vector<std::byte>::size_type cur_;
+};
+
+
+/**
+ * Canonicalizes a gadget in SLLS format, returning in database row format.
+ * Intended for use when loading human-readable gadget definitions into the
+ * database.
+ */
+Row canonicalize_from_slls(SLLS gadget) {
+	unique_ptr<WorkingAutomaton> a = inflate_slls(gadget);
+	//We already canonicalized it when we built it; now we just have to pack it
+	//into row format.
+	SLLS canonical = deflate_slls(*a);
+	unsigned int states = a->accept_size() == 1 ? 1 : a->accept_size() - 1;
+	unsigned int locations = a->active_alphabet_size();
+	std::sort(canonical.uedges.begin(), canonical.uedges.end());
+	std::sort(canonical.dedges.begin(), canonical.dedges.end());
+	PackWriter data;
+	for (GadgetEdge e : canonical.uedges)
+		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
+	for (GadgetEdge e : canonical.dedges)
+		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
+	return {states, locations,
+			numeric_cast<unsigned int>(gadget.uedges.size()), numeric_cast<unsigned int>(gadget.dedges.size()),
+			std::move(data.data)};
 }
 
 
@@ -151,7 +435,7 @@ msgpack::object_handle handler_adapter(const msgpack::object& arg_array) {
 
 using handler_ptr = msgpack::object_handle(*)(const msgpack::object&);
 const std::pair<string_view, handler_ptr> handlers[] = {
-	{"canonicalize"sv, &handler_adapter<canonicalizeF>},
+	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 };
 
 msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
