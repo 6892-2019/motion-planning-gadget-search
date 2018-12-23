@@ -45,3 +45,22 @@ create table completed_connects (
 	exclude using gist (r with &&)
 );
 
+-- Canonical names for gadgets.  This is the name used for reports.  Alternate
+-- input names are stored in the aliases table.
+create table cnames (
+	id bigint primary key generated always as identity,
+	gadget_id bigint references gadgets not null,
+	name text unique not null
+);
+
+-- Noncanonical names for gadgets.
+create table aliases (
+	id bigint primary key generated always as identity,
+	-- This could reference gadgets directly, but doing it this way ensures a
+	-- canonical name exists.
+	cname_id references cnames not null,
+	name text not null
+);
+
+-- We could also have a table of gadget sets, but we probably actually want to
+-- use a query (e.g., all n-state m-location deterministic gadgets).
