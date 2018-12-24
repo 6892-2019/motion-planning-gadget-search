@@ -36,6 +36,7 @@
         <in>dump-known-gadgets.cpp</in>
         <in>gadgetdefs.cpp</in>
         <in>gadgetdefs.hpp</in>
+        <in>gadgets.yaml</in>
         <in>generational-search.cpp</in>
         <in>ops.cpp</in>
         <in>provenance.cpp</in>
@@ -278,6 +279,8 @@
       <item path="src/toggles/gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/gadgetdefs.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/toggles/gadgets.yaml" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/generational-search.cpp"
             ex="false"
