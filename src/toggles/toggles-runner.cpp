@@ -182,7 +182,7 @@ SLLS deflate_slls(const AutomatonBase& a) {
 	tsl::hopscotch_set<GadgetEdge> edges;
 	for (AutomatonBase::state_type start = 0; start < state_size; ++start) {
 		if (!a.accept(start)) continue;
-		if (accept_size == 1 && start == 0) continue; //ignore superposition pseudostate
+		if (accept_size != 1 && start == 0) continue; //ignore superposition pseudostate
 		for (AutomatonBase::symbol_type from : activealpha) {
 			auto middle = a.stepDeterministic(start, from);
 			if (middle) {
@@ -191,7 +191,7 @@ SLLS deflate_slls(const AutomatonBase& a) {
 					auto end = a.stepDeterministic(*middle, to);
 					if (end) {
 						assert(a.accept(*end));
-						if (accept_size == 1 && *end == 0) continue; //ignore superposition pseudostate
+						if (accept_size != 1 && *end == 0) continue; //ignore superposition pseudostate
 						//TODO: are nops not in the database?  their SL graph is empty, and we minimize both states and locations...
 						if (start == *end && from == to) continue; //skip nop edges
 						//If either is missing, the insert invalidates iterators, so there's not
