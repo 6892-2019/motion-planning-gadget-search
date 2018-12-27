@@ -219,14 +219,25 @@ SLLS deflate_slls(const AutomatonBase& a) {
 }
 
 /**
- * A gadget in database row format is a 4-tuple of the count of states,
- * locations, undirected edges and directed edges, followed by an edge list.
- * Each endpoint (s,l) is encoded as one integer s*locations+l, stored as a
- * varint.  The undirected edges (if any) proceed the directed edges (if any).
- * Edges are sorted in natural tuple order before being compressed; undirected
- * edges are encoded as the lesser of the pair of edges they represent.
+ * A gadget is uniquely identified in the database as a byte array starting with
+ * a count of states, locations, undirected edges and directed edges, each as a
+ * varint, followed by the edges.  The undirected edges (if any) precede the
+ * directed edges (if any).  Each endpoint is s*locations+l as a varint.  Edges
+ * are sorted in natural tuple order before being compressed; undirected edges
+ * are encoded as the lesser of the pair of edges they represent.
+ *
+ * As the gadget is uniquely described by the byte array, we can deduplicate in
+ * the database using only that array (and so only using a single index).  But
+ * keeping the counts separate lets us query for the smallest gadgets not yet
+ * combined (using a join against the provenance table), so we return them
+ * separately for the convenience of the Python code (or maybe eventually to
+ * directly insert them in the database).  This redundancy shouldn't cost more
+ * than 8 bytes per gadget (at the front of the byte array).
+ *
+ * When taking gadgets as input, we only need the byte array, as the counts are
+ * recoverable from it.
  */
-struct Row {
+struct OutputRow {
 	unsigned int states, locations, uedges, dedges;
 	std::vector<std::byte> edges;
 	MSGPACK_DEFINE_ARRAY(states, locations, uedges, dedges, edges)
@@ -379,28 +390,35 @@ private:
 };
 
 
+OutputRow deflate_outputrow(const AutomatonBase& a) {
+	SLLS slls = deflate_slls(a);
+	unsigned int states = a.accept_size() == 1 ? 1 : a.accept_size() - 1;
+	unsigned int locations = a.active_alphabet_size();
+	std::sort(slls.uedges.begin(), slls.uedges.end());
+	std::sort(slls.dedges.begin(), slls.dedges.end());
+	PackWriter data;
+	data.writeVarint(states).writeVarint(locations)
+			.writeVarint(numeric_cast<unsigned int>(slls.uedges.size()))
+			.writeVarint(numeric_cast<unsigned int>(slls.dedges.size()));
+	for (GadgetEdge e : slls.uedges)
+		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
+	for (GadgetEdge e : slls.dedges)
+		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
+	return {states, locations,
+			numeric_cast<unsigned int>(slls.uedges.size()), numeric_cast<unsigned int>(slls.dedges.size()),
+			std::move(data.data)};
+}
+
 /**
  * Canonicalizes a gadget in SLLS format, returning in database row format.
  * Intended for use when loading human-readable gadget definitions into the
  * database.
  */
-Row canonicalize_from_slls(SLLS gadget) {
+OutputRow canonicalize_from_slls(SLLS gadget) {
 	unique_ptr<WorkingAutomaton> a = inflate_slls(gadget);
 	//We already canonicalized it when we built it; now we just have to pack it
 	//into row format.
-	SLLS canonical = deflate_slls(*a);
-	unsigned int states = a->accept_size() == 1 ? 1 : a->accept_size() - 1;
-	unsigned int locations = a->active_alphabet_size();
-	std::sort(canonical.uedges.begin(), canonical.uedges.end());
-	std::sort(canonical.dedges.begin(), canonical.dedges.end());
-	PackWriter data;
-	for (GadgetEdge e : canonical.uedges)
-		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
-	for (GadgetEdge e : canonical.dedges)
-		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
-	return {states, locations,
-			numeric_cast<unsigned int>(gadget.uedges.size()), numeric_cast<unsigned int>(gadget.dedges.size()),
-			std::move(data.data)};
+	return deflate_outputrow(*a);
 }
 
 
