@@ -82,7 +82,7 @@ def sync_known_gadgets(args):
       name_to_gid[alias] = name_to_gid[cname]
 
     aliases_tbl = db_meta.tables['aliases']
-    q_upsert_alias = insert(aliases_tbl).values(gadget_id=bindparam('gid'), name=bindparam('name')).on_conflict_do_update(index_elements=(aliases_tbl.c.id,), set_={'gadget_id': bindparam('gid')}).returning(aliases_tbl.c.id)
+    q_upsert_alias = insert(aliases_tbl).values(gadget_id=bindparam('gid'), name=bindparam('name')).on_conflict_do_update(index_elements=(aliases_tbl.c.name,), set_={'gadget_id': bindparam('gid')}).returning(aliases_tbl.c.id)
     name_to_aliasid = {}
     for name, gid in name_to_gid.items():
       name_to_aliasid[name] = conn.execute(q_upsert_alias, gid=gid, name=name).scalar()
