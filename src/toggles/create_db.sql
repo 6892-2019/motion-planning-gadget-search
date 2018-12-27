@@ -12,7 +12,7 @@ create table gadgets (
 	-- those in separate tables because we'll probably want to add more such
 	-- features later and/or compute for only a subset of the gadgets.
 	-- this comes last because it's variably-sized
-	edges bytea -- TODO: index over hash expression? don't use 'unique' because that creates a btree, copying all the data
+	edges bytea not null -- TODO: index over hash expression? don't use 'unique' because that creates a btree, copying all the data
 );
 
 -- some columns may be null for connects (and, if implemented, deletes)
@@ -32,7 +32,7 @@ create table completed_combines (
 	id bigint primary key generated always as identity,
 	g1 bigint references gadgets not null,
 	g2 bigint references gadgets not null,
-	alphabet_size smallint
+	alphabet_size smallint not null
 );
 
 -- Stores closed intervals
@@ -45,22 +45,23 @@ create table completed_connects (
 	exclude using gist (r with &&)
 );
 
--- Canonical names for gadgets.  This is the name used for reports.  Alternate
--- input names are stored in the aliases table.
-create table cnames (
+-- Human-readable names for gadgets.
+create table aliases (
 	id bigint primary key generated always as identity,
 	gadget_id bigint references gadgets not null,
 	name text unique not null
 );
 
--- Noncanonical names for gadgets.
-create table aliases (
+-- Canonical names for gadgets.  This is the name used for reports.  If a gadget
+-- has one or more names but isn't listed here, reports may not use it, or may
+-- pick a name arbitrarily.
+create table cnames (
 	id bigint primary key generated always as identity,
-	-- This could reference gadgets directly, but doing it this way ensures a
-	-- canonical name exists.
-	cname_id references cnames not null,
-	name text not null
+	gadget_id bigint references gadgets unique not null,
+	name_id bigint references aliases unique not null
 );
 
 -- We could also have a table of gadget sets, but we probably actually want to
--- use a query (e.g., all n-state m-location deterministic gadgets).
+-- use a query (e.g., all n-state m-location deterministic gadgets).  (The
+-- disadvantage of queries is that their membership depends on the contents of
+-- the database, expanding as more gadgets are discovered.)
