@@ -86,12 +86,15 @@ def sync_known_gadgets(args):
     name_to_aliasid = {}
     for name, gid in name_to_gid.items():
       name_to_aliasid[name] = conn.execute(q_upsert_alias, gid=gid, name=name).scalar()
-    print(name_to_aliasid)
 
-    # TODO: upsert cnames.  There are two possible unique indices that might be violated, possibly simultaneously, so it's not actually clear how to do this upsert...
-#    cnames_tbl = db_meta.tables['cnames']
-#    q_upsert_cname = insert(cnames_tbl).values(gadget_id=bindparam('gid'), name=bindparam('nid')).on_conflict_do_update(index_elements
-#    cnames = input_data['gadgets'].keys()
+    # Ideally we'd upsert cnames, but there are two possible unique indices
+    # that might be violated, possibly simultaneously, so it's not clear how to
+    # resolve conflicts.
+    conn.execute('truncate table cnames restart identity')
+    cnames_tbl = db_meta.tables['cnames']
+    q_insert_cnames = insert(cnames_tbl).values(gadget_id=bindparam('gid'), name_id=bindparam('nid'))
+    # don't need 'returning id' here so we can use batch mode
+    conn.execute(q_insert_cnames, [dict(gid=name_to_gid[cname], nid=name_to_aliasid[cname]) for cname in input_data['gadgets'].keys()])
 
 
 
