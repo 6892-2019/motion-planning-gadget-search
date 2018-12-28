@@ -3,12 +3,13 @@
 import argparse
 import os
 import sys
+import re
 import pwd
 import subprocess
 import msgpack
 import yaml
 import sqlalchemy
-from sqlalchemy import bindparam
+from sqlalchemy import bindparam, select
 from sqlalchemy.dialects.postgresql import insert
 
 
@@ -44,7 +45,7 @@ def local_toggles_runner(script_args, command, *args, error_as_exc=True):
 
 def discover_database(args):
   connect_url = 'postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'.format(**vars(args))
-  engine = sqlalchemy.create_engine(connect_url)
+  engine = sqlalchemy.create_engine(connect_url, isolation_level='SERIALIZABLE')
   meta = sqlalchemy.MetaData()
   meta.reflect(engine)
   return (engine, meta)
@@ -65,7 +66,7 @@ def sync_known_gadgets(args):
   name_to_gid = {}
   with db_engine.connect() as conn, conn.begin() as txn:
     gadgets_tbl = db_meta.tables['gadgets']
-    q_existing_gadget_id = sqlalchemy.select([gadgets_tbl.c.id]).where(gadgets_tbl.c.edges == bindparam('data'))
+    q_existing_gadget_id = select([gadgets_tbl.c.id]).where(gadgets_tbl.c.edges == bindparam('data'))
     gadget_non_primary_keys = [c.name for c in gadgets_tbl.c if not gadgets_tbl.primary_key.contains_column(c)]
 
     for name, row in named_rows.items():
@@ -98,6 +99,71 @@ def sync_known_gadgets(args):
 
 
 
+def connect(args):
+  # Three kinds of queries: fetch ids, fetch all ids in range, and fetch with a join through the aliases table.  An empty range is okay (but warnable?), an invalid id or alias is not.  We could do faster batch queries if we didn't care about checking for errors.  We should also be deduplicating and giving useful error messages.
+  gids = set()
+  gid_ranges = [] # pairs in [) form
+  g_names = []
+  for i in args.inputs:
+    m = re.fullmatch('\d+', i)
+    if m:
+      if int(i) in gids: # set add returns None, grumble
+        print('warning: skipping duplicate id', i)
+      gids.add(int(i))
+      continue
+
+    m = re.fullmatch(r'(\(|\[)(\d+),\s*(\d+)(\)|\])', i)
+    if m:
+      lower, upper = int(m[2]), int(m[3])
+      if m[1] == '(':
+        lower += 1
+      if m[4] == ']':
+        upper += 1
+      if not (lower < upper):
+        raise ValueError('bad range: '+i)
+      gid_ranges.append((lower, upper))
+      continue
+
+    g_names.append(i) #no useful consistency check on aliases, though it might be a mistyped range...
+
+  db_engine, db_meta = discover_database(args)
+  gadgets_tbl = db_meta.tables['gadgets']
+  aliases_tbl = db_meta.tables['aliases']
+  with db_engine.connect() as conn:
+    with conn.begin() as txn:
+      conn.execute('set transaction read only') # begin() doesn't take an arg
+
+      gid_to_alias = {}
+      q_translate_alias = select([aliases_tbl.c.gadget_id]).where(aliases_tbl.c.name == bindparam('name'))
+      for name in g_names:
+        i = conn.execute(q_translate_alias, name=name).scalar()
+        if not i:
+          raise ValueError('no match for {}'.format(name))
+        if i in gids:
+          print('warning: named gadget {} duplicates explicit id {}'.format(name, i))
+        for r in gid_ranges:
+          if r[0] <= i and i < r[1]:
+            print('warning: named gadget {} ({}) contained in range [{},{})'.format(name, i, r[0], r[1]))
+        if i in gid_to_alias:
+          print('warning: named gadget {} duplicates other named gadget {} (both {})'.format(name, gid_to_alias[i], i))
+        gid_to_alias[i] = name # only tracking the last duplicate is fine
+      gids.update(gid_to_alias.keys())
+
+      clauses = []
+      if gids:
+        clauses.append(gadgets_tbl.c.id.in_(gids))
+      if gid_ranges:
+        data = ', '.join(['int8range({}, {})'.format(lower, upper) for lower, upper in gid_ranges])
+        clauses.append(sqlalchemy.text('gadgets.id <@ any(array['+data+'])'))
+      if not clauses:
+        raise ValueError("can't happen: neither ids nor ranges?")
+      q_retrieve_gadgets = select([gadgets_tbl.c.id, gadgets_tbl.c.edges]).where(sqlalchemy.or_(*clauses)).where("NOT EXISTS (SELECT 1 FROM completed_connects WHERE completed_connects.r @> gadgets.id LIMIT 1)")
+      gadgets = conn.execute(q_retrieve_gadgets).fetchall()
+
+    # exit the read-only transaction here
+
+
+
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   subparsers = parser.add_subparsers()
@@ -114,6 +180,10 @@ if __name__ == '__main__':
   skg_parser = subparsers.add_parser('sync-known-gadgets')
   skg_parser.add_argument('input', type=argparse.FileType(), help='YAML file of gadget and alias definitions')
   skg_parser.set_defaults(command_func=sync_known_gadgets)
+
+  connect_parser = subparsers.add_parser('connect')
+  connect_parser.add_argument('inputs', type=str, nargs='+', help='Name, gadget id, or range of gadget ids to connect (may be passed multiple times)')
+  connect_parser.set_defaults(command_func=connect)
 
   args = parser.parse_args()
   args.command_func(args)

@@ -38,7 +38,7 @@ create table completed_combines (
 -- Stores closed intervals
 create table completed_connects (
 	id bigint primary key generated always as identity,
-	r int8range not null check(lower_inc(r) and upper_inc(r)),
+	r int8range not null check(lower_inc(r) and not upper_inc(r)),
 	-- Unfortunately we can't reference the gadgets table in a check constraint,
 	-- so the best we can do is ensure the ranges don't overlap.  (Another
 	-- option would be to use two foreign key columns and index on an expression.)
