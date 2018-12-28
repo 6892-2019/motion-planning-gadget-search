@@ -40,34 +40,6 @@ void branchToAnyAcceptState(WorkingAutomaton& a) {
 	setInitialStates(a, accepting);
 }
 
-void canonicalizeQ(WorkingAutomaton& a) {
-	//This is ugh, but canonicalizeRenumber is a template and so can't easily be
-	//moved onto WorkingAutomaton.
-	switch (a.alphabet_size()) {
-#define GADGETDEFS_CANONICALIZE_CASE(N) case N: canonicalize(static_cast<Automaton<N>&>(a), a.active_alphabet_size()); break;
-		GADGETDEFS_CANONICALIZE_CASE(1)
-		GADGETDEFS_CANONICALIZE_CASE(2)
-		GADGETDEFS_CANONICALIZE_CASE(3)
-		GADGETDEFS_CANONICALIZE_CASE(4)
-		GADGETDEFS_CANONICALIZE_CASE(5)
-		GADGETDEFS_CANONICALIZE_CASE(6)
-		GADGETDEFS_CANONICALIZE_CASE(7)
-		GADGETDEFS_CANONICALIZE_CASE(8)
-		GADGETDEFS_CANONICALIZE_CASE(9)
-		GADGETDEFS_CANONICALIZE_CASE(10)
-		GADGETDEFS_CANONICALIZE_CASE(11)
-		GADGETDEFS_CANONICALIZE_CASE(12)
-		GADGETDEFS_CANONICALIZE_CASE(13)
-		GADGETDEFS_CANONICALIZE_CASE(14)
-		GADGETDEFS_CANONICALIZE_CASE(15)
-		GADGETDEFS_CANONICALIZE_CASE(16)
-#undef GADGETDEFS_CANONICALIZE_CASE
-	default:
-		std::cout << "unhandled canonicalize: " << typeid(a).name();
-		std::terminate();
-	}
-}
-
 std::unique_ptr<WorkingAutomaton> prepare(const WorkingAutomaton& a) {
 	std::unique_ptr<WorkingAutomaton> q = a.clone();
 	q->minimize();
@@ -76,7 +48,7 @@ std::unique_ptr<WorkingAutomaton> prepare(const WorkingAutomaton& a) {
 	acceptingClosure(*q, q->active_alphabet_size());
 	branchToAnyAcceptState(*q);
 	q->minimize();
-	canonicalizeQ(*q);
+	canonicalize(*q, q->active_alphabet_size());
 	return q;
 }
 

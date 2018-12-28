@@ -25,6 +25,7 @@ void canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool
 	auto perms = getPerms(a.alphabet_size(), locations, true, allowMirroring);
 	a.canonicalizeRenumber(perms.first, perms.second);
 }
+void canonicalize(automaton::WorkingAutomaton& a, const unsigned int locations, bool allowMirroring = true);
 
 template<class AutomatonType>
 AutomatonType mirror(const AutomatonType& a, unsigned int locations) {

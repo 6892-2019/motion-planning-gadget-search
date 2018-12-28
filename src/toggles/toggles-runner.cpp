@@ -39,7 +39,7 @@ public:
 		acceptingClosure(*gadget, activealpha);
 		branchToAnyAcceptState(*gadget);
 		gadget->minimize();
-		canonicalizeQ(*gadget);
+		canonicalize(*gadget, activealpha);
 		return std::move(gadget);
 	}
 private:
@@ -80,33 +80,6 @@ private:
 			a->addTrans(s, i, 0);
 		}
 		return a;
-	}
-	static void canonicalizeQ(WorkingAutomaton& a) {
-		//This is ugh, but canonicalizeRenumber is a template and so can't easily be
-		//moved onto WorkingAutomaton.
-		switch (a.alphabet_size()) {
-	#define GADGETDEFS_CANONICALIZE_CASE(N) case N: canonicalize(static_cast<Automaton<N>&>(a), a.active_alphabet_size()); break;
-			GADGETDEFS_CANONICALIZE_CASE(1)
-			GADGETDEFS_CANONICALIZE_CASE(2)
-			GADGETDEFS_CANONICALIZE_CASE(3)
-			GADGETDEFS_CANONICALIZE_CASE(4)
-			GADGETDEFS_CANONICALIZE_CASE(5)
-			GADGETDEFS_CANONICALIZE_CASE(6)
-			GADGETDEFS_CANONICALIZE_CASE(7)
-			GADGETDEFS_CANONICALIZE_CASE(8)
-			GADGETDEFS_CANONICALIZE_CASE(9)
-			GADGETDEFS_CANONICALIZE_CASE(10)
-			GADGETDEFS_CANONICALIZE_CASE(11)
-			GADGETDEFS_CANONICALIZE_CASE(12)
-			GADGETDEFS_CANONICALIZE_CASE(13)
-			GADGETDEFS_CANONICALIZE_CASE(14)
-			GADGETDEFS_CANONICALIZE_CASE(15)
-			GADGETDEFS_CANONICALIZE_CASE(16)
-	#undef GADGETDEFS_CANONICALIZE_CASE
-		default:
-			std::cout << "unhandled canonicalize: " << typeid(a).name();
-			std::terminate();
-		}
 	}
 };
 
