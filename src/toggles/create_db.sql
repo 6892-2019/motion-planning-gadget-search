@@ -56,20 +56,22 @@ create table completed_connects (
 	exclude using gist (r with &&)
 );
 
--- Human-readable names for gadgets.
+-- Human-readable names for gadgets.  A name may map to multiple gadgets.
 create table aliases (
 	id bigint primary key generated always as identity,
 	gadget_id bigint references gadgets not null,
-	name text unique not null
+	name text not null,
+	unique (gadget_id, name)
 );
 
 -- Canonical names for gadgets.  This is the name used for reports.  If a gadget
 -- has one or more names but isn't listed here, reports may not use it, or may
--- pick a name arbitrarily.
+-- pick a name arbitrarily.  Canonical names cannot name alias groups (because
+-- their purpose is to name a single gadget).
 create table cnames (
 	id bigint primary key generated always as identity,
 	gadget_id bigint references gadgets unique not null,
-	name_id bigint references aliases unique not null
+	name text unique not null
 );
 
 -- We could also have a table of gadget sets, but we probably actually want to
