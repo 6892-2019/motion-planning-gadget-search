@@ -27,9 +27,9 @@ void canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool
 }
 void canonicalize(automaton::WorkingAutomaton& a, const unsigned int locations, bool allowMirroring = true);
 
-template<class AutomatonType>
-AutomatonType mirror(const AutomatonType& a, unsigned int locations) {
-	AutomatonType b = a;
+template<unsigned int N>
+[[nodiscard]] automaton::Automaton<N> mirror(const automaton::Automaton<N>& a, unsigned int locations) {
+	automaton::Automaton<N> b = a;
 	if (locations == 1) {
 		//We can't renumber the symbols/locations because there's only one, but
 		//we still have to renumber the states.
@@ -45,10 +45,11 @@ AutomatonType mirror(const AutomatonType& a, unsigned int locations) {
 	b.canonicalizeRenumber(perms.first, perms.second);
 	return b;
 }
-template<class AutomatonType>
-AutomatonType mirror(const AutomatonType& a) {
+template<unsigned int N>
+[[nodiscard]] automaton::Automaton<N> mirror(const automaton::Automaton<N>& a) {
 	return mirror(a, a.active_alphabet_size());
 }
+[[nodiscard]] std::unique_ptr<automaton::WorkingAutomaton> mirror(const automaton::WorkingAutomaton& a);
 
 #endif /* CANONICALIZE_HPP */
 

@@ -186,7 +186,6 @@ SLLS deflate_slls(const AutomatonBase& a) {
 		else if (e < e.reverse()) //only the lesser of the pair
 			gadget.uedges.push_back(e);
 	}
-	fmt::print(stderr, "{}\n", edges.size());
 	assert(2*gadget.uedges.size() + gadget.dedges.size() == edges.size());
 	return gadget;
 }
@@ -387,11 +386,20 @@ OutputRow deflate_outputrow(const AutomatonBase& a) {
  * Intended for use when loading human-readable gadget definitions into the
  * database.
  */
-OutputRow canonicalize_from_slls(SLLS gadget) {
+std::vector<OutputRow> canonicalize_from_slls(SLLS gadget) {
 	unique_ptr<WorkingAutomaton> a = inflate_slls(gadget);
+	unique_ptr<WorkingAutomaton> b = mirror(*a);
 	//We already canonicalized it when we built it; now we just have to pack it
-	//into row format.
-	return deflate_outputrow(*a);
+	//into row format.  If it's chiral, we return both enantiomers.
+	if (*a != *b) {
+		OutputRow la = deflate_outputrow(*a), lb = deflate_outputrow(*b);
+		//Order them arbitrarily but consistently.
+		assert(la.edges != lb.edges);
+		if (std::lexicographical_compare(lb.edges.begin(), lb.edges.end(), la.edges.begin(), la.edges.end()))
+			std::swap(la, lb);
+		return {std::move(la), std::move(lb)};
+	} else
+		return {deflate_outputrow(*a)};
 }
 
 
