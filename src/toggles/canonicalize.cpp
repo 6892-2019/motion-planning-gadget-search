@@ -21,7 +21,7 @@ getPerms(unsigned int alphabetSize, unsigned int locations, bool normal, bool mi
 
 void canonicalize(WorkingAutomaton& a, const unsigned int locations, bool allowMirroring) {
 	switch (a.alphabet_size()) {
-		#define GADGETDEFS_CANONICALIZE_CASE(N) case N: canonicalize(static_cast<Automaton<N>&>(a), a.active_alphabet_size(), allowMirroring); break;
+#define GADGETDEFS_CANONICALIZE_CASE(N) case N: canonicalize(static_cast<Automaton<N>&>(a), locations, allowMirroring); break;
 		GADGETDEFS_CANONICALIZE_CASE(1)
 		GADGETDEFS_CANONICALIZE_CASE(2)
 		GADGETDEFS_CANONICALIZE_CASE(3)
