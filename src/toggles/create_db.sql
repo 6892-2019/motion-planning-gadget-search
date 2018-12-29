@@ -15,24 +15,35 @@ create table gadgets (
 	edges bytea not null -- TODO: index over hash expression? don't use 'unique' because that creates a btree, copying all the data
 );
 
--- some columns may be null for connects (and, if implemented, deletes)
-create table provenance (
+create table combine_provenance (
 	id bigint primary key generated always as identity,
-	g1 bigint references gadgets not null,
-	g2 bigint references gadgets,
-	splice smallint,
-	rotation smallint,
-	location smallint not null,
-	-- TODO: Whether we choose a component index or state number, we didn't
-	-- compute this value from a canonical automaton, so it's fragile.
-	root smallint not null -- could make this null if there was only one component, I guess
+	input1 bigint references gadgets not null,
+	input2 bigint references gadgets not null,
+	output1 bigint references gadgets not null,
+	-- The smallest accepting state in the chosen component.  (This is fragile
+	-- because it doesn't come from a canonical automaton, but slightly less
+	-- fragile than just taking the component number.)
+	root integer not null,
+	splice smallint not null,
+	rotation smallint not null,
+	location smallint not null
+);
+
+create table connect_provenance (
+	id bigint primary key generated always as identity,
+	input1 bigint references gadgets not null,
+	output1 bigint references gadgets not null,
+	location smallint not null
+	-- TODO: could replace the primary key with a composite key of all three
+	-- fields; could also do the same for combine_provenance if we really wanted (all fields)
 );
 
 create table completed_combines (
-	id bigint primary key generated always as identity,
+	-- no specific primary key column as we should only keep the high-water mark for each pair
 	g1 bigint references gadgets not null,
 	g2 bigint references gadgets not null,
-	alphabet_size smallint not null
+	alphabet_size smallint not null,
+	primary key (g1, g2)
 );
 
 -- Stores closed intervals
