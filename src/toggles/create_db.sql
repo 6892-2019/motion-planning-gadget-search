@@ -38,6 +38,14 @@ create table connect_provenance (
 	-- fields; could also do the same for combine_provenance if we really wanted (all fields)
 );
 
+create table mirror_provenance (
+	a bigint references gadgets not null,
+	b bigint references gadgets not null,
+	primary key (a, b),
+	check(a < b)
+	-- TODO: prevent (a, c) and (b, c)/(a, b) and (a, c) from coexisting (enforce it's a partial matching)
+);
+
 create table completed_combines (
 	-- no specific primary key column as we should only keep the high-water mark for each pair
 	g1 bigint references gadgets not null,
@@ -55,6 +63,16 @@ create table completed_connects (
 	-- option would be to use two foreign key columns and index on an expression.)
 	exclude using gist (r with &&)
 );
+
+create table completed_mirrors (
+	id bigint primary key generated always as identity,
+	r int8range not null check(lower_inc(r) and not upper_inc(r)),
+	exclude using gist (r with &&)
+);
+
+-- No specific chirality table: if a gadget's id is in mirror_provenance, it's
+-- chiral; if not and its id is in completed_mirrors, it's achiral, and
+-- otherwise we don't know.
 
 -- Human-readable names for gadgets.  A name may map to multiple gadgets.
 create table aliases (

@@ -77,6 +77,7 @@ def sync_known_gadgets(args):
 
   named_rows = SingleDefinitionMapping()
   alias_groups = SingleDefinitionMapping()
+  mirror_provenance = [] # list of pairs
   for name, gadget in input_data['gadgets'].items():
     for required_key in ('uedges', 'dedges'):
       if required_key not in gadget:
@@ -89,6 +90,7 @@ def sync_known_gadgets(args):
       named_rows['r-'+name] = canonicals[0]
       named_rows['s-'+name] = canonicals[1]
       alias_groups[name] = ('r-'+name, 's-'+name)
+      mirror_provenance.append(('r-'+name, 's-'+name))
 
   for alias, target in input_data['aliases'].items():
     if alias in named_rows:
@@ -118,6 +120,14 @@ def sync_known_gadgets(args):
       if not gid:
         gid = conn.execute(q_insert_gadget, {k: v for k, v in zip(gadget_non_primary_keys, row)}).scalar()
       name_to_gid[name] = gid
+
+    for aname, bname in mirror_provenance:
+      a, b = name_to_gid[aname], name_to_gid[bname]
+      a, b = min(a, b), max(a, b)
+      conn.execute(sqlalchemy.text('insert into mirror_provenance values ({}, {}) on conflict do nothing'.format(a, b)))
+      q_insert_compmirr = 'insert into completed_mirrors (r) values (int8range({}, {})) on conflict do nothing'
+      conn.execute(sqlalchemy.text(q_insert_compmirr.format(a, a+1)))
+      conn.execute(sqlalchemy.text(q_insert_compmirr.format(b, b+1)))
 
     # Previously we tried to upsert aliases and cnames, but it's too much
     # complexity for too little benefit.
