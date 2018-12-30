@@ -22,7 +22,8 @@ create table combine_provenance (
 	output1 bigint references gadgets not null,
 	-- The smallest accepting state in the chosen component.  (This is fragile
 	-- because it doesn't come from a canonical automaton, but slightly less
-	-- fragile than just taking the component number.)
+	-- fragile than just taking the component number.)  If there's only a single
+	-- component, this will always be 0.
 	root integer not null,
 	splice smallint not null,
 	rotation smallint not null,
@@ -33,6 +34,7 @@ create table connect_provenance (
 	id bigint primary key generated always as identity,
 	input1 bigint references gadgets not null,
 	output1 bigint references gadgets not null,
+	root integer not null, -- same meaning as combine_provenance
 	location smallint not null
 	-- TODO: could replace the primary key with a composite key of all three
 	-- fields; could also do the same for combine_provenance if we really wanted (all fields)
