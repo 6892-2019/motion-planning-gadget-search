@@ -319,7 +319,7 @@ private:
 
 class PackReader {
 public:
-	PackReader(const vector<std::byte>& data) : data_(data) {}
+	PackReader(const vector<std::byte>& data) : data_(data), cur_(0) {}
 	unsigned int read8() {
 		return readBytes<1>();
 	}
