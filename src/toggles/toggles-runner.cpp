@@ -12,6 +12,8 @@ using namespace automaton;
 using std::size_t;
 using std::pair;
 using std::tuple;
+using std::optional;
+using std::nullopt;
 using std::vector;
 using std::unique_ptr;
 using std::string_view;
@@ -42,16 +44,8 @@ public:
 		return *this;
 	}
 	unique_ptr<WorkingAutomaton> build() {
-		branchToAnyAcceptState(*gadget);
 		gadget->minimize();
-		auto alpha = gadget->alphabet_size(), activealpha = gadget->active_alphabet_size();
-		auto nop = make_nop(alpha, activealpha);
-		gadget = shuffleAccept(*gadget, *nop, alpha);
-		gadget->minimize();
-		acceptingClosure(*gadget, activealpha);
-		branchToAnyAcceptState(*gadget);
-		gadget->minimize();
-		canonicalize(*gadget, activealpha);
+		canonicalize(*gadget, gadget->active_alphabet_size(), false);
 		return std::move(gadget);
 	}
 private:
@@ -64,34 +58,6 @@ private:
 			gadget->setAccept(gadgetStateToAutomatonState.back());
 		}
 		return gadgetStateToAutomatonState[gadgetState];
-	}
-	static void branchToAnyAcceptState(WorkingAutomaton& a) {
-		StateSet accepting;
-		for (AutomatonBase::state_type s = 0; s < a.state_size(); ++s)
-			if (a.accept(s))
-				accepting.insert_absent(s);
-		setInitialStates(a, accepting);
-	}
-	static void setInitialStates(WorkingAutomaton& a, const StateSet& initialStates) {
-		using state_type = WorkingAutomaton::state_type;
-		state_type s = a.addState();
-		for (state_type t : initialStates)
-			a.addEpsilon(s, t);
-		a.swapStateNumbers(0, s);
-	}
-	static unique_ptr<WorkingAutomaton> make_nop(unsigned int alphabet_size, unsigned int locations) {
-		if (locations > alphabet_size) return nullptr;
-		//GadgetBuilder calls prepare which calls make_nop, so we have to do this
-		//manually to break the cycle.
-		unique_ptr<WorkingAutomaton> a = make_working(alphabet_size);
-		a->addState();
-		a->setAccept(0, true);
-		for (unsigned int i = 0; i < locations; ++i) {
-			auto s = a->addState();
-			a->addTrans(0, i, s);
-			a->addTrans(s, i, 0);
-		}
-		return a;
 	}
 };
 
@@ -126,6 +92,90 @@ struct hash<GadgetEdge> {
 };
 }
 
+
+//TODO: these should be appropriately generalized (e.g., not depending on acceptness,
+//reviving state-based things) and moved up to the main automaton library.
+template<class ForEachDestination, class IsAccept>
+auto predecessorless_accept_things(const unsigned int size,
+		ForEachDestination&& for_each_destination, IsAccept&& accept) {
+	dynarray<unsigned int> predcount(size);
+	std::fill(predcount.begin(), predcount.end(), 0u);
+	for (auto s : xrange(size))
+		for_each_destination(s, [&](unsigned int t){++predcount[t];});
+
+	//We don't want predecessorless nonaccept states to count as predecessors.
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		for (unsigned int i = 0; i < size; ++i)
+			if (predcount[i] == 0 && !accept(i)) {
+				for_each_destination(i, [&](unsigned int t){--predcount[t];});
+				//Mark this state as previously considered, not to be repeated.
+				predcount[i] = std::numeric_limits<unsigned int>::max();
+				progress = true;
+			}
+	}
+
+	std::vector<unsigned int> retval;
+	for (unsigned int i = 0; i < size; ++i)
+		if (predcount[i] == 0 && accept(i))
+			retval.push_back(i);
+	return retval;
+}
+template<unsigned int N>
+auto predecessorless_accept_components(const Automaton<N>& a, const SCCs& sccs) {
+	dynarray<unsigned int> state_to_comp(a.state_size());
+	for (auto c : xrange(sccs.size()))
+		for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
+			state_to_comp[s] = c;
+	return predecessorless_accept_things(sccs.size(),
+			[&](unsigned int c, auto&& action){
+				//We might visit a destination many times if it's targeted by
+				//multiple states in the source component, but that's fine as
+				//long as we're consistent between increments and decrements.
+				for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
+					a.for_each_destination(s, [&](typename Automaton<N>::state_type t) {
+						if (state_to_comp[t] != c) //only count edges to other components
+							action(state_to_comp[t]);
+					});
+			},
+			[&](unsigned int c) {
+				return std::any_of(sccs.begin(c), sccs.end(c), [&](unsigned int s){
+					return a.accept(s);
+				});
+			});
+}
+
+auto reachable_accept_components(const AutomatonBase& a, const SCCs& sccs) {
+	dynarray<unsigned int> state_to_comp(a.state_size());
+	for (auto c : xrange(sccs.size()))
+		for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
+			state_to_comp[s] = c;
+
+	std::vector<unsigned int> ret;
+	tsl::hopscotch_set<unsigned int> closed;
+	circular_deque<unsigned int, 32> worklist;
+	closed.insert(0);
+	worklist.push_back(0);
+	while (!worklist.empty()) {
+		unsigned int cur = worklist.pop_front();
+		//even if we aren't an accepting component, we can still reach other accepting components
+		bool accepting = false;
+		for (auto s : make_range_for_pair(sccs.begin(cur), sccs.end(cur))) {
+			a.for_each_destination(s, [&](AutomatonBase::state_type t) {
+				unsigned int other = state_to_comp[t];
+				if (closed.insert(other).second)
+					worklist.push_back(other);
+			});
+			accepting = accepting || a.accept(s);
+		}
+		if (accepting)
+			ret.push_back(cur); //TODO: could template this finishing action, so we just count if we only care about .size()
+	}
+	return ret;
+}
+
+
 /**
  * A gadget in SLLS format is two lists of undirected and directed GadgetEdges.
  * Undirected edges also represent their reverse edge.
@@ -155,19 +205,14 @@ unique_ptr<WorkingAutomaton> inflate_slls(SLLS gadget, unsigned int alphabetSize
 
 SLLS deflate_slls(const AutomatonBase& a) {
 	SLLS gadget;
-	auto state_size = a.state_size(), accept_size = a.accept_size();
+	auto state_size = a.state_size();
 	auto activealpha = a.activeAlphabet();
-	if (accept_size == 2)
-		//Accept size should be 1 (stateless, e.g., nops and splits) or >= 3
-		//(2+ states, plus one for superposition).
-		throw std::logic_error("accept size 2?!");
 
 	unsigned int gadgetStates = 0;
 	tsl::hopscotch_map<AutomatonBase::state_type, unsigned int> autoToGadget; //maps automaton states to gadget states
 	tsl::hopscotch_set<GadgetEdge> edges;
 	for (AutomatonBase::state_type start = 0; start < state_size; ++start) {
 		if (!a.accept(start)) continue;
-		if (accept_size != 1 && start == 0) continue; //ignore superposition pseudostate
 		for (AutomatonBase::symbol_type from : activealpha) {
 			auto middle = a.stepDeterministic(start, from);
 			if (middle) {
@@ -176,9 +221,7 @@ SLLS deflate_slls(const AutomatonBase& a) {
 					auto end = a.stepDeterministic(*middle, to);
 					if (end) {
 						assert(a.accept(*end));
-						if (accept_size != 1 && *end == 0) continue; //ignore superposition pseudostate
-						//TODO: are nops not in the database?  their SL graph is empty, and we minimize both states and locations...
-						if (start == *end && from == to) continue; //skip nop edges
+						if (start == *end && from == to) continue; //skip nop edges (TODO: I think we shouldn't have any)
 						//If either is missing, the insert invalidates iterators, so there's not
 						//much point in using them.
 						if (!autoToGadget.count(start))
@@ -208,7 +251,12 @@ SLLS deflate_slls(const AutomatonBase& a) {
  * varint, followed by the edges.  The undirected edges (if any) precede the
  * directed edges (if any).  Each endpoint is s*locations+l as a varint.  Edges
  * are sorted in natural tuple order before being compressed; undirected edges
- * are encoded as the lesser of the pair of edges they represent.
+ * are encoded as the lesser of the pair of edges they represent.  We
+ * additionally store the number of strongly connected components reachable from
+ * the initial state and containing at least one accepting state in the row,
+ * relevant for gadgets only usable a finite number of times.  We do not store
+ * this number in the byte array because it is not needed to interpret the edge
+ * list.
  *
  * As the gadget is uniquely described by the byte array, we can deduplicate in
  * the database using only that array (and so only using a single index).  But
@@ -222,9 +270,9 @@ SLLS deflate_slls(const AutomatonBase& a) {
  * recoverable from it.
  */
 struct OutputRow {
-	unsigned int states, locations, uedges, dedges;
+	unsigned int states, locations, uedges, dedges, sccs;
 	std::vector<std::byte> edges;
-	MSGPACK_DEFINE_ARRAY(states, locations, uedges, dedges, edges)
+	MSGPACK_DEFINE_ARRAY(states, locations, uedges, dedges, sccs, edges)
 };
 bool operator==(const OutputRow& a, const OutputRow& b) {
 	//The four fields are repeated at the beginning of the byte array, so we
@@ -233,6 +281,9 @@ bool operator==(const OutputRow& a, const OutputRow& b) {
 }
 bool operator!=(const OutputRow& a, const OutputRow& b) {
 	return !(a == b);
+}
+bool operator<(const OutputRow& a, const OutputRow& b) {
+	return std::lexicographical_compare(a.edges.begin(), a.edges.end(), b.edges.begin(), b.edges.end());
 }
 namespace std {
 template<>
@@ -413,7 +464,7 @@ unique_ptr<WorkingAutomaton> inflate_outputrow(const std::vector<std::byte>& byt
 
 OutputRow deflate_outputrow(const AutomatonBase& a) {
 	SLLS slls = deflate_slls(a);
-	unsigned int states = a.accept_size() == 1 ? 1 : a.accept_size() - 1;
+	unsigned int states = a.accept_size();
 	unsigned int locations = a.active_alphabet_size();
 	std::sort(slls.uedges.begin(), slls.uedges.end());
 	std::sort(slls.dedges.begin(), slls.dedges.end());
@@ -425,9 +476,21 @@ OutputRow deflate_outputrow(const AutomatonBase& a) {
 		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
 	for (GadgetEdge e : slls.dedges)
 		data.writeVarint(e.start * locations + e.from).writeVarint(e.end * locations + e.to);
+	SCCs sccs = automaton::find_components(a);
 	return {states, locations,
 			numeric_cast<unsigned int>(slls.uedges.size()), numeric_cast<unsigned int>(slls.dedges.size()),
+			numeric_cast<unsigned int>(reachable_accept_components(a, sccs).size()),
 			std::move(data.data)};
+}
+
+//TODO: make this SCCs::find
+unsigned int component_for_state(SCCs sccs, AutomatonBase::state_type state) {
+	for (unsigned int c : xrange(sccs.size()))
+		for (unsigned int s : make_range_for_pair(sccs.begin(c), sccs.end(c))) //TODO: add SCCs::range (name TBD)
+			if (s == state)
+				return c;
+	//TODO: add an SCCs method giving the number of states, so we can report here
+	throw std::logic_error(fmt::format("component_for_state failed: {} {}", state, sccs.size()));
 }
 
 /**
@@ -435,286 +498,262 @@ OutputRow deflate_outputrow(const AutomatonBase& a) {
  * Intended for use when loading human-readable gadget definitions into the
  * database.
  */
-std::vector<OutputRow> canonicalize_from_slls(SLLS gadget) {
+vector<pair<OutputRow, optional<OutputRow>>> canonicalize_from_slls(SLLS gadget) {
 	unique_ptr<WorkingAutomaton> a = inflate_slls(gadget);
-	unique_ptr<WorkingAutomaton> b = mirror(*a);
-	//We already canonicalized it when we built it; now we just have to pack it
-	//into row format.  If it's chiral, we return both enantiomers.
-	if (*a != *b) {
-		OutputRow la = deflate_outputrow(*a), lb = deflate_outputrow(*b);
-		//Order them arbitrarily but consistently.
-		assert(la.edges != lb.edges);
-		if (std::lexicographical_compare(lb.edges.begin(), lb.edges.end(), la.edges.begin(), la.edges.end()))
-			std::swap(la, lb);
-		return {std::move(la), std::move(lb)};
-	} else
-		return {deflate_outputrow(*a)};
-}
+	OutputRow row = deflate_outputrow(*a);
+	SCCs sccs = automaton::find_components(*a); //just computed this in deflate_outputrow, could try to save it
+	auto activealpha = a->active_alphabet_size();
 
-/**
- * A row (minus the primary key) of an edge in the combine_provenance table.  We
- * use smaller types to save space.
- */
-struct CombineProvenance {
-	std::uint64_t input1, input2;
-	std::uint32_t output1;
-	std::uint32_t root;
-	std::uint8_t splice, rotation, connectPoint;
-	MSGPACK_DEFINE_ARRAY(input1, input2, output1, root, splice, rotation, connectPoint)
-};
-
-/**
- * A row (minus the primary key) of an edge in the connect_provenance table.  We
- * use smaller types to save space.
- */
-struct ConnectProvenance {
-	std::uint64_t input1;
-	std::uint32_t output1;
-	std::uint32_t root;
-	std::uint8_t connectPoint;
-	MSGPACK_DEFINE_ARRAY(input1, output1, root, connectPoint)
-};
-
-template<class Provenance>
-struct Finisher {
-	//I'm assuming we aren't generating so many rows as to need the PageHolder
-	//machinery to reduce fragmentation.
-	tsl::ordered_set<OutputRow> rows_;
-	vector<Provenance> prov_;
-	bool operator()(const AutomatonBase& a, Provenance prov) {
-		auto pair = rows_.insert(deflate_outputrow(a));
-		//When we successfully insert, we know the index is size()-1, but deque
-		//operator- is cheap enough that it's not worth branching on .second.
-		prov.output1 = numeric_cast<decltype(prov.output1)>(std::distance(rows_.begin(), pair.first));
-		prov_.push_back(std::move(prov));
-		return pair.second;
-	}
-};
-
-template<unsigned int N, class Iter>
-void setInitialStatesToAcceptingStatesInRange(Automaton<N>& a, Iter first, Iter last) {
-	//TODO: first scan to see if there's only one accept state in the range
-	//(by remembering it and jumping to a new loop when the second is seen), so
-	//that we avoid introducing a new state unnecessarily.
-	using state_type = typename Automaton<N>::state_type;
-	state_type s = a.addState();
-	for (state_type t : make_range_for_pair(first, last))
-		if (a.accept(t))
-			a.addEpsilon(s, t);
-	a.swapStateNumbers(0, s);
-}
-
-template<unsigned int N>
-bool enjoin(Automaton<N>& a, typename Automaton<N>::symbol_type l, typename Automaton<N>::symbol_type m) {
-	using state_type = typename Automaton<N>::state_type;
-	bool progress, changed = false;
-	//TODO: instead of fixpoint iteration, we should put the changed state s
-	//on a worklist and iterate until it's empty
-	do {
-		progress = false;
-		for (state_type s = 0; s < a.state_size(); ++s) {
-			if (a.accept(s)) continue;
-			auto dests = a.step(s, l);
-			for (state_type d : dests) {
-				assert(a.accept(d));
-				for (state_type e : a.step(d, m))
-					progress |= a.addEpsilon(s, e);
-			}
-
-			dests = a.step(s, m);
-			for (state_type d : dests) {
-				assert(a.accept(d));
-				for (state_type e : a.step(d, l))
-					progress |= a.addEpsilon(s, e);
-			}
+	vector<pair<unique_ptr<WorkingAutomaton>, OutputRow>> normals;
+	normals.emplace_back(std::move(a), std::move(row));
+	//When initializing the database with named gadgets, we want to try all
+	//initial states in the initial connected component.
+	unsigned int initial_component = component_for_state(sccs, 0);
+	for (auto state : make_range_for_pair(sccs.begin(initial_component), sccs.end(initial_component))) //TODO: SCCs::range
+		if (normals.front().first->accept(state)) {
+			unique_ptr<WorkingAutomaton> p = normals.front().first->clone();
+			p->swapStateNumbers(0, state);
+			canonicalize(*p, activealpha, false); //no mirroring
+			row = deflate_outputrow(*p);
+			normals.emplace_back(std::move(p), std::move(row));
 		}
-		changed |= progress;
-	} while (progress);
-	return changed;
-}
+	std::sort(normals.begin(), normals.end(), [](const auto& l, const auto& r) {return l.second < r.second;});
+	normals.erase(std::unique(normals.begin(), normals.end(),
+			[](const auto& l, const auto& r) {return l.second == r.second;}), normals.end());
 
-template<unsigned int N>
-auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
-	//TODO: these alphamap manipulations could all be precomputed, though it's
-	//not clear that would be any faster than using a stack variable
-	std::array<unsigned int, Automaton<N>::alphabet_size_v> alphamap;
-	if (connectPoint+1 == locations) {
-		auto end = alphamap.begin()+locations-2;
-		//other connect point is zero, so start from 1
-		std::iota(alphamap.begin(), end, 1);
-		std::fill(end, alphamap.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
-	} else {
-		auto middle = alphamap.begin()+connectPoint, end = alphamap.begin()+locations-2;
-		std::iota(alphamap.begin(), middle, 0);
-		std::iota(middle, end, connectPoint+2);
-		std::fill(end, alphamap.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
-	}
-	return alphamap;
-}
-
-template<class ForEachDestination, class IsAccept>
-auto predecessorless_accept_things(const unsigned int size,
-		ForEachDestination&& for_each_destination, IsAccept&& accept) {
-	dynarray<unsigned int> predcount(size);
-	std::fill(predcount.begin(), predcount.end(), 0u);
-	for (auto s : xrange(size))
-		for_each_destination(s, [&](unsigned int t){++predcount[t];});
-
-	//We don't want predecessorless nonaccept states to count as predecessors.
-	bool progress = true;
-	while (progress) {
-		progress = false;
-		for (unsigned int i = 0; i < size; ++i)
-			if (predcount[i] == 0 && !accept(i)) {
-				for_each_destination(i, [&](unsigned int t){--predcount[t];});
-				//Mark this state as previously considered, not to be repeated.
-				predcount[i] = std::numeric_limits<unsigned int>::max();
-				progress = true;
-			}
+	//It's plausible that only a subset of the states are chiral.
+	vector<pair<unique_ptr<WorkingAutomaton>, OutputRow>> mirrors;
+	for (const auto& n : normals) {
+		unique_ptr<WorkingAutomaton> p = mirror(*n.first);
+		row = deflate_outputrow(*p);
+		mirrors.emplace_back(std::move(p), std::move(row));
 	}
 
-	std::vector<unsigned int> retval;
-	for (unsigned int i = 0; i < size; ++i)
-		if (predcount[i] == 0 && accept(i))
-			retval.push_back(i);
+	//Mirror order is the same as the normal order (mirrors aren't sorted).
+	//We're also just taking the first enantiomorph as 'normal', rather than
+	//the lexicographically lesser one.
+	vector<pair<OutputRow, optional<OutputRow>>> retval;
+	for (auto i : xrange(normals.size()))
+		if (normals[i].second != mirrors[i].second)
+			retval.emplace_back(std::move(normals[i].second), std::move(mirrors[i].second));
+		else
+			retval.emplace_back(std::move(normals[i].second), nullopt);
 	return retval;
 }
-template<unsigned int N>
-auto predecessorless_accept_components(const Automaton<N>& a, const SCCs& sccs) {
-	dynarray<unsigned int> state_to_comp(a.state_size());
-	for (auto c : xrange(sccs.size()))
-		for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
-			state_to_comp[s] = c;
-	return predecessorless_accept_things(sccs.size(),
-			[&](unsigned int c, auto&& action){
-				//We might visit a destination many times if it's targeted by
-				//multiple states in the source component, but that's fine as
-				//long as we're consistent between increments and decrements.
-				for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
-					a.for_each_destination(s, [&](typename Automaton<N>::state_type t) {
-						if (state_to_comp[t] != c) //only count edges to other components
-							action(state_to_comp[t]);
-					});
-			},
-			[&](unsigned int c) {
-				return std::any_of(sccs.begin(c), sccs.end(c), [&](unsigned int s){
-					return a.accept(s);
-				});
-			});
-}
 
-template<unsigned int N, class Provenance>
-void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
-		Provenance prov, Finisher<Provenance>& finisher) {
-	Automaton<N> connected = a;
-	enjoin(connected, prov.connectPoint, (prov.connectPoint+1) % activeAlphabetSize);
-	acceptingClosure(connected, activeAlphabetSize);
-	auto alphamap = connect_alphamap<N>(activeAlphabetSize, prov.connectPoint);
-	connected.renumberAlphabet(alphamap.begin());
+///**
+// * A row (minus the primary key) of an edge in the combine_provenance table.  We
+// * use smaller types to save space.
+// */
+//struct CombineProvenance {
+//	std::uint64_t input1, input2;
+//	std::uint32_t output1;
+//	std::uint32_t root;
+//	std::uint8_t splice, rotation, connectPoint;
+//	MSGPACK_DEFINE_ARRAY(input1, input2, output1, root, splice, rotation, connectPoint)
+//};
 
-	//We may have disconnected the automaton (disconnecting the
-	//configuration graph of the gadget it represents).
-	automaton::SCCs sccs = automaton::find_components(connected);
-	auto roots = predecessorless_accept_components(connected, sccs);
-	std::array<typename Automaton<N>::symbol_type, Automaton<N>::alphabet_size_v> compression;
-	for (auto c : roots) {
-		Automaton<N> op = connected; //TODO: avoid copy if single root; avoid copy on last iteration (more general: also covers one-root case)
-		setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
-		op.minimize();
-		auto active = op.activeAlphabet();
-		if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
-		//TODO: if this check usually doesn't fire, we can use active_alphabet_size instead of materializing the set
-		if (active.size() != (activeAlphabetSize - 2)) {
-			//compress the alphabet
-			active.sort();
-			std::copy(active.begin(), active.end(), compression.begin());
-			std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
-			op.renumberAlphabet(compression.begin());
-			//Because we're deleting unused symbols, we don't need to
-			//minimize again; any two equivalent states would differ only in
-			//the symbols we deleted, but those symbols were inactive.
-			//TODO: improve Automaton to notice this, or add a renumberAlphabet variant,
-			//so that we actually skip minimizing in the finisher's canonicalize.
-		}
-
-		if (roots.size() == 1)
-			prov.root = 0;
-		else {
-			prov.root = std::numeric_limits<decltype(prov.root)>::max();
-			for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
-				if (s < prov.root && a.accept(s))
-					prov.root = s;
-		}
-		finisher(std::move(op), prov);
-	}
-}
-
-template<unsigned int N>
-void connect(const Automaton<N>& a, std::uint64_t input1, Finisher<ConnectProvenance>& finisher) {
-	auto activeAlphabetSize = a.active_alphabet_size();
-	//If there are fewer than 4 locations, there will be fewer than 2 surviving
-	//after the connect (we'll always delete two locations), so no results.
-	if (activeAlphabetSize < 4) return;
-	ConnectProvenance prov;
-	debug_scream(prov);
-	prov.input1 = input1;
-	for (auto connectPoint : xrange(activeAlphabetSize)) {
-		prov.connectPoint = numeric_cast<std::uint8_t>(connectPoint);
-		connect_at(a, activeAlphabetSize, prov, finisher);
-	}
-}
-
-void connect(const AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProvenance>& finisher) {
-	auto alpha = a.alphabet_size();
-	if (alpha < 4) {
-		//We should ignore these at the database level.
-		fmt::print(stderr, "ignoring connect for gadget {} with alphabet size {} (no results possible)\n",
-				input1, alpha);
-		return;
-	}
-	switch (alpha) {
-#define TOGGLESRUNNER_CONNECT_CASE(N) case N: return connect(static_cast<const Automaton<N>&>(a), input1, finisher);
-		TOGGLESRUNNER_CONNECT_CASE(4)
-		TOGGLESRUNNER_CONNECT_CASE(5)
-		TOGGLESRUNNER_CONNECT_CASE(6)
-		TOGGLESRUNNER_CONNECT_CASE(7)
-		TOGGLESRUNNER_CONNECT_CASE(8)
-		TOGGLESRUNNER_CONNECT_CASE(9)
-		TOGGLESRUNNER_CONNECT_CASE(10)
-		TOGGLESRUNNER_CONNECT_CASE(11)
-		TOGGLESRUNNER_CONNECT_CASE(12)
-		TOGGLESRUNNER_CONNECT_CASE(13)
-		TOGGLESRUNNER_CONNECT_CASE(14)
-		TOGGLESRUNNER_CONNECT_CASE(15)
-		TOGGLESRUNNER_CONNECT_CASE(16)
-#undef TOGGLESRUNNER_CONNECT_CASE
-		default:
-			fmt::print(stderr, "unhandled toggles-runner connect for gadget {} with alphabet size {} and typeid {}\n",
-					input1, alpha, typeid(a).name());
-	}
-}
-
-
-struct ConnectCommandOutput {
-//	decltype(Finisher<ConnectProvenance>::rows_.values_container()) rows;
-	vector<OutputRow> rows;
-	vector<ConnectProvenance> prov;
-	vector<std::uint64_t> toughies; //TODO: more specific information (connectPoint or root)?
-	MSGPACK_DEFINE_ARRAY(rows, prov, toughies) //TODO: maybe using map would give more flexibility?
-};
-ConnectCommandOutput do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) { //TODO: ensure we're moving, not copying the arg
-	Finisher<ConnectProvenance> finisher;
-	vector<std::uint64_t> toughies;
-	for (auto& i : inputs)
-		//TODO: try-catch for toughies
-		connect(*inflate_outputrow(i.second), i.first, finisher);
-	//TODO: Ideally we'd just put values_container (a deque) in the ConnectCommandOutput,
-	//but msgpack only provides a packer, and MSGPACK_DEFINE_ARRAY also demands
-	//a packer (I guess -- we shouldn't be using it).  Though we end up copying
-	//it either way because we can't move it -- maybe tsl::ordered_set needs a release() method?
-	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
-	return {std::move(rows), std::move(finisher.prov_), std::move(toughies)};
-}
+///**
+// * A row (minus the primary key) of an edge in the connect_provenance table.  We
+// * use smaller types to save space.
+// */
+//struct ConnectProvenance {
+//	std::uint64_t input1;
+//	std::uint32_t output1;
+//	std::uint32_t root;
+//	std::uint8_t connectPoint;
+//	MSGPACK_DEFINE_ARRAY(input1, output1, root, connectPoint)
+//};
+//
+//template<class Provenance>
+//struct Finisher {
+//	//I'm assuming we aren't generating so many rows as to need the PageHolder
+//	//machinery to reduce fragmentation.
+//	tsl::ordered_set<OutputRow> rows_;
+//	vector<Provenance> prov_;
+//	bool operator()(const AutomatonBase& a, Provenance prov) {
+//		auto pair = rows_.insert(deflate_outputrow(a));
+//		//When we successfully insert, we know the index is size()-1, but deque
+//		//operator- is cheap enough that it's not worth branching on .second.
+//		prov.output1 = numeric_cast<decltype(prov.output1)>(std::distance(rows_.begin(), pair.first));
+//		prov_.push_back(std::move(prov));
+//		return pair.second;
+//	}
+//};
+//
+//template<unsigned int N, class Iter>
+//void setInitialStatesToAcceptingStatesInRange(Automaton<N>& a, Iter first, Iter last) {
+//	//TODO: first scan to see if there's only one accept state in the range
+//	//(by remembering it and jumping to a new loop when the second is seen), so
+//	//that we avoid introducing a new state unnecessarily.
+//	using state_type = typename Automaton<N>::state_type;
+//	state_type s = a.addState();
+//	for (state_type t : make_range_for_pair(first, last))
+//		if (a.accept(t))
+//			a.addEpsilon(s, t);
+//	a.swapStateNumbers(0, s);
+//}
+//
+//template<unsigned int N>
+//bool enjoin(Automaton<N>& a, typename Automaton<N>::symbol_type l, typename Automaton<N>::symbol_type m) {
+//	using state_type = typename Automaton<N>::state_type;
+//	bool progress, changed = false;
+//	//TODO: instead of fixpoint iteration, we should put the changed state s
+//	//on a worklist and iterate until it's empty
+//	do {
+//		progress = false;
+//		for (state_type s = 0; s < a.state_size(); ++s) {
+//			if (a.accept(s)) continue;
+//			auto dests = a.step(s, l);
+//			for (state_type d : dests) {
+//				assert(a.accept(d));
+//				for (state_type e : a.step(d, m))
+//					progress |= a.addEpsilon(s, e);
+//			}
+//
+//			dests = a.step(s, m);
+//			for (state_type d : dests) {
+//				assert(a.accept(d));
+//				for (state_type e : a.step(d, l))
+//					progress |= a.addEpsilon(s, e);
+//			}
+//		}
+//		changed |= progress;
+//	} while (progress);
+//	return changed;
+//}
+//
+//template<unsigned int N>
+//auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
+//	//TODO: these alphamap manipulations could all be precomputed, though it's
+//	//not clear that would be any faster than using a stack variable
+//	std::array<unsigned int, Automaton<N>::alphabet_size_v> alphamap;
+//	if (connectPoint+1 == locations) {
+//		auto end = alphamap.begin()+locations-2;
+//		//other connect point is zero, so start from 1
+//		std::iota(alphamap.begin(), end, 1);
+//		std::fill(end, alphamap.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
+//	} else {
+//		auto middle = alphamap.begin()+connectPoint, end = alphamap.begin()+locations-2;
+//		std::iota(alphamap.begin(), middle, 0);
+//		std::iota(middle, end, connectPoint+2);
+//		std::fill(end, alphamap.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
+//	}
+//	return alphamap;
+//}
+//
+//template<unsigned int N, class Provenance>
+//void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
+//		Provenance prov, Finisher<Provenance>& finisher) {
+//	Automaton<N> connected = a;
+//	enjoin(connected, prov.connectPoint, (prov.connectPoint+1) % activeAlphabetSize);
+//	acceptingClosure(connected, activeAlphabetSize);
+//	auto alphamap = connect_alphamap<N>(activeAlphabetSize, prov.connectPoint);
+//	connected.renumberAlphabet(alphamap.begin());
+//
+//	//We may have disconnected the automaton (disconnecting the
+//	//configuration graph of the gadget it represents).
+//	automaton::SCCs sccs = automaton::find_components(connected);
+//	auto roots = predecessorless_accept_components(connected, sccs);
+//	std::array<typename Automaton<N>::symbol_type, Automaton<N>::alphabet_size_v> compression;
+//	for (auto c : roots) {
+//		Automaton<N> op = connected; //TODO: avoid copy if single root; avoid copy on last iteration (more general: also covers one-root case)
+//		setInitialStatesToAcceptingStatesInRange(op, sccs.begin(c), sccs.end(c));
+//		op.minimize();
+//		auto active = op.activeAlphabet();
+//		if (active.size() <= 1) continue; //there are no interesting 1-symbol automata
+//		//TODO: if this check usually doesn't fire, we can use active_alphabet_size instead of materializing the set
+//		if (active.size() != (activeAlphabetSize - 2)) {
+//			//compress the alphabet
+//			active.sort();
+//			std::copy(active.begin(), active.end(), compression.begin());
+//			std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
+//			op.renumberAlphabet(compression.begin());
+//			//Because we're deleting unused symbols, we don't need to
+//			//minimize again; any two equivalent states would differ only in
+//			//the symbols we deleted, but those symbols were inactive.
+//			//TODO: improve Automaton to notice this, or add a renumberAlphabet variant,
+//			//so that we actually skip minimizing in the finisher's canonicalize.
+//		}
+//
+//		if (roots.size() == 1)
+//			prov.root = 0;
+//		else {
+//			prov.root = std::numeric_limits<decltype(prov.root)>::max();
+//			for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
+//				if (s < prov.root && a.accept(s))
+//					prov.root = s;
+//		}
+//		finisher(std::move(op), prov);
+//	}
+//}
+//
+//template<unsigned int N>
+//void connect(const Automaton<N>& a, std::uint64_t input1, Finisher<ConnectProvenance>& finisher) {
+//	auto activeAlphabetSize = a.active_alphabet_size();
+//	//If there are fewer than 4 locations, there will be fewer than 2 surviving
+//	//after the connect (we'll always delete two locations), so no results.
+//	if (activeAlphabetSize < 4) return;
+//	ConnectProvenance prov;
+//	debug_scream(prov);
+//	prov.input1 = input1;
+//	for (auto connectPoint : xrange(activeAlphabetSize)) {
+//		prov.connectPoint = numeric_cast<std::uint8_t>(connectPoint);
+//		connect_at(a, activeAlphabetSize, prov, finisher);
+//	}
+//}
+//
+//void connect(const AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProvenance>& finisher) {
+//	auto alpha = a.alphabet_size();
+//	if (alpha < 4) {
+//		//We should ignore these at the database level.
+//		fmt::print(stderr, "ignoring connect for gadget {} with alphabet size {} (no results possible)\n",
+//				input1, alpha);
+//		return;
+//	}
+//	switch (alpha) {
+//#define TOGGLESRUNNER_CONNECT_CASE(N) case N: return connect(static_cast<const Automaton<N>&>(a), input1, finisher);
+//		TOGGLESRUNNER_CONNECT_CASE(4)
+//		TOGGLESRUNNER_CONNECT_CASE(5)
+//		TOGGLESRUNNER_CONNECT_CASE(6)
+//		TOGGLESRUNNER_CONNECT_CASE(7)
+//		TOGGLESRUNNER_CONNECT_CASE(8)
+//		TOGGLESRUNNER_CONNECT_CASE(9)
+//		TOGGLESRUNNER_CONNECT_CASE(10)
+//		TOGGLESRUNNER_CONNECT_CASE(11)
+//		TOGGLESRUNNER_CONNECT_CASE(12)
+//		TOGGLESRUNNER_CONNECT_CASE(13)
+//		TOGGLESRUNNER_CONNECT_CASE(14)
+//		TOGGLESRUNNER_CONNECT_CASE(15)
+//		TOGGLESRUNNER_CONNECT_CASE(16)
+//#undef TOGGLESRUNNER_CONNECT_CASE
+//		default:
+//			fmt::print(stderr, "unhandled toggles-runner connect for gadget {} with alphabet size {} and typeid {}\n",
+//					input1, alpha, typeid(a).name());
+//	}
+//}
+//
+//
+//struct ConnectCommandOutput {
+////	decltype(Finisher<ConnectProvenance>::rows_.values_container()) rows;
+//	vector<OutputRow> rows;
+//	vector<ConnectProvenance> prov;
+//	vector<std::uint64_t> toughies; //TODO: more specific information (connectPoint or root)?
+//	MSGPACK_DEFINE_ARRAY(rows, prov, toughies) //TODO: maybe using map would give more flexibility?
+//};
+//ConnectCommandOutput do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) { //TODO: ensure we're moving, not copying the arg
+//	Finisher<ConnectProvenance> finisher;
+//	vector<std::uint64_t> toughies;
+//	for (auto& i : inputs)
+//		//TODO: try-catch for toughies
+//		connect(*inflate_outputrow(i.second), i.first, finisher);
+//	//TODO: Ideally we'd just put values_container (a deque) in the ConnectCommandOutput,
+//	//but msgpack only provides a packer, and MSGPACK_DEFINE_ARRAY also demands
+//	//a packer (I guess -- we shouldn't be using it).  Though we end up copying
+//	//it either way because we can't move it -- maybe tsl::ordered_set needs a release() method?
+//	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
+//	return {std::move(rows), std::move(finisher.prov_), std::move(toughies)};
+//}
 
 
 template<typename T>
@@ -749,7 +788,7 @@ msgpack::object_handle handler_adapter(const msgpack::object& arg_array) {
 using handler_ptr = msgpack::object_handle(*)(const msgpack::object&);
 const std::pair<string_view, handler_ptr> handlers[] = {
 	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
-	{"connect"sv, &handler_adapter<do_connect>},
+//	{"connect"sv, &handler_adapter<do_connect>},
 };
 
 msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
