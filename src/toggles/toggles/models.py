@@ -76,14 +76,14 @@ class CompletedConnect(Base):
     __tablename__ = 'completed_connectss'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
-    __table_args = (ExcludeConstraint(('r', '&&'), name='exc_compconnect_r'),)
+    __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compconnect_r'),)
 
 
 class CompletedMirror(Base):
     __tablename__ = 'completed_mirrors'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
-    __table_args = (ExcludeConstraint(('r', '&&'), name='exc_compmirror_r'),)
+    __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compmirror_r'),)
 
 
 # No specific chirality table; if a gadget's id is in mirror_edges, it's chiral;
@@ -95,7 +95,7 @@ class CompletedMirror(Base):
 # gadget may have multiple names.  When listing produced gadgets, we will use
 # every name that names only that gadget.
 class Name(Base):
-    __tablenames__ = 'names'
+    __tablename__ = 'names'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     gadget_id = Column('gadget_id', BigInteger, ForeignKey(Gadget.id), nullable=False)
     name = Column('name', Text, nullable=False)
