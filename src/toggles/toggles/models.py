@@ -5,6 +5,7 @@ import sqlalchemy
 from sqlalchemy import Column, Integer, Index, BigInteger, ForeignKey, SmallInteger, CheckConstraint, Text
 from sqlalchemy.dialects.postgresql import BYTEA, INT8RANGE, ExcludeConstraint
 from sqlalchemy.ext.declarative import declarative_base
+from psycopg2.extras import NumericRange
 
 
 # https://docs.sqlalchemy.org/en/rel_1_2/dialects/postgresql.html#postgresql-10-identity-columns
@@ -33,6 +34,13 @@ class Gadget(Base):
 
     # We'd make this a unique index but postgres doesn't support that yet.
     __table_args__ = (Index('idx_gadgets_data', data, postgresql_using='hash'),)
+
+    @classmethod
+    def from_tuple(cls, t):
+        if len(t) != 6:
+            raise ValueError('bad tuple length {} {}'.format(len(t), t))
+        return Gadget(states=t[0], locations=t[1], undirected_edges=t[2],
+                directed_edges=t[3], components=t[4], data=t[5])
 
 
 class CombineEdge(Base):
@@ -78,12 +86,20 @@ class CompletedConnect(Base):
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
     __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compconnect_r'),)
 
+    @classmethod
+    def singleton(cls, gadget_id):
+        return CompletedConnect(r=NumericRange(lower=gadget_id, upper=gadget_id+1))
+
 
 class CompletedMirror(Base):
     __tablename__ = 'completed_mirrors'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
     __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compmirror_r'),)
+
+    @classmethod
+    def singleton(cls, gadget_id):
+        return CompletedMirror(r=NumericRange(lower=gadget_id, upper=gadget_id + 1))
 
 
 # No specific chirality table; if a gadget's id is in mirror_edges, it's chiral;
