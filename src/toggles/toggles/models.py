@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from typing import ContextManager
 
 import sqlalchemy
-from sqlalchemy import Column, Integer, Index, BigInteger, ForeignKey, SmallInteger, CheckConstraint, Text
+from sqlalchemy import Column, Integer, Index, BigInteger, ForeignKey, SmallInteger, CheckConstraint, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import BYTEA, INT8RANGE, ExcludeConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from psycopg2.extras import NumericRange
@@ -115,6 +115,7 @@ class Name(Base):
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     gadget_id = Column('gadget_id', BigInteger, ForeignKey(Gadget.id), nullable=False)
     name = Column('name', Text, nullable=False)
+    __table_args__ = (UniqueConstraint(gadget_id, name),)
 
 
 Session = sessionmaker()
