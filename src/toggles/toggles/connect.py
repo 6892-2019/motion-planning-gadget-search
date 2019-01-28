@@ -1,13 +1,15 @@
 import argparse
 import re
 import sys
+from operator import itemgetter
+from more_itertools import consecutive_groups
 
 from sqlalchemy import and_, or_, cast
 from sqlalchemy.dialects.postgresql import array, INT8RANGE, ARRAY
 from sqlalchemy.dialects.postgresql.array import CONTAINED_BY
 from psycopg2.extras import NumericRange
 
-from .models import session_scope, Name, Gadget, CompletedConnect
+from .models import session_scope, Name, Gadget, CompletedConnect, ConnectEdge
 from .runner import local_toggles_runner
 
 
@@ -64,8 +66,40 @@ def connect(args):
         sys.exit(1)
 
     rows, edges, toughie_ids = local_toggles_runner(args, 'connect', connect_data)
-    print(len(rows), len(edges))
-    pass
+
+    with session_scope() as session:
+        # Particularly for large batches, it may be faster to use a temporary
+        # table, then insert the result of a subquery, then finally use a join
+        # to get the id mapping.
+        # https://stackoverflow.com/a/4070385/3614835
+        local_to_global = {}
+        pending = []
+        for index, r in enumerate(rows):
+            g = session.query(Gadget).filter_by(data=r[-1]).one_or_none()
+            if g:
+                local_to_global[index] = g.id
+            else:
+                g = Gadget.from_tuple(r)
+                session.add(g)
+                # We don't get an id until we flush, and we want to batch the flush.
+                pending.append((index, g))
+        session.flush()
+        local_to_global.update({index: g.id for index, g in pending})
+
+        # TODO: both edges and completion logging could be done in bulk
+        for e in edges:
+            assert e[1] < len(rows), e
+            # TODO: once we're getting the canonicalize rotation index, create and use ConnectEdge.from_tuple
+            session.add(ConnectEdge(input1=e[0], output1=local_to_global[e[1]],
+                    connect_location=e[2], canonicalize_rotation=-1))
+
+        # There would only be conflicts here if some other task did the work
+        # first, but in that case we'd have conflicted on the edges too, so we
+        # can use maximal intervals.
+        completed_ids = sorted(map(itemgetter(0), connect_data))
+        for group in consecutive_groups(completed_ids):
+            group = tuple(group)  # force
+            session.add(CompletedConnect.range(group[0], group[-1]+1))
 
 
 def register_subcommand(parser: argparse.ArgumentParser, subparser_holder: argparse._SubParsersAction):

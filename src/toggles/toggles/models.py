@@ -90,6 +90,10 @@ class CompletedConnect(Base):
     def singleton(cls, gadget_id):
         return CompletedConnect(r=NumericRange(lower=gadget_id, upper=gadget_id+1))
 
+    @classmethod
+    def range(cls, lower_inclusive, upper_exclusive):
+        return CompletedConnect(r=NumericRange(lower=lower_inclusive, upper=upper_exclusive))
+
 
 class CompletedMirror(Base):
     __tablename__ = 'completed_mirrors'
@@ -100,6 +104,10 @@ class CompletedMirror(Base):
     @classmethod
     def singleton(cls, gadget_id):
         return CompletedMirror(r=NumericRange(lower=gadget_id, upper=gadget_id + 1))
+
+    @classmethod
+    def range(cls, lower_inclusive, upper_exclusive):
+        return CompletedMirror(r=NumericRange(lower=lower_inclusive, upper=upper_exclusive))
 
 
 # No specific chirality table; if a gadget's id is in mirror_edges, it's chiral;
