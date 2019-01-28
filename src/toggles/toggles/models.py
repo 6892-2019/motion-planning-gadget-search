@@ -81,7 +81,7 @@ class CompletedCombine(Base):
 
 
 class CompletedConnect(Base):
-    __tablename__ = 'completed_connectss'
+    __tablename__ = 'completed_connects'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
     __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compconnect_r'),)
