@@ -397,7 +397,8 @@ public:
 	 * form, possibly with a different accepted language.
 	 */
 	template<typename Iter>
-	void canonicalizeRenumber(Iter alphabetPermsBegin, Iter alphabetPermsEnd) {
+	auto canonicalizeRenumber(Iter alphabetPermsBegin, Iter alphabetPermsEnd)
+			-> decltype(automaton::detail::begin(*alphabetPermsBegin)) {
 		assert(alphabetPermsBegin != alphabetPermsEnd);
 		//Can't test canonical_ here, because it means "canonical with respect
 		//to the accepted language", and we might change the language.  We still
@@ -429,6 +430,7 @@ public:
 		renumber(enumerators[0].renumbering.begin(), begin(enumerators[0].alphabetPerm));
 		prepareForEquals();
 		canonical_ = true;
+		return enumerators[0].alphabetPerm;
 	}
 
 	/**

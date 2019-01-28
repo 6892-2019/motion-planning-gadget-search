@@ -101,21 +101,10 @@ def sync_known_gadgets(args):
                 session.flush()  # we need the id
                 gadget_id_map[index] = g.id
 
-        for a, b in mirror_pairs:
-            a, b = gadget_id_map[a], gadget_id_map[b]
-            assert a != b, '{} {}'.format(a, b)  # indicates an error in the toggles runner
-            a, b = min(a, b), max(a, b)
-            # I'm assuming we have an exclude constraint ensuring the edge table is a mapping.
-            e = session.query(MirrorEdge).filter(or_(MirrorEdge.a == a, MirrorEdge.b == b)).one_or_none()
-            if not e:
-                session.add(MirrorEdge(a=a, b=b))
-
-        # We evaluated mirrors for everything, even achiral things, so mark
-        # everything completed.
-        for g in gadget_id_map.values():
-            c = session.query(CompletedMirror).filter(CompletedMirror.r.contains(cast(g, BigInteger))).one_or_none()
-            if not c:
-                session.add(CompletedMirror.singleton(g))
+        # While we got mirrors, we didn't record their canonicalize permutation,
+        # so we can't add edges and completion logging.  It's not worth worrying
+        # about because we'll only run this initialization once; we'll fill in
+        # like normal mirroring.
 
         # It's much easier to just wipe this table and start over.
         session.query(Name).delete(synchronize_session='fetch')

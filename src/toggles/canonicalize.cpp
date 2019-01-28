@@ -19,9 +19,9 @@ getPerms(unsigned int alphabetSize, unsigned int locations, bool normal, bool mi
 	__builtin_unreachable();
 }
 
-void canonicalize(WorkingAutomaton& a, const unsigned int locations, bool allowMirroring) {
+unsigned int canonicalize(WorkingAutomaton& a, const unsigned int locations, bool allowMirroring) {
 	switch (a.alphabet_size()) {
-#define GADGETDEFS_CANONICALIZE_CASE(N) case N: canonicalize(static_cast<Automaton<N>&>(a), locations, allowMirroring); break;
+#define GADGETDEFS_CANONICALIZE_CASE(N) case N: return canonicalize(static_cast<Automaton<N>&>(a), locations, allowMirroring); break;
 		GADGETDEFS_CANONICALIZE_CASE(1)
 		GADGETDEFS_CANONICALIZE_CASE(2)
 		GADGETDEFS_CANONICALIZE_CASE(3)
@@ -46,9 +46,15 @@ void canonicalize(WorkingAutomaton& a, const unsigned int locations, bool allowM
 	}
 }
 
-std::unique_ptr<WorkingAutomaton> mirror(const WorkingAutomaton& a) {
+template<unsigned int N>
+std::pair<std::unique_ptr<WorkingAutomaton>, unsigned int> gadgetdefs_mirror_case(const WorkingAutomaton& a) {
+	auto&& b = mirror(static_cast<const Automaton<N>&>(a));
+	return {std::make_unique<Automaton<N>>(std::move(b.first)), b.second};
+}
+
+std::pair<std::unique_ptr<WorkingAutomaton>, unsigned int> mirror(const WorkingAutomaton& a) {
 	switch (a.alphabet_size()) {
-#define GADGETDEFS_MIRROR_CASE(N) case N: return std::make_unique<Automaton<N>>(mirror(static_cast<const Automaton<N>&>(a)));
+#define GADGETDEFS_MIRROR_CASE(N) case N: return gadgetdefs_mirror_case<N>(a);
 		GADGETDEFS_MIRROR_CASE(1)
 		GADGETDEFS_MIRROR_CASE(2)
 		GADGETDEFS_MIRROR_CASE(3)

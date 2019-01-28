@@ -63,11 +63,18 @@ class ConnectEdge(Base):
     connect_location = Column('connect_location', SmallInteger, nullable=False)
     canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
 
+    @classmethod
+    def from_tuple(cls, t):
+        if len(t) != 4:
+            raise ValueError('bad tuple length {} {}'.format(len(t), t))
+        return ConnectEdge(input1=t[0], output1=t[1], connect_location=t[2], canonicalize_rotation=t[3])
+
 
 class MirrorEdge(Base):
     __tablename__ = 'mirror_edges'
     a = Column('a', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
     b = Column('b', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
+    canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
     # TODO: this doesn't prevent (a,c)/(b,c); we want this table to be a (partial) matching
     __table_args__ = (CheckConstraint('a < b', name='chk_mirror_sorted'),)
 

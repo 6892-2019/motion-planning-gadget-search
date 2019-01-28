@@ -524,7 +524,10 @@ vector<pair<OutputRow, optional<OutputRow>>> canonicalize_from_slls(SLLS gadget)
 	//It's plausible that only a subset of the states are chiral.
 	vector<pair<unique_ptr<WorkingAutomaton>, OutputRow>> mirrors;
 	for (const auto& n : normals) {
-		unique_ptr<WorkingAutomaton> p = mirror(*n.first);
+		//We don't return the rotation, but we won't add a mirror provenance edge
+		//either, so the usual mirror machinery will fill it in later.  We just
+		//need the gadget up front so we can give it an appropriate name.
+		unique_ptr<WorkingAutomaton> p = mirror(*n.first).first;
 		row = deflate_outputrow(*p);
 		mirrors.emplace_back(std::move(p), std::move(row));
 	}
@@ -550,7 +553,8 @@ vector<pair<OutputRow, optional<OutputRow>>> canonicalize_from_slls(SLLS gadget)
 //	std::uint32_t output1;
 //	std::uint32_t root;
 //	std::uint8_t splice, rotation, connectPoint;
-//	MSGPACK_DEFINE_ARRAY(input1, input2, output1, root, splice, rotation, connectPoint)
+//	std::uint8_t canonicalizePermutation;
+//	MSGPACK_DEFINE_ARRAY(input1, input2, output1, root, splice, rotation, connectPoint, canonicalizePermutation)
 //};
 
 /**
@@ -561,7 +565,8 @@ struct ConnectProvenance {
 	std::uint64_t input1;
 	std::uint32_t output1;
 	std::uint8_t connectPoint;
-	MSGPACK_DEFINE_ARRAY(input1, output1, connectPoint)
+	std::uint8_t canonicalizePermutation;
+	MSGPACK_DEFINE_ARRAY(input1, output1, connectPoint, canonicalizePermutation)
 };
 
 template<class Provenance>
@@ -571,8 +576,7 @@ struct Finisher {
 	tsl::ordered_set<OutputRow> rows_;
 	vector<Provenance> prov_;
 	bool operator()(WorkingAutomaton&& a, Provenance prov) {
-		//TODO: store the rotation index in provenance (though that assumes we didn't canonicalize earlier...)
-		canonicalize(a, a.active_alphabet_size(), false);
+		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(canonicalize(a, a.active_alphabet_size(), false));
 		auto pair = rows_.insert(deflate_outputrow(a));
 		//When we successfully insert, we know the index is size()-1, but deque
 		//operator- is cheap enough that it's not worth branching on .second.

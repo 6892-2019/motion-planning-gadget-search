@@ -89,9 +89,8 @@ def connect(args):
         # TODO: both edges and completion logging could be done in bulk
         for e in edges:
             assert e[1] < len(rows), e
-            # TODO: once we're getting the canonicalize rotation index, create and use ConnectEdge.from_tuple
-            session.add(ConnectEdge(input1=e[0], output1=local_to_global[e[1]],
-                    connect_location=e[2], canonicalize_rotation=-1))
+            e[1] = local_to_global[e[1]]
+            session.add(ConnectEdge.from_tuple(e))
 
         # There would only be conflicts here if some other task did the work
         # first, but in that case we'd have conflicted on the edges too, so we
