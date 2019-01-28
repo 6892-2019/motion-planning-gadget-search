@@ -441,11 +441,13 @@ private:
 };
 
 
-unique_ptr<WorkingAutomaton> inflate_outputrow(const std::vector<std::byte>& bytes) {
+unique_ptr<WorkingAutomaton> inflate_outputrow(const std::vector<std::byte>& bytes, unsigned int automaton_size = 0) {
 	PackReader data(bytes);
 	[[maybe_unused]] unsigned int states = data.readVarint(); //TODO: do we really not need this here? at least use it for checking the divisions...
 	unsigned int locations = data.readVarint();
-	GadgetBuilder builder(locations); //TODO: estimate how many automaton states to reserve?
+	if (automaton_size && locations > automaton_size)
+		throw std::logic_error(fmt::format("inflate_outputrow: specified size too small: {} {}", automaton_size, locations));
+	GadgetBuilder builder(automaton_size ? automaton_size : locations); //TODO: estimate how many automaton states to reserve?
 	unsigned int undirected_edges = data.readVarint();
 	unsigned int directed_edges = data.readVarint();
 	//TODO: locations should be less than 16 (for supported inputs), so we
@@ -460,6 +462,10 @@ unique_ptr<WorkingAutomaton> inflate_outputrow(const std::vector<std::byte>& byt
 		builder.trans(p / locations, p % locations, q % locations, q / locations);
 	}
 	return builder.build();
+}
+template<unsigned int N>
+unique_ptr<Automaton<N>> inflate_outputrow(const std::vector<std::byte>& bytes) {
+	return unique_cast<Automaton<N>>(inflate_outputrow(bytes, N));
 }
 
 OutputRow deflate_outputrow(const AutomatonBase& a) {
@@ -544,30 +550,6 @@ vector<pair<OutputRow, optional<OutputRow>>> canonicalize_from_slls(SLLS gadget)
 	return retval;
 }
 
-///**
-// * A row (minus the primary key) of an edge in the combine_provenance table.  We
-// * use smaller types to save space.
-// */
-//struct CombineProvenance {
-//	std::uint64_t input1, input2;
-//	std::uint32_t output1;
-//	std::uint32_t root;
-//	std::uint8_t splice, rotation, connectPoint;
-//	std::uint8_t canonicalizePermutation;
-//	MSGPACK_DEFINE_ARRAY(input1, input2, output1, root, splice, rotation, connectPoint, canonicalizePermutation)
-//};
-
-/**
- * A row (minus the primary key) of an edge in the connect_provenance table.  We
- * use smaller types to save space.
- */
-struct ConnectProvenance {
-	std::uint64_t input1;
-	std::uint32_t output1;
-	std::uint8_t connectPoint;
-	std::uint8_t canonicalizePermutation;
-	MSGPACK_DEFINE_ARRAY(input1, output1, connectPoint, canonicalizePermutation)
-};
 
 template<class Provenance>
 struct Finisher {
@@ -586,6 +568,18 @@ struct Finisher {
 	}
 };
 
+
+/**
+ * A row (minus the primary key) of an edge in the connect_provenance table.  We
+ * use smaller types to save space.
+ */
+struct ConnectProvenance {
+	std::uint64_t input1;
+	std::uint32_t output1;
+	std::uint8_t connectPoint;
+	std::uint8_t canonicalizePermutation;
+	MSGPACK_DEFINE_ARRAY(input1, output1, connectPoint, canonicalizePermutation)
+};
 
 template<unsigned int N>
 bool enjoin(Automaton<N>& a, typename Automaton<N>::symbol_type l, typename Automaton<N>::symbol_type m) {
@@ -711,7 +705,6 @@ void connect(const AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProve
 	}
 }
 
-
 struct ConnectCommandOutput {
 //	decltype(Finisher<ConnectProvenance>::rows_.values_container()) rows;
 	vector<OutputRow> rows;
@@ -732,6 +725,204 @@ ConnectCommandOutput do_connect(vector<pair<std::uint64_t, vector<std::byte>>> i
 	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
 	return {std::move(rows), std::move(finisher.prov_), std::move(toughies)};
 }
+
+
+/**
+ * A row (minus the primary key) of an edge in the combine_provenance table.  We
+ * use smaller types to save space.
+ */
+struct CombineProvenance {
+	std::uint64_t input1, input2;
+	std::uint32_t output1;
+	std::uint8_t splice, rotation, connectPoint;
+	std::uint8_t canonicalizePermutation;
+	MSGPACK_DEFINE_ARRAY(input1, input2, output1, splice, rotation, connectPoint, canonicalizePermutation)
+};
+
+using RotationVec = boost::container::small_vector<unsigned int, 16>;
+template<unsigned int N>
+RotationVec find_useful_rotations(const Automaton<N>& a) {
+	using symbol_type = AutomatonBase::symbol_type;
+	RotationVec useful;
+	auto locations = a.active_alphabet_size();
+	if (!locations) return useful;
+
+	vector<pair<std::uint64_t, Automaton<N>>> distinct;
+	std::array<symbol_type, Automaton<N>::alphabet_size_v> rotation;
+	std::iota(rotation.begin(), rotation.end(), 0);
+	for (unsigned int rl = 0; rl < locations; ++rl) {
+		//It's arbitrary which way we rotate so long as we match what combine does.
+		std::iota(rotation.begin(), rotation.begin()+locations, 0);
+		std::rotate(rotation.begin(), rotation.begin()+rl, rotation.begin()+locations);
+		Automaton<N> rm = a;
+		rm.permuteAlphabet(rotation);
+		rm.canonicalize(); //The normal, non-alphabet-adjusting canonicalize.
+		auto our_hash = rm.working_hash();
+		bool labeled_continue = false;
+		for (const auto& p : distinct)
+			if (our_hash == p.first && rm == p.second)
+				labeled_continue = true;
+		if (labeled_continue) continue;
+
+		distinct.emplace_back(our_hash, std::move(rm));
+		useful.push_back(rl);
+	}
+	return useful;
+}
+
+RotationVec find_useful_rotations(const WorkingAutomaton& a) {
+	switch (a.alphabet_size()) {
+#define TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(N) case N: return find_useful_rotations(static_cast<const Automaton<N>&>(a));
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(1)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(2)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(3)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(4)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(5)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(6)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(7)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(8)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(9)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(10)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(11)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(12)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(13)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(14)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(15)
+		TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE(16)
+#undef TOGGLESRUNNER_FIND_USEFUL_ROTATIONS_CASE
+		default:
+			fmt::print(stderr, "unhandled find_useful_rotations for alphabet size {}, typeid {}\n",
+					a.alphabet_size(), typeid(a).name());
+			std::terminate();
+	}
+}
+
+template<unsigned int Precision>
+void combine(const Automaton<Precision>& la, AutomatonBase::state_type leftLocations,
+		const Automaton<Precision>& ra, AutomatonBase::state_type rightLocations,
+		const RotationVec& rightRotations, CombineProvenance prov, Finisher<CombineProvenance>& finish) {
+	using symbol_type = WorkingAutomaton::symbol_type;
+	std::array<symbol_type, Automaton<Precision>::alphabet_size_v> slide;
+	Automaton<Precision> shiftedRight = ra;
+	std::iota(slide.begin(), slide.end(), 0);
+	std::rotate(slide.rbegin(), slide.rbegin()+leftLocations, slide.rend());
+	shiftedRight.renumberAlphabet(slide.data());
+	Automaton<Precision> shuffled = automaton::shuffleAccept(la, shiftedRight);
+	shuffled.minimize();
+	//Now [0,leftLocations) are from the left and [leftLocations,leftLocations+rightLocations)
+	//are from the right.  We want to start inserting at left location 0, so we
+	//write all the right locations, then all the left locations.  We'll rotate
+	//the right locations as appropriate.  Then we'll move a left location to
+	//the other end of the array.  Locations beyond leftLocations+rightLocations
+	//are left alone, as they are always inactive.
+	std::iota(slide.begin(), slide.begin()+rightLocations, leftLocations);
+	std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
+	std::iota(slide.begin()+rightLocations+leftLocations, slide.end(), rightLocations+leftLocations);
+	for (decltype(leftLocations) ll = 0; ll < leftLocations; ++ll) {
+		for (auto rotation : rightRotations) {
+			//Because we're reading a list of rotations (not rotation deltas),
+			//we have to re-initialize the right locations each time.
+			std::iota(slide.begin()+ll, slide.begin()+ll+rightLocations, leftLocations);
+			std::rotate(slide.begin()+ll, slide.begin()+ll+rotation, slide.begin()+ll+rightLocations);
+			Automaton<Precision> permuted = shuffled;
+			permuted.permuteAlphabet(slide.data());
+			prov.splice = numeric_cast<std::uint8_t>(ll);
+			prov.rotation = numeric_cast<std::uint8_t>(rotation);
+			prov.connectPoint = numeric_cast<std::uint8_t>(
+					(leftLocations+rightLocations+ll-1) % (leftLocations + rightLocations));
+			connect_at(permuted, leftLocations + rightLocations, prov, finish);
+			prov.connectPoint = numeric_cast<std::uint8_t>(
+					(leftLocations+rightLocations+ll+rightLocations-1) % (leftLocations + rightLocations));
+			connect_at(permuted, leftLocations + rightLocations, prov, finish);
+		}
+		std::swap(slide[ll], slide[ll+rightLocations]);
+	}
+}
+
+struct CombineCommandInput {
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs;
+	vector<std::uint64_t> lefts, rights;
+	unsigned int precision;
+	MSGPACK_DEFINE_ARRAY(inputs, lefts, rights, precision)
+};
+//This could possibly be templatized with ConnectCommandOutput, though we will
+//want toughies to be pairs of ids.  The get-stuff-from-Finisher logic can be
+//shared with closure and possibly mirror (depending on how Finisher sets
+//canonicalize_permutation).
+//Maybe toughies is a partially-completed provenance?
+struct CombineCommandOutput {
+//	decltype(Finisher<ConnectProvenance>::rows_.values_container()) rows;
+	vector<OutputRow> rows;
+	vector<CombineProvenance> prov;
+	vector<pair<std::uint64_t, std::uint64_t>> toughies;
+	MSGPACK_DEFINE_ARRAY(rows, prov, toughies)
+};
+template<unsigned int Precision>
+CombineCommandOutput do_combine0(CombineCommandInput cmd) {
+	tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map;
+	for (auto& p : cmd.inputs)
+		map[p.first] = std::move(p.second);
+	cmd.inputs.clear();
+
+	vector<unique_ptr<Automaton<Precision>>> right_autos;
+	vector<unsigned int> right_locations;
+	vector<RotationVec> right_rotations;
+	for (std::uint64_t r : cmd.rights) {
+		right_autos.push_back(inflate_outputrow<Precision>(map[r]));
+		right_locations.push_back(right_autos.back()->active_alphabet_size());
+		right_rotations.push_back(find_useful_rotations(*right_autos.back()));
+	}
+
+	CombineProvenance prov;
+	Finisher<CombineProvenance> finisher;
+	vector<pair<std::uint64_t, std::uint64_t>> toughies;
+	for (std::uint64_t l : cmd.lefts) {
+		prov.input1 = l;
+		unique_ptr<Automaton<Precision>> pla = inflate_outputrow<Precision>(map[prov.input1]);
+		auto leftLocations = pla->active_alphabet_size();
+		for (auto ri : xrange(cmd.rights.size())) {
+			prov.input2 = cmd.rights[ri];
+			//TODO: try-catch for toughies.
+			combine(*pla, leftLocations, *right_autos[ri], right_locations[ri], right_rotations[ri], prov, finisher);
+		}
+	}
+
+	//TODO: Ideally we'd just put values_container (a deque) in the ConnectCommandOutput,
+	//but msgpack only provides a packer, and MSGPACK_DEFINE_ARRAY also demands
+	//a packer (I guess -- we shouldn't be using it).  Though we end up copying
+	//it either way because we can't move it -- maybe tsl::ordered_set needs a release() method?
+	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
+	return {std::move(rows), std::move(finisher.prov_), std::move(toughies)};
+}
+
+CombineCommandOutput do_combine(CombineCommandInput cmd) {
+	switch (cmd.precision) {
+#define TOGGLESRUNNER_DO_COMBINE_CASE(N) case N: return do_combine0<N>(std::move(cmd));
+		TOGGLESRUNNER_DO_COMBINE_CASE(4)
+		TOGGLESRUNNER_DO_COMBINE_CASE(5)
+		TOGGLESRUNNER_DO_COMBINE_CASE(6)
+		TOGGLESRUNNER_DO_COMBINE_CASE(7)
+		TOGGLESRUNNER_DO_COMBINE_CASE(8)
+		TOGGLESRUNNER_DO_COMBINE_CASE(9)
+		TOGGLESRUNNER_DO_COMBINE_CASE(10)
+		TOGGLESRUNNER_DO_COMBINE_CASE(11)
+		TOGGLESRUNNER_DO_COMBINE_CASE(12)
+		TOGGLESRUNNER_DO_COMBINE_CASE(13)
+		TOGGLESRUNNER_DO_COMBINE_CASE(14)
+		TOGGLESRUNNER_DO_COMBINE_CASE(15)
+		TOGGLESRUNNER_DO_COMBINE_CASE(16)
+#undef TOGGLESRUNNER_DO_COMBINE_CASE
+		case 1:
+		case 2:
+		case 3:
+			fmt::print(stderr, "impossibly small precision for do_combine: {}\n", cmd.precision);
+			std::terminate();
+		default:
+			fmt::print(stderr, "unhandled do_combine for precision {}\n", cmd.precision);
+			std::terminate();
+	}
+}
+
 
 
 template<typename T>
@@ -767,6 +958,7 @@ using handler_ptr = msgpack::object_handle(*)(const msgpack::object&);
 const std::pair<string_view, handler_ptr> handlers[] = {
 	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 	{"connect"sv, &handler_adapter<do_connect>},
+	{"combine"sv, &handler_adapter<do_combine>},
 };
 
 msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
