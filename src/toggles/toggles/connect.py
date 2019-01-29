@@ -1,5 +1,4 @@
 import argparse
-import re
 import sys
 from operator import itemgetter
 from more_itertools import consecutive_groups
@@ -11,31 +10,11 @@ from psycopg2.extras import NumericRange
 
 from .models import session_scope, Name, Gadget, CompletedConnect, ConnectEdge
 from .runner import local_toggles_runner
+from .util import parse_gid_spec
 
 
 def connect(args):
-    gids = set()
-    gid_ranges = []  # pairs in [) form
-    input_names = []
-    for i in args.inputs:
-        m = re.fullmatch('\d+', i)
-        if m:
-            gids.add(int(i))
-            continue
-
-        m = re.fullmatch(r'(\(|\[)(\d+),\s*(\d+)(\)|\])', i)
-        if m:
-            lower, upper = int(m[2]), int(m[3])
-            if m[1] == '(':
-                lower += 1
-            if m[4] == ']':
-                upper += 1
-            if not (lower < upper):
-                raise ValueError('bad range: ' + i)
-            gid_ranges.append((lower, upper))
-            continue
-
-        input_names.append(i)
+    gid_ranges, gids, input_names = parse_gid_spec(args)
 
     # TODO: we'd like a read-only session if possible here, we're not going to
     # hold it open while the compute happens

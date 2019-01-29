@@ -54,6 +54,13 @@ class CombineEdge(Base):
     connect_location = Column('connect_location', SmallInteger, nullable=False)
     canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
 
+    @classmethod
+    def from_tuple(cls, t):
+        if len(t) != 7:
+            raise ValueError('bad tuple length {} {}'.format(len(t), t))
+        return CombineEdge(input1=t[0], input2=t[1], output1=t[2], splice=t[3],
+                rotation=t[4], connect_location=t[5], canonicalize_rotation=t[6])
+
 
 class ConnectEdge(Base):
     __tablename__ = 'connect_edges'

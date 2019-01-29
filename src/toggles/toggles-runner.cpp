@@ -881,6 +881,7 @@ CombineCommandOutput do_combine0(CombineCommandInput cmd) {
 		unique_ptr<Automaton<Precision>> pla = inflate_outputrow<Precision>(map[prov.input1]);
 		auto leftLocations = pla->active_alphabet_size();
 		for (auto ri : xrange(cmd.rights.size())) {
+			if (leftLocations + right_locations[ri] > Precision) continue;
 			prov.input2 = cmd.rights[ri];
 			//TODO: try-catch for toughies.
 			combine(*pla, leftLocations, *right_autos[ri], right_locations[ri], right_rotations[ri], prov, finisher);
