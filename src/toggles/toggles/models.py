@@ -54,6 +54,8 @@ class CombineEdge(Base):
     connect_location = Column('connect_location', SmallInteger, nullable=False)
     canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
 
+    directed = True
+
     @classmethod
     def from_tuple(cls, t):
         if len(t) != 7:
@@ -70,6 +72,8 @@ class ConnectEdge(Base):
     connect_location = Column('connect_location', SmallInteger, nullable=False)
     canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
 
+    directed = True
+
     @classmethod
     def from_tuple(cls, t):
         if len(t) != 4:
@@ -82,8 +86,36 @@ class MirrorEdge(Base):
     a = Column('a', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
     b = Column('b', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
     canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
+    # Mirror edges are undirected, so we canonicalize by sorting the ids.
     # TODO: this doesn't prevent (a,c)/(b,c); we want this table to be a (partial) matching
     __table_args__ = (CheckConstraint('a < b', name='chk_mirror_sorted'),)
+
+    directed = False
+
+    @classmethod
+    def from_tuple(cls, t):
+        if len(t) != 3:
+            raise ValueError('bad tuple length {} {}'.format(len(t), t))
+        if t[0] == t[1]:
+            raise ValueError('mirror is itself? {} {}'.format(t[0], t[1]))
+        if t[0] > t[1]:
+            t[0], t[1] = t[1], t[0]
+        return MirrorEdge(a=t[0], b=t[1], canonicalize_rotation=t[2])
+
+
+class CloseEdge(Base):
+    __tablename__ = 'close_edges'
+    input1 = Column('input1', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
+    output1 = Column('output1', BigInteger, ForeignKey(Gadget.id), nullable=False)
+    canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
+
+    directed = True
+
+    @classmethod
+    def from_tuple(cls, t):
+        if len(t) != 3:
+            raise ValueError('bad tuple length {} {}'.format(len(t), t))
+        return CloseEdge(input1=t[0], output1=t[1], canonicalize_rotation=t[2])
 
 
 class CompletedCombine(Base):
@@ -123,10 +155,28 @@ class CompletedMirror(Base):
     def range(cls, lower_inclusive, upper_exclusive):
         return CompletedMirror(r=NumericRange(lower=lower_inclusive, upper=upper_exclusive))
 
-
 # No specific chirality table; if a gadget's id is in mirror_edges, it's chiral;
 # if not and its id is contained within completed_mirrors, it's a chiral;
 # otherwise, we don't yet know.
+
+
+class CompletedClose(Base):
+    __tablename__ = 'completed_closes'
+    id = Column('id', BigInteger, primary_key=True, nullable=False)
+    r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
+    __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compclose_r'),)
+
+    @classmethod
+    def singleton(cls, gadget_id):
+        return CompletedClose(r=NumericRange(lower=gadget_id, upper=gadget_id + 1))
+
+    @classmethod
+    def range(cls, lower_inclusive, upper_exclusive):
+        return CompletedClose(r=NumericRange(lower=lower_inclusive, upper=upper_exclusive))
+
+# Similarly, if a gadget's id is in completed_closes, then it is fully closed if
+# and only if it isn't the source of a close edge.  (A fully-closed gadget isn't
+# necessarily the target of a close edge.)
 
 
 # Human-readable names for gadgets.  A name may map to multiple gadgets and a
