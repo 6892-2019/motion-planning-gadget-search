@@ -558,8 +558,13 @@ struct Finisher {
 	tsl::ordered_set<OutputRow> rows_;
 	vector<Provenance> prov_;
 	bool operator()(WorkingAutomaton&& a, Provenance prov) {
+		//TODO: calling active_alphabet_size again here is wasteful, should pass it in instead
 		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(canonicalize(a, a.active_alphabet_size(), false));
-		auto pair = rows_.insert(deflate_outputrow(a));
+		return (*this)(deflate_outputrow(a), prov);
+	}
+	bool operator()(OutputRow&& r, Provenance prov) {
+		//caller is responsible for setting canonicalizePermutation
+		auto pair = rows_.insert(r);
 		//When we successfully insert, we know the index is size()-1, but deque
 		//operator- is cheap enough that it's not worth branching on .second.
 		prov.output1 = numeric_cast<decltype(prov.output1)>(std::distance(rows_.begin(), pair.first));
@@ -709,21 +714,19 @@ struct ConnectCommandOutput {
 //	decltype(Finisher<ConnectProvenance>::rows_.values_container()) rows;
 	vector<OutputRow> rows;
 	vector<ConnectProvenance> prov;
-	vector<std::uint64_t> toughies; //TODO: more specific information (connectPoint or root)?
-	MSGPACK_DEFINE_ARRAY(rows, prov, toughies) //TODO: maybe using map would give more flexibility?
+	//if we ever return toughies, we need Python-side changes, as the other unary commands don't
+	MSGPACK_DEFINE_ARRAY(rows, prov)
 };
 ConnectCommandOutput do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) { //TODO: ensure we're moving, not copying the arg
 	Finisher<ConnectProvenance> finisher;
-	vector<std::uint64_t> toughies;
 	for (auto& i : inputs)
-		//TODO: try-catch for toughies
 		connect(*inflate_outputrow(i.second), i.first, finisher);
 	//TODO: Ideally we'd just put values_container (a deque) in the ConnectCommandOutput,
 	//but msgpack only provides a packer, and MSGPACK_DEFINE_ARRAY also demands
 	//a packer (I guess -- we shouldn't be using it).  Though we end up copying
 	//it either way because we can't move it -- maybe tsl::ordered_set needs a release() method?
 	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
-	return {std::move(rows), std::move(finisher.prov_), std::move(toughies)};
+	return {std::move(rows), std::move(finisher.prov_)};
 }
 
 
@@ -925,6 +928,62 @@ CombineCommandOutput do_combine(CombineCommandInput cmd) {
 }
 
 
+struct SimpleProvenance {
+	std::uint64_t input1;
+	std::uint32_t output1;
+	std::uint8_t canonicalizePermutation;
+	MSGPACK_DEFINE_ARRAY(input1, output1, canonicalizePermutation)
+};
+
+struct SimpleOutput {
+//	decltype(Finisher<SimpleProvenance>::rows_.values_container()) rows;
+	vector<OutputRow> rows;
+	vector<SimpleProvenance> prov;
+	MSGPACK_DEFINE_ARRAY(rows, prov)
+};
+SimpleOutput do_close(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+	Finisher<SimpleProvenance> finisher;
+	for (const auto& p : inputs) {
+		SimpleProvenance prov;
+		prov.input1 = p.first;
+		unique_ptr<WorkingAutomaton> a = inflate_outputrow(p.second);
+		//TODO: inflate_outputrow could just return the value from the byte array...
+		auto activealpha = a->active_alphabet_size();
+		bool possibly_changed = acceptingClosure(*a, activealpha);
+		if (!possibly_changed) continue;
+		//Even if we changed the automaton, we may not have changed the gadget
+		//because true nop edges (same state and location) aren't stored in the
+		//database version of the gadget, so acceptingClosure's return isn't conclusive.
+		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(canonicalize(*a, activealpha, false));
+		OutputRow r = deflate_outputrow(*a);
+		if (r.edges != p.second)
+			finisher(std::move(r), prov);
+	}
+	//TODO: avoid this copy
+	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
+	return {std::move(rows), std::move(finisher.prov_)};
+}
+
+
+SimpleOutput do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+	Finisher<SimpleProvenance> finisher;
+	for (const auto& p : inputs) {
+		SimpleProvenance prov;
+		prov.input1 = p.first;
+		unique_ptr<WorkingAutomaton> a = inflate_outputrow(p.second);
+		//mirror copies.  We do need to know if mirroring changed the automaton,
+		//but maybe there's a way to do that while reusing *a?
+		pair<unique_ptr<WorkingAutomaton>, unsigned int> m = mirror(*a);
+		if (*m.first == *a) continue;
+		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(m.second);
+		finisher(deflate_outputrow(*m.first), prov);
+	}
+	//TODO: avoid this copy
+	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
+	return {std::move(rows), std::move(finisher.prov_)};
+}
+
+
 
 template<typename T>
 struct callable_traits : callable_traits<decltype(&T::operator())> {};
@@ -960,6 +1019,8 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 	{"connect"sv, &handler_adapter<do_connect>},
 	{"combine"sv, &handler_adapter<do_combine>},
+	{"close"sv, &handler_adapter<do_close>},
+	{"mirror"sv, &handler_adapter<do_mirror>},
 };
 
 msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
