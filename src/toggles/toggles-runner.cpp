@@ -221,7 +221,6 @@ SLLS deflate_slls(const AutomatonBase& a) {
 					auto end = a.stepDeterministic(*middle, to);
 					if (end) {
 						assert(a.accept(*end));
-						if (start == *end && from == to) continue; //skip nop edges (TODO: I think we shouldn't have any)
 						//If either is missing, the insert invalidates iterators, so there's not
 						//much point in using them.
 						if (!autoToGadget.count(start))
