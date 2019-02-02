@@ -441,32 +441,6 @@ public:
 	void optimize(OptimizeKind how) override;
 	using WorkingAutomaton::optimize;
 
-private:
-	template<class RandomAccessIterator>
-	static symbol_mask_type renumberAlphabet(symbol_mask_type cur, RandomAccessIterator map) {
-		symbol_mask_type ns;
-		for (symbol_type a = 0; a < alphabet_size_v; ++a) {
-			symbol_type i = map[a];
-			if (i == std::numeric_limits<symbol_type>::max())
-				ns.reset(a); //no-op, because we initialized to 0 above
-			else if (i == (std::numeric_limits<symbol_type>::max()-1))
-				ns.set(a);
-			else
-				ns.set(a, cur[i]);
-		}
-		return ns;
-	}
-
-	template<class RandomAccessIterator>
-	static symbol_mask_type permuteAlphabet(symbol_mask_type cur, RandomAccessIterator map) {
-		//just like renumberAlphabet above, but constant 0 and 1 are illegal
-		symbol_mask_type ns;
-		for (symbol_type a = 0; a < alphabet_size_v; ++a)
-			ns.set(a, cur[map[a]]);
-		return ns;
-	}
-
-public:
 	/**
 	 * Renumbers the symbols on transitions out of all states in this automaton
 	 * by looking up through the given iterator.  Mapping a symbol to
@@ -475,9 +449,7 @@ public:
 	 * (transition on that symbol).
 	 */
 	template<class RandomAccessIterator>
-	void renumberAlphabet(RandomAccessIterator symbols) {
-		renumberAlphabet(0, state_size(), symbols);
-	}
+	void renumberAlphabet(RandomAccessIterator symbols);
 
 	/**
 	 * Renumbers the symbols on transitions out of the states in the given range
@@ -487,18 +459,7 @@ public:
 	 * (transition on that symbol).
 	 */
 	template<class RandomAccessIterator>
-	void renumberAlphabet(state_type stateBegin, state_type stateEnd, RandomAccessIterator symbols) {
-		for (state_type s = stateBegin; s != stateEnd; ++s) {
-			for (Transition& t : transitions_[s])
-				t.symbols_ = renumberAlphabet(t.symbols_, symbols);
-			//we may have emptied a transition
-			transitions_[s].erase(std::remove_if(transitions_[s].begin(), transitions_[s].end(),
-					[](Transition& t){return t.symbols_.none();}), transitions_[s].end());
-			if (deterministic() && !isStateDeterministic(s))
-				deterministic_ = false;
-		}
-		minimal_ = canonical_ = false;
-	}
+	void renumberAlphabet(state_type stateBegin, state_type stateEnd, RandomAccessIterator symbols);
 
 	/**
 	 * Permutes the symbols on transitions out of all states in this automaton
@@ -507,14 +468,7 @@ public:
 	 * language iff the previous automaton was minimal for the old language.
 	 */
 	template<class RandomAccessIterator>
-	void permuteAlphabet(RandomAccessIterator symbolMap) {
-		//TODO: assert it's a permutation
-		for (state_type s = 0; s != state_size(); ++s)
-			for (Transition& t : transitions_[s])
-				t.symbols_ = permuteAlphabet(t.symbols_, symbolMap);
-		//Changing the alphabet may change the canonical state numbers.
-		canonical_ = false;
-	}
+	void permuteAlphabet(RandomAccessIterator symbolMap);
 
 	/**
 	 * Renumbers states.  After this method returns, state i is numbered
@@ -524,22 +478,7 @@ public:
 	 * other number may change the language accepted by this automaton.
 	 */
 	template<class RandomAccessIterator>
-	void renumberStates(RandomAccessIterator states) {
-		if (states[0] != 0)
-			minimal_ = false;
-		for (auto& ts : transitions_)
-			for (Transition& t : ts)
-				t.next_ = states[t.next_];
-		//apply_reverse_permutation destroys the permutation, so we'll copy the bitset
-		//and manually permute.  (The bitset is smaller than the permutation.)
-		boost::dynamic_bitset<std::size_t> accept;
-		accept.resize(transitions_.size()); //yes, resize, not reserve
-		for (state_type i = 0; i < transitions_.size(); ++i)
-			accept.set(states[i], accept_.test(i));
-		accept_ = std::move(accept);
-		apply_reverse_permutation(transitions_.begin(), transitions_.end(), states);
-		canonical_ = false;
-	}
+	void renumberStates(RandomAccessIterator states);
 
 	/**
 	 * Swaps the given state numbers.  This is somewhat more efficient than
@@ -555,30 +494,7 @@ public:
 	 * must point to permutations of the appropriate size.
 	 */
 	template<class RandomAccessIterator1, class RandomAccessIterator2>
-	void renumber(RandomAccessIterator1 states, RandomAccessIterator2 symbols) {
-		if (states[0] != 0)
-			minimal_ = false;
-		//Renumber transitions_[*].next_ and .symbols_, then swap transitions_.
-		//This doesn't just call renumberStates followed by renumberAlphabet to
-		//preserve locality when iterating transitions_.
-		for (auto& ts : transitions_)
-			for (Transition& t : ts) {
-				t.next_ = states[t.next_];
-				t.symbols_ = renumberAlphabet(t.symbols_, symbols);
-				//We're assuming it's actually a permutation, and so not checking
-				//for transitions becoming empty or determinism changing.
-				//TODO: we really should check, or assert it's a permutation
-			}
-		//apply_reverse_permutation destroys the permutation, so we'll copy the bitset
-		//and manually permute.  (The bitset is smaller than the permutation.)
-		boost::dynamic_bitset<std::size_t> accept;
-		accept.resize(transitions_.size()); //yes, resize, not reserve
-		for (state_type i = 0; i < transitions_.size(); ++i)
-			accept.set(states[i], accept_.test(i));
-		accept_ = std::move(accept);
-		apply_reverse_permutation(transitions_.begin(), transitions_.end(), states);
-		canonical_ = false;
-	}
+	void renumber(RandomAccessIterator1 states, RandomAccessIterator2 symbols);
 
 	/**
 	 * Enumerates the strings accepted by this automaton.
@@ -743,6 +659,113 @@ private:
 			prepareForEquals();
 	}
 };
+
+//These are used only by the out-of-line definitions below, so don't need to be members.
+namespace detail {
+template<unsigned int AlphabetSize, class RandomAccessIterator>
+bitset<AlphabetSize> renumberAlphabet(bitset<AlphabetSize> cur, RandomAccessIterator map) {
+	bitset<AlphabetSize> ns;
+	for (symbol_type a = 0; a < ns.size(); ++a) {
+		symbol_type i = map[a];
+		if (i == std::numeric_limits<symbol_type>::max())
+			ns.reset(a); //no-op, because we initialized to 0 above
+		else if (i == (std::numeric_limits<symbol_type>::max()-1))
+			ns.set(a);
+		else
+			ns.set(a, cur[i]);
+	}
+	return ns;
+}
+
+template<unsigned int AlphabetSize, class RandomAccessIterator>
+bitset<AlphabetSize> permuteAlphabet(bitset<AlphabetSize> cur, RandomAccessIterator map) {
+	//just like renumberAlphabet above, but constant 0 and 1 are illegal
+	bitset<AlphabetSize> ns;
+	for (symbol_type a = 0; a < ns.size(); ++a)
+		ns.set(a, cur[map[a]]);
+	return ns;
+}
+} //namespace detail
+
+//These out-of-line definitions must appear here instead of in automaton.tcc
+//because they also depend on an iterator type.
+template<unsigned int N>
+template<class RandomAccessIterator>
+void Automaton<N>::renumberAlphabet(RandomAccessIterator symbols) {
+	renumberAlphabet(0, state_size(), symbols);
+}
+
+template<unsigned int N>
+template<class RandomAccessIterator>
+void Automaton<N>::renumberAlphabet(state_type stateBegin, state_type stateEnd, RandomAccessIterator symbols) {
+	for (state_type s = stateBegin; s != stateEnd; ++s) {
+		for (Transition& t : transitions_[s])
+			t.symbols_ = detail::renumberAlphabet(t.symbols_, symbols);
+		//we may have emptied a transition
+		transitions_[s].erase(std::remove_if(transitions_[s].begin(), transitions_[s].end(),
+				[](Transition& t){return t.symbols_.none();}), transitions_[s].end());
+		if (deterministic() && !isStateDeterministic(s))
+			deterministic_ = false;
+	}
+	minimal_ = canonical_ = false;
+}
+
+template<unsigned int N>
+template<class RandomAccessIterator>
+void Automaton<N>::permuteAlphabet(RandomAccessIterator symbolMap) {
+	//TODO: assert it's a permutation
+	for (state_type s = 0; s != state_size(); ++s)
+		for (Transition& t : transitions_[s])
+			t.symbols_ = detail::permuteAlphabet(t.symbols_, symbolMap);
+	//Changing the alphabet may change the canonical state numbers.
+	canonical_ = false;
+}
+
+template<unsigned int N>
+template<class RandomAccessIterator>
+void Automaton<N>::renumberStates(RandomAccessIterator states) {
+	if (states[0] != 0)
+		minimal_ = false;
+	for (auto& ts : transitions_)
+		for (Transition& t : ts)
+			t.next_ = states[t.next_];
+	//apply_reverse_permutation destroys the permutation, so we'll copy the bitset
+	//and manually permute.  (The bitset is smaller than the permutation.)
+	boost::dynamic_bitset<std::size_t> accept;
+	accept.resize(transitions_.size()); //yes, resize, not reserve
+	for (state_type i = 0; i < transitions_.size(); ++i)
+		accept.set(states[i], accept_.test(i));
+	accept_ = std::move(accept);
+	apply_reverse_permutation(transitions_.begin(), transitions_.end(), states);
+	canonical_ = false;
+}
+
+template<unsigned int N>
+template<class RandomAccessIterator1, class RandomAccessIterator2>
+void Automaton<N>::renumber(RandomAccessIterator1 states, RandomAccessIterator2 symbols) {
+	if (states[0] != 0)
+		minimal_ = false;
+	//Renumber transitions_[*].next_ and .symbols_, then swap transitions_.
+	//This doesn't just call renumberStates followed by renumberAlphabet to
+	//preserve locality when iterating transitions_.
+	for (auto& ts : transitions_)
+		for (Transition& t : ts) {
+			t.next_ = states[t.next_];
+			t.symbols_ = detail::renumberAlphabet(t.symbols_, symbols);
+			//We're assuming it's actually a permutation, and so not checking
+			//for transitions becoming empty or determinism changing.
+			//TODO: we really should check, or assert it's a permutation
+		}
+	//apply_reverse_permutation destroys the permutation, so we'll copy the bitset
+	//and manually permute.  (The bitset is smaller than the permutation.)
+	boost::dynamic_bitset<std::size_t> accept;
+	accept.resize(transitions_.size()); //yes, resize, not reserve
+	for (state_type i = 0; i < transitions_.size(); ++i)
+		accept.set(states[i], accept_.test(i));
+	accept_ = std::move(accept);
+	apply_reverse_permutation(transitions_.begin(), transitions_.end(), states);
+	canonical_ = false;
+}
 
 #define AUTOMATON_EXTERN_TEMPLATE extern
 #define AUTOMATON_SIZE 1
