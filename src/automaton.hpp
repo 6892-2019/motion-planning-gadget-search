@@ -765,6 +765,8 @@ private:
 #include "automaton-instantiations.hpp"
 #define AUTOMATON_SIZE 10
 #include "automaton-instantiations.hpp"
+#define AUTOMATON_SIZE 11
+#include "automaton-instantiations.hpp"
 #define AUTOMATON_SIZE 12
 #include "automaton-instantiations.hpp"
 #define AUTOMATON_SIZE 13
