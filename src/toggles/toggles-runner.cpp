@@ -992,11 +992,11 @@ std::string build_insert_gadgets_query(unsigned int rows) {
 	for (unsigned int i = 1; i < rows; ++i)
 		values.push_back(fmt::format("(${}, ${}, ${}, ${}, ${}, ${}, ${})",
 				7*i+1, 7*i+2, 7*i+3, 7*i+4, 7*i+5, 7*i+6, 7*i+7));
-	return "with input_rows (n, states, locations, uedges, dedges, sccs, data) as (values" +
+	return "with input_rows (n, states, locations, uedges, dedges, components, data) as (values" +
 			join(values, ",\n  ") +
 			"\n), ins as (\n"
-			"  insert into gadgets (states, locations, undirected_edges, directed_edges, sccs, data)\n"
-			"  select states, locations, uedges, dedges, sccs, data from input_rows\n"
+			"  insert into gadgets (states, locations, undirected_edges, directed_edges, components, data)\n"
+			"  select states, locations, uedges, dedges, components, data from input_rows\n"
 			"  returning gadgets.id, gadgets.data\n"
 			")\n"
 			"select input_rows.n, ins.id from input_rows join ins using (data);";
@@ -1041,7 +1041,7 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 
 	//TODO: should allow command-line args, build this string, and store it globally
 	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
-	pqxx::result result = pqxx::perform([&](){
+	pqxx::result input_data = pqxx::perform([&](){
 		pqxx::transaction<pqxx::serializable, pqxx::read_only> trans(conn);
 		pqxx::result result = trans.exec_n(input_gids.size(), "select id, data from gadgets where id in ("+in_clause_list+")");
 		trans.commit();
@@ -1050,7 +1050,7 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 
 	//Returned rows are text internally, so we may as well convert now.
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs;
-	for (const auto& row : result) {
+	for (const auto& row : input_data) {
 		std::uint64_t gid = row.at(0).as<std::uint64_t>();
 		pqxx::binarystring data(row.at(1));
 		vector<std::byte> bytes;
@@ -1079,24 +1079,24 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 			pqxx::prepare::invocation inv = trans.prepared("select_data_100");
 			for (std::size_t max = row_index + 100; row_index < max; ++row_index) {
 				const OutputRow& r = outputs.rows[row_index];
-				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+				inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
 			}
 			pqxx::result already_have = inv.exec();
 			for (pqxx::row r : already_have)
 				local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
-			pending_insert_count += 100 - result.size();
+			pending_insert_count += 100 - already_have.size();
 		}
 		if (row_index < outputs.rows.size()) {
 			std::size_t epilogue_count = outputs.rows.size() - row_index;
 			pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(epilogue_count));
 			for (; row_index < outputs.rows.size(); ++row_index) {
 				const OutputRow& r = outputs.rows[row_index];
-				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+				inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
 			}
 			pqxx::result already_have = inv.exec();
 			for (pqxx::row r : already_have)
 				local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
-			pending_insert_count += epilogue_count - result.size();
+			pending_insert_count += epilogue_count - already_have.size();
 		}
 
 		if (pending_insert_count >= 100)
@@ -1156,7 +1156,7 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 			pqxx::prepare::invocation inv = trans.prepared("insert_close_edge_200");
 			for (std::size_t max = edge_index + 200; edge_index < max; ++edge_index) {
 				const SimpleProvenance& p = outputs.prov[edge_index];
-				inv(p.input1)(p.output1)((unsigned short)p.canonicalizePermutation);
+				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
 		}
@@ -1165,7 +1165,7 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 					build_insert_close_edges_query(outputs.prov.size() - edge_index));
 			for (; edge_index < outputs.prov.size(); ++edge_index) {
 				const SimpleProvenance& p = outputs.prov[edge_index];
-				inv(p.input1)(p.output1)((unsigned short)p.canonicalizePermutation);
+				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
 		}
