@@ -236,13 +236,18 @@ SLLS deflate_slls(const AutomatonBase& a) {
 		}
 	}
 
+	MAYBE_UNUSED std::size_t nop_edges = 0;
 	for (const GadgetEdge& e : edges) {
 		if (!edges.count(e.reverse()))
 			gadget.dedges.push_back(e);
-		else if (e < e.reverse()) //only the lesser of the pair
+		else if (e < e.reverse() || e == e.reverse()) {//only the lesser of the pair; also equal for nop edges
 			gadget.uedges.push_back(e);
+			if (e == e.reverse())
+				++nop_edges;
+		}
 	}
-	assert(2*gadget.uedges.size() + gadget.dedges.size() == edges.size());
+	//nop edges are undirected, but only appear once in the set
+	assert(2*gadget.uedges.size() - nop_edges + gadget.dedges.size() == edges.size());
 	return gadget;
 }
 
