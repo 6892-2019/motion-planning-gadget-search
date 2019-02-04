@@ -2,10 +2,12 @@
 #include "automaton.hpp"
 #include "canonicalize.hpp"
 #include "ops.hpp"
+#include "stringutils.hpp"
 #include "hopscotch/hopscotch_set.h"
 #include "hopscotch/hopscotch_map.h"
 #include "tsl/ordered_set.h"
 #include "msgpack.hpp"
+#include <pqxx/pqxx>
 #include <cstdio>
 
 using namespace automaton;
@@ -963,6 +965,248 @@ SimpleOutput do_close(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 	return {std::move(rows), std::move(finisher.prov_)};
 }
 
+std::string build_select_gadget_data_to_id(unsigned int rows) {
+	assert(rows >= 1);
+	vector<std::string> values;
+	values.reserve(rows);
+	values.push_back("  ($1::integer, $2::bytea)"); //first one is special to specify types
+	for (unsigned int i = 1; i < rows; ++i)
+		values.push_back(fmt::format("(${}, ${})", 2*i + 1, 2*i + 2));
+	return "with input_rows (n, data) as (values\n" +
+			join(values, ",\n  ") +
+			"\n)\n" +
+			"select input_rows.n, gadgets.id from gadgets join input_rows using (data);";
+}
+
+std::string build_insert_gadgets_query(unsigned int rows) {
+	assert(rows >= 1);
+	vector<std::string> values;
+	values.reserve(rows);
+	//first one is special to specify types
+	values.push_back("  ($1::integer, $2::integer, $3::integer, $4::integer, $5::integer, $6::integer, $7::bytea)");
+	for (unsigned int i = 1; i < rows; ++i)
+		values.push_back(fmt::format("(${}, ${}, ${}, ${}, ${}, ${}, ${})",
+				7*i+1, 7*i+2, 7*i+3, 7*i+4, 7*i+5, 7*i+6, 7*i+7));
+	return "with input_rows (n, states, locations, uedges, dedges, sccs, data) as (values" +
+			join(values, ",\n  ") +
+			"\n), ins as (\n"
+			"  insert into gadgets (states, locations, undirected_edges, directed_edges, sccs, data)\n"
+			"  select states, locations, uedges, dedges, sccs, data from input_rows\n"
+			"  returning gadgets.id, gadgets.data\n"
+			")\n"
+			"select input_rows.n, ins.id from input_rows join ins using (data);";
+}
+
+std::string build_insert_simple_edges_query(unsigned int rows, std::string_view table_name, std::string_view column_name_list) {
+	assert(rows >= 1);
+	vector<std::string> values;
+	values.reserve(rows);
+	values.push_back("  ($1::bigint, $2::bigint, $3::smallint)");
+	for (unsigned int i = 1; i < rows; ++i)
+		values.push_back(fmt::format("(${}, ${}, ${})", 3*i + 1, 3*i + 2, 3*i+3));
+	return fmt::format("insert into {} ({}) values\n", table_name, column_name_list) +
+			join(values, ",\n  ") +
+			"\n on conflict do nothing;";
+}
+
+std::string build_insert_close_edges_query(unsigned int rows) {
+	return build_insert_simple_edges_query(rows, "close_edges", "input1, output1, canonicalize_rotation");
+}
+std::string build_insert_mirror_edges_query(unsigned int rows) {
+	return build_insert_simple_edges_query(rows, "mirror_edges", "a, b, canonicalize_rotation");
+}
+
+std::string build_insert_completion_query(unsigned int rows, std::string_view table_name) {
+	assert(rows >= 1);
+	vector<std::string> values;
+	values.reserve(rows);
+	values.push_back("  (int8range($1::bigint, $2::bigint))");
+	for (unsigned int i = 1; i < rows; ++i)
+		values.push_back(fmt::format("(int8range(${}, ${}))", 2*i + 1, 2*i + 2));
+	return fmt::format("insert into {} (r) values\n", table_name) +
+			join(values, ",\n  ") + ";";
+}
+
+vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
+	//TODO: stringutils.hpp:join overload?  (use std::to_chars)
+	vector<std::string> gids_as_strings;
+	for (std::uint64_t t : input_gids)
+		gids_as_strings.push_back(std::to_string(t));
+	std::string in_clause_list = join(gids_as_strings, ",");
+
+	//TODO: should allow command-line args, build this string, and store it globally
+	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+	pqxx::result result = pqxx::perform([&](){
+		pqxx::transaction<pqxx::serializable, pqxx::read_only> trans(conn);
+		pqxx::result result = trans.exec_n(input_gids.size(), "select id, data from gadgets where id in ("+in_clause_list+")");
+		trans.commit();
+		return result;
+	}, 10);
+
+	//Returned rows are text internally, so we may as well convert now.
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs;
+	for (const auto& row : result) {
+		std::uint64_t gid = row.at(0).as<std::uint64_t>();
+		pqxx::binarystring data(row.at(1));
+		vector<std::byte> bytes;
+		bytes.insert(bytes.begin(), reinterpret_cast<const std::byte*>(data.begin()), reinterpret_cast<const std::byte*>(data.end()));
+		inputs.emplace_back(gid, std::move(bytes));
+	}
+
+	SimpleOutput outputs = do_close(inputs);
+
+	//TODO: ideally these would be persistently prepared when pgbouncer
+	//starts a new connection with the database, but pqxx wants to keep some
+	//local state, I guess.
+	if (outputs.rows.size() >= 100)
+		conn.prepare("select_data_100", build_select_gadget_data_to_id(100));
+	if (outputs.prov.size() >= 200)
+		conn.prepare("insert_close_edge_200", build_insert_close_edges_query(200));
+
+	vector<std::uint64_t> novel_gadgets = pqxx::perform([&](){
+		pqxx::transaction<pqxx::serializable> trans(conn);
+
+		vector<std::uint64_t> local_to_global(outputs.rows.size(), std::numeric_limits<std::uint64_t>::max());
+		std::size_t row_index = 0, pending_insert_count = 0;
+		//Do batches of 100 with our prepared statement, then make one
+		//parameterized (non-prepared) query for the remainder.
+		while (outputs.rows.size() - row_index >= 100) {
+			pqxx::prepare::invocation inv = trans.prepared("select_data_100");
+			for (std::size_t max = row_index + 100; row_index < max; ++row_index) {
+				const OutputRow& r = outputs.rows[row_index];
+				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+			}
+			pqxx::result already_have = inv.exec();
+			for (pqxx::row r : already_have)
+				local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
+			pending_insert_count += 100 - result.size();
+		}
+		if (row_index < outputs.rows.size()) {
+			std::size_t epilogue_count = outputs.rows.size() - row_index;
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(epilogue_count));
+			for (; row_index < outputs.rows.size(); ++row_index) {
+				const OutputRow& r = outputs.rows[row_index];
+				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+			}
+			pqxx::result already_have = inv.exec();
+			for (pqxx::row r : already_have)
+				local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
+			pending_insert_count += epilogue_count - result.size();
+		}
+
+		if (pending_insert_count >= 100)
+			conn.prepare("insert_gadgets_100", build_insert_gadgets_query(100));
+
+		//Scan over local_to_global building up a batch, then fill it in; also
+		//record the global ids of the inserted gadgets.
+		vector<std::uint64_t> novel_global_ids;
+		novel_global_ids.reserve(pending_insert_count);
+		row_index = 0;
+		while (pending_insert_count >= 100) {
+			pqxx::prepare::invocation inv = trans.prepared("insert_gadgets_100");
+			std::size_t batched = 0;
+			while (batched++ < 100) {
+				while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
+				const OutputRow& r = outputs.rows[row_index];
+				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+				++row_index;
+				++batched;
+			}
+			pqxx::result inserted = inv.exec();
+			for (pqxx::row r : inserted) {
+				auto gid = r[1].as<std::size_t>();
+				local_to_global[r[0].as<std::size_t>()] = gid;
+				novel_global_ids.push_back(gid);
+			}
+			pending_insert_count -= 100;
+		}
+		if (pending_insert_count) {
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(
+					build_insert_gadgets_query(pending_insert_count));
+			std::size_t batched = 0;
+			while (batched++ < pending_insert_count) {
+				while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
+				const OutputRow& r = outputs.rows[row_index];
+				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+				++row_index;
+				++batched;
+			}
+			pqxx::result inserted = inv.exec();
+			for (pqxx::row r : inserted) {
+				auto gid = r[1].as<std::size_t>();
+				local_to_global[r[0].as<std::size_t>()] = gid;
+				novel_global_ids.push_back(gid);
+			}
+			pending_insert_count -= batched;
+		}
+
+		//Should have filled in everything now.
+		assert(std::find(local_to_global.begin(), local_to_global.end(),
+				std::numeric_limits<std::uint64_t>::max()) == local_to_global.end());
+
+		//TODO: remember to sort for mirror (thus need to remap earlier)
+		//don't need to dedup because on conflict do nothing
+		std::size_t edge_index = 0;
+		while (outputs.prov.size() - edge_index >= 200) {
+			pqxx::prepare::invocation inv = trans.prepared("insert_close_edge_200");
+			for (std::size_t max = edge_index + 200; edge_index < max; ++edge_index) {
+				const SimpleProvenance& p = outputs.prov[edge_index];
+				inv(p.input1)(p.output1)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+		if (edge_index < outputs.prov.size()) {
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(
+					build_insert_close_edges_query(outputs.prov.size() - edge_index));
+			for (; edge_index < outputs.prov.size(); ++edge_index) {
+				const SimpleProvenance& p = outputs.prov[edge_index];
+				inv(p.input1)(p.output1)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+
+		//Closure is idempotent, so we've also finished for any new gadgets.
+		input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
+		std::sort(input_gids.begin(), input_gids.end());
+		vector<pair<std::uint32_t, std::uint32_t>> ranges;
+		auto first = input_gids.begin(), last = input_gids.begin();
+		//Build maximal ranges, first inclusive and last exclusive.
+		while (true) {
+			if (last+1 == input_gids.end()) {
+				ranges.emplace_back(*first, *last + 1);
+				break;
+			} else if (*(last+1) - *last != 1) {
+				ranges.emplace_back(*first, *last + 1);
+				first = last = last+1;
+			} else
+				++last;
+		}
+
+		//It's not clear to me that using prepared statements is actually faster here...
+		if (ranges.size() > 100)
+			conn.prepare("insert_close_complete_100", build_insert_completion_query(100, "completed_closes"));
+		std::size_t completed_index = 0;
+		while (ranges.size() - completed_index >= 100) {
+			pqxx::prepare::invocation inv = trans.prepared("insert_close_complete_100");
+			for (std::size_t max = completed_index + 200; completed_index < max; ++completed_index)
+				inv(ranges[completed_index].first)(ranges[completed_index].second);
+			inv.exec();
+		}
+		if (completed_index < ranges.size()) {
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(
+					build_insert_completion_query(ranges.size() - completed_index, "completed_closes"));
+			for (; completed_index < ranges.size(); ++completed_index)
+				inv(ranges[completed_index].first)(ranges[completed_index].second);
+			inv.exec();
+		}
+
+		trans.commit();
+		return novel_global_ids;
+	}, 10);
+
+	return novel_gadgets;
+}
+
 
 SimpleOutput do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 	Finisher<SimpleProvenance> finisher;
@@ -1020,6 +1264,8 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"combine"sv, &handler_adapter<do_combine>},
 	{"close"sv, &handler_adapter<do_close>},
 	{"mirror"sv, &handler_adapter<do_mirror>},
+
+	{"close-db"sv, &handler_adapter<do_close_db>},
 };
 
 msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
