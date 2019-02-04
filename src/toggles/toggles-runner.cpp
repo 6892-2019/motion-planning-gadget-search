@@ -1115,7 +1115,6 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 				const OutputRow& r = outputs.rows[row_index];
 				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
 				++row_index;
-				++batched;
 			}
 			pqxx::result inserted = inv.exec();
 			for (pqxx::row r : inserted) {
@@ -1134,7 +1133,6 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 				const OutputRow& r = outputs.rows[row_index];
 				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
 				++row_index;
-				++batched;
 			}
 			pqxx::result inserted = inv.exec();
 			for (pqxx::row r : inserted) {
