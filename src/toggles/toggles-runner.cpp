@@ -21,6 +21,9 @@ using std::unique_ptr;
 using std::string_view;
 using namespace std::literals::string_view_literals;
 
+using transaction = pqxx::transaction<pqxx::serializable>;
+using ro_transaction = pqxx::transaction<pqxx::serializable, pqxx::read_only>;
+
 template<typename T>
 void debug_scream([[maybe_unused]] T& t) {
 	static_assert(std::is_trivial_v<T>, "must be trivial to scream");
@@ -991,6 +994,15 @@ SimpleOutput do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 
 
 
+std::string build_select_gadget_id_to_data_immediate(const std::vector<std::uint64_t>& gids) {
+	//TODO: stringutils.hpp:join overload?  (use std::to_chars)
+	vector<std::string> gids_as_strings;
+	for (std::uint64_t t : gids)
+		gids_as_strings.push_back(std::to_string(t));
+	std::string in_clause_list = join(gids_as_strings, ",");
+	return "select id, data from gadgets where id in ("+in_clause_list+")";
+}
+
 std::string build_select_gadget_data_to_id(unsigned int rows) {
 	assert(rows >= 1);
 	vector<std::string> values;
@@ -1131,21 +1143,13 @@ auto retry_db_operation(Callback&& callback, unsigned int attempts = 10, std::st
 	throw retry_failed_exception(std::move(message), std::move(suppressed));
 }
 
-vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
-	//TODO: stringutils.hpp:join overload?  (use std::to_chars)
-	vector<std::string> gids_as_strings;
-	for (std::uint64_t t : input_gids)
-		gids_as_strings.push_back(std::to_string(t));
-	std::string in_clause_list = join(gids_as_strings, ",");
-
-	//TODO: should allow command-line args, build this string, and store it globally
-	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+vector<pair<std::uint64_t, vector<std::byte>>> select_gadget_id_to_data(pqxx::connection& conn, const vector<std::uint64_t>& gids) {
 	pqxx::result input_data = retry_db_operation([&](){
-		pqxx::transaction<pqxx::serializable, pqxx::read_only> trans(conn);
-		pqxx::result result = trans.exec_n(input_gids.size(), "select id, data from gadgets where id in ("+in_clause_list+")");
+		ro_transaction trans(conn);
+		pqxx::result result = trans.exec_n(gids.size(), build_select_gadget_id_to_data_immediate(gids));
 		trans.commit();
 		return result;
-	}, 10);
+	}, 10, "select_gadget_id_to_data_immediate");
 
 	//Returned rows are text internally, so we may as well convert now.
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs;
@@ -1156,95 +1160,164 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 		bytes.insert(bytes.begin(), reinterpret_cast<const std::byte*>(data.begin()), reinterpret_cast<const std::byte*>(data.end()));
 		inputs.emplace_back(gid, std::move(bytes));
 	}
+	return inputs;
+}
 
-	SimpleOutput outputs = do_close(inputs);
-
-	//TODO: ideally these would be persistently prepared when pgbouncer
-	//starts a new connection with the database, but pqxx wants to keep some
-	//local state, I guess.
-	if (outputs.rows.size() >= 100)
+//This is basically a workaround for NetBeans' choking on structured bindings.
+//If I ever stop using it, this can just be a pair.
+struct SelsertGadgetByDataResult {
+	vector<std::uint64_t> local_to_global, novel_global_ids;
+};
+/**
+ * Returns the global gadget id of each of the given rows, inserting the row if
+ * not already present.  The vector of ids matches the order of the rows.
+ */
+SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans, vector<OutputRow> rows) {
+	//TODO: decide if we can persistently prepare when pgbouncer starts a new
+	//transaction (for this and other prepared statements)
+	if (rows.size() >= 100)
 		conn.prepare("select_data_100", build_select_gadget_data_to_id(100));
+
+	vector<std::uint64_t> local_to_global(rows.size(), std::numeric_limits<std::uint64_t>::max());
+	std::size_t row_index = 0, pending_insert_count = 0;
+	//Do batches of 100 with our prepared statement, then make one
+	//parameterized (non-prepared) query for the remainder.
+	while (rows.size() - row_index >= 100) {
+		pqxx::prepare::invocation inv = trans.prepared("select_data_100");
+		for (std::size_t max = row_index + 100; row_index < max; ++row_index) {
+			const OutputRow& r = rows[row_index];
+			inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+		}
+		pqxx::result already_have = inv.exec();
+		for (pqxx::row r : already_have)
+			local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
+		pending_insert_count += 100 - already_have.size();
+	}
+	if (row_index < rows.size()) {
+		std::size_t epilogue_count = rows.size() - row_index;
+		pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(epilogue_count));
+		for (; row_index < rows.size(); ++row_index) {
+			const OutputRow& r = rows[row_index];
+			inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+		}
+		pqxx::result already_have = inv.exec();
+		for (pqxx::row r : already_have)
+			local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
+		pending_insert_count += epilogue_count - already_have.size();
+	}
+
+	if (pending_insert_count >= 100)
+		conn.prepare("insert_gadgets_100", build_insert_gadgets_query(100));
+
+	//Scan over local_to_global building up a batch, then fill it in; also
+	//record the global ids of the inserted gadgets.
+	vector<std::uint64_t> novel_global_ids;
+	novel_global_ids.reserve(pending_insert_count);
+	row_index = 0;
+	while (pending_insert_count >= 100) {
+		pqxx::prepare::invocation inv = trans.prepared("insert_gadgets_100");
+		std::size_t batched = 0;
+		while (batched++ < 100) {
+			while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
+			const OutputRow& r = rows[row_index];
+			inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+			++row_index;
+		}
+		pqxx::result inserted = inv.exec();
+		for (pqxx::row r : inserted) {
+			auto gid = r[1].as<std::size_t>();
+			local_to_global[r[0].as<std::size_t>()] = gid;
+			novel_global_ids.push_back(gid);
+		}
+		pending_insert_count -= 100;
+	}
+	if (pending_insert_count) {
+		pqxx::internal::parameterized_invocation inv = trans.parameterized(
+				build_insert_gadgets_query(pending_insert_count));
+		std::size_t batched = 0;
+		while (batched++ < pending_insert_count) {
+			while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
+			const OutputRow& r = rows[row_index];
+			inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+			++row_index;
+		}
+		pqxx::result inserted = inv.exec();
+		for (pqxx::row r : inserted) {
+			auto gid = r[1].as<std::size_t>();
+			local_to_global[r[0].as<std::size_t>()] = gid;
+			novel_global_ids.push_back(gid);
+		}
+		pending_insert_count -= batched;
+	}
+
+	//Should have filled in everything now.
+	assert(std::find(local_to_global.begin(), local_to_global.end(),
+			std::numeric_limits<std::uint64_t>::max()) == local_to_global.end());
+	return {std::move(local_to_global), std::move(novel_global_ids)};
+}
+
+void insert_completed_ranges(pqxx::connection& conn, transaction& trans,
+		vector<pair<std::uint64_t, std::uint64_t>> ranges,
+		string_view table) {
+	//It's not clear to me that using prepared statements is actually faster here...
+	const unsigned int batch_size = 100;
+	std::optional<std::string> prepared_statement_name;
+	if (ranges.size() > batch_size) {
+		prepared_statement_name.emplace(fmt::format("insert_{}_{}", table, batch_size));
+		conn.prepare(*prepared_statement_name, build_insert_completion_query(batch_size, table));
+	}
+	std::size_t completed_index = 0;
+	while (ranges.size() - completed_index >= batch_size) {
+		pqxx::prepare::invocation inv = trans.prepared(*prepared_statement_name);
+		for (std::size_t max = completed_index + batch_size; completed_index < max; ++completed_index)
+			inv(ranges[completed_index].first)(ranges[completed_index].second);
+		inv.exec();
+	}
+	if (completed_index < ranges.size()) {
+		pqxx::internal::parameterized_invocation inv = trans.parameterized(
+				build_insert_completion_query(ranges.size() - completed_index, table));
+		for (; completed_index < ranges.size(); ++completed_index)
+			inv(ranges[completed_index].first)(ranges[completed_index].second);
+		inv.exec();
+	}
+}
+
+vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint64_t>& data) {
+	assert(std::is_sorted(data.begin(), data.end()));
+	vector<pair<std::uint64_t, std::uint64_t>> ranges;
+	auto first = data.begin(), last = data.begin();
+	//Build maximal ranges, first inclusive and last exclusive.
+	while (true) {
+		if (last+1 == data.end()) {
+			ranges.emplace_back(*first, *last + 1);
+			break;
+		} else if (*(last+1) - *last != 1) {
+			ranges.emplace_back(*first, *last + 1);
+			first = last = last+1;
+		} else
+			++last;
+	}
+	return ranges;
+}
+
+vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
+	//TODO: should allow command-line args, build this string, and store it globally
+	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
+
+	SimpleOutput outputs = do_close(std::move(inputs));
+
 	if (outputs.prov.size() >= 200)
 		conn.prepare("insert_close_edge_200", build_insert_close_edges_query(200));
 
 	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
-		pqxx::transaction<pqxx::serializable> trans(conn);
+		transaction trans(conn);
 
-		vector<std::uint64_t> local_to_global(outputs.rows.size(), std::numeric_limits<std::uint64_t>::max());
-		std::size_t row_index = 0, pending_insert_count = 0;
-		//Do batches of 100 with our prepared statement, then make one
-		//parameterized (non-prepared) query for the remainder.
-		while (outputs.rows.size() - row_index >= 100) {
-			pqxx::prepare::invocation inv = trans.prepared("select_data_100");
-			for (std::size_t max = row_index + 100; row_index < max; ++row_index) {
-				const OutputRow& r = outputs.rows[row_index];
-				inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-			}
-			pqxx::result already_have = inv.exec();
-			for (pqxx::row r : already_have)
-				local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
-			pending_insert_count += 100 - already_have.size();
-		}
-		if (row_index < outputs.rows.size()) {
-			std::size_t epilogue_count = outputs.rows.size() - row_index;
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(epilogue_count));
-			for (; row_index < outputs.rows.size(); ++row_index) {
-				const OutputRow& r = outputs.rows[row_index];
-				inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-			}
-			pqxx::result already_have = inv.exec();
-			for (pqxx::row r : already_have)
-				local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
-			pending_insert_count += epilogue_count - already_have.size();
-		}
-
-		if (pending_insert_count >= 100)
-			conn.prepare("insert_gadgets_100", build_insert_gadgets_query(100));
-
-		//Scan over local_to_global building up a batch, then fill it in; also
-		//record the global ids of the inserted gadgets.
-		vector<std::uint64_t> novel_global_ids;
-		novel_global_ids.reserve(pending_insert_count);
-		row_index = 0;
-		while (pending_insert_count >= 100) {
-			pqxx::prepare::invocation inv = trans.prepared("insert_gadgets_100");
-			std::size_t batched = 0;
-			while (batched++ < 100) {
-				while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
-				const OutputRow& r = outputs.rows[row_index];
-				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-				++row_index;
-			}
-			pqxx::result inserted = inv.exec();
-			for (pqxx::row r : inserted) {
-				auto gid = r[1].as<std::size_t>();
-				local_to_global[r[0].as<std::size_t>()] = gid;
-				novel_global_ids.push_back(gid);
-			}
-			pending_insert_count -= 100;
-		}
-		if (pending_insert_count) {
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_gadgets_query(pending_insert_count));
-			std::size_t batched = 0;
-			while (batched++ < pending_insert_count) {
-				while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
-				const OutputRow& r = outputs.rows[row_index];
-				inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-				++row_index;
-			}
-			pqxx::result inserted = inv.exec();
-			for (pqxx::row r : inserted) {
-				auto gid = r[1].as<std::size_t>();
-				local_to_global[r[0].as<std::size_t>()] = gid;
-				novel_global_ids.push_back(gid);
-			}
-			pending_insert_count -= batched;
-		}
-
-		//Should have filled in everything now.
-		assert(std::find(local_to_global.begin(), local_to_global.end(),
-				std::numeric_limits<std::uint64_t>::max()) == local_to_global.end());
+		//could be structured bindings
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
 
 		//TODO: remember to sort for mirror (thus need to remap earlier)
 		//don't need to dedup because on conflict do nothing
@@ -1270,40 +1343,10 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 		//Closure is idempotent, so we've also finished for any new gadgets.
 		input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
 		std::sort(input_gids.begin(), input_gids.end());
-		vector<pair<std::uint32_t, std::uint32_t>> ranges;
-		auto first = input_gids.begin(), last = input_gids.begin();
-		//Build maximal ranges, first inclusive and last exclusive.
-		while (true) {
-			if (last+1 == input_gids.end()) {
-				ranges.emplace_back(*first, *last + 1);
-				break;
-			} else if (*(last+1) - *last != 1) {
-				ranges.emplace_back(*first, *last + 1);
-				first = last = last+1;
-			} else
-				++last;
-		}
-
-		//It's not clear to me that using prepared statements is actually faster here...
-		if (ranges.size() > 100)
-			conn.prepare("insert_close_complete_100", build_insert_completion_query(100, "completed_closes"));
-		std::size_t completed_index = 0;
-		while (ranges.size() - completed_index >= 100) {
-			pqxx::prepare::invocation inv = trans.prepared("insert_close_complete_100");
-			for (std::size_t max = completed_index + 200; completed_index < max; ++completed_index)
-				inv(ranges[completed_index].first)(ranges[completed_index].second);
-			inv.exec();
-		}
-		if (completed_index < ranges.size()) {
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_completion_query(ranges.size() - completed_index, "completed_closes"));
-			for (; completed_index < ranges.size(); ++completed_index)
-				inv(ranges[completed_index].first)(ranges[completed_index].second);
-			inv.exec();
-		}
+		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_closes");
 
 		trans.commit();
-		return novel_global_ids;
+		return std::move(novel_global_ids);
 	}, 10);
 
 	return novel_gadgets;
