@@ -1032,6 +1032,84 @@ std::string build_insert_completion_query(unsigned int rows, std::string_view ta
 			join(values, ",\n  ") + ";";
 }
 
+struct retry_failed_exception : public std::exception {
+	retry_failed_exception(std::string&& msg, vector<std::exception_ptr>&& v) :
+			std::exception(), message(std::move(msg)), causes(std::move(v)) {}
+	//Technically we shouldn't use string or vector because they might throw
+	//when copied, and std::exceptions shouldn't.
+	std::string message;
+	std::vector<std::exception_ptr> causes;
+	const char* what() const noexcept override {
+		return message.c_str();
+	}
+};
+
+/**
+ * Retries a database operation if transient errors occur (such as serialization
+ * failures).
+ *
+ * pqxx::perform will retry things like a prepared statement getting the wrong
+ * number of parameters, which is clearly a logic error, so we need our own
+ * retry loop.
+ */
+template<class Callback>
+auto retry_db_operation(Callback&& callback, unsigned int attempts = 10, std::string_view identifier = "<unnamed>"sv) {
+	assert(attempts);
+	vector<std::exception_ptr> suppressed;
+	//Ideally we'd wait to format these messages, but std::exception_ptr erases
+	//the exception type (in fact, we can't even dereference it).
+	vector<std::string> messages;
+
+	auto record_message = [&](unsigned int i, const char* type, const char* what) {
+		messages.push_back(fmt::format("  attempt {} got {}: {}", i, type, what));
+	};
+	auto record_stderr = [&](unsigned int i, const char* type, const char* what) {
+		fmt::print(stderr, "attempt {} of {} at {} got {}: {}\n",
+				i, attempts, identifier, type, what);
+	};
+
+	for (unsigned int i = 0; i < attempts; ++i) {
+		try {
+			return callback();
+		} catch (const pqxx::serialization_failure& e) {
+			record_message(i, "serialization_failure", e.what());
+			record_stderr(i, "serialization_failure", e.what());
+			suppressed.push_back(std::current_exception());
+		} catch (const pqxx::deadlock_detected& e) {
+			record_message(i, "deadlock_detected", e.what());
+			record_stderr(i, "deadlock_detected", e.what());
+			suppressed.push_back(std::current_exception());
+		} catch (const pqxx::broken_connection& e) {
+			//It seems a bit odd to retry this, but pqxx::perform does, and if
+			//the transaction rolled back, it's safe to try again.
+			record_message(i, "broken_connection", e.what());
+			record_stderr(i, "broken_connection", e.what());
+			suppressed.push_back(std::current_exception());
+		} catch (const std::exception& e) {
+			//All non-whitelisted errors lead to termination, but we also tack
+			//on information from any suppressed exceptions from previous attempts.
+			record_message(i, typeid(e).name(), e.what());
+			record_stderr(i, "broken_connection", e.what());
+			suppressed.push_back(std::current_exception());
+			break; //common code path with attempts-exhausted
+		} catch (...) {
+			record_message(i, "[unknown exception]", "(what not available)");
+			record_stderr(i, "[unknown exception]", "(what not available)");
+			suppressed.push_back(std::current_exception());
+			break; //common code path with attempts-exhausted
+		}
+	}
+
+	if (suppressed.size() == 1) //if we failed immediately
+		std::rethrow_exception(suppressed.front());
+	std::string message = fmt::format("{} failed after {} of {} attempts:\n{}",
+			identifier, suppressed.size(), attempts,
+			join(messages, "\n"));
+	//I think std::nested_exception could be used to preserve the fatal
+	//exception's type if that was important.
+	throw retry_failed_exception(std::move(message), std::move(suppressed));
+}
+
 vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 	//TODO: stringutils.hpp:join overload?  (use std::to_chars)
 	vector<std::string> gids_as_strings;
@@ -1041,7 +1119,7 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 
 	//TODO: should allow command-line args, build this string, and store it globally
 	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
-	pqxx::result input_data = pqxx::perform([&](){
+	pqxx::result input_data = retry_db_operation([&](){
 		pqxx::transaction<pqxx::serializable, pqxx::read_only> trans(conn);
 		pqxx::result result = trans.exec_n(input_gids.size(), "select id, data from gadgets where id in ("+in_clause_list+")");
 		trans.commit();
@@ -1068,7 +1146,7 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 	if (outputs.prov.size() >= 200)
 		conn.prepare("insert_close_edge_200", build_insert_close_edges_query(200));
 
-	vector<std::uint64_t> novel_gadgets = pqxx::perform([&](){
+	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
 		pqxx::transaction<pqxx::serializable> trans(conn);
 
 		vector<std::uint64_t> local_to_global(outputs.rows.size(), std::numeric_limits<std::uint64_t>::max());
