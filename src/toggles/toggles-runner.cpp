@@ -970,6 +970,27 @@ SimpleOutput do_close(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 	return {std::move(rows), std::move(finisher.prov_)};
 }
 
+
+SimpleOutput do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+	Finisher<SimpleProvenance> finisher;
+	for (const auto& p : inputs) {
+		SimpleProvenance prov;
+		prov.input1 = p.first;
+		unique_ptr<WorkingAutomaton> a = inflate_outputrow(p.second);
+		//mirror copies.  We do need to know if mirroring changed the automaton,
+		//but maybe there's a way to do that while reusing *a?
+		pair<unique_ptr<WorkingAutomaton>, unsigned int> m = mirror(*a);
+		if (*m.first == *a) continue;
+		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(m.second);
+		finisher(deflate_outputrow(*m.first), prov);
+	}
+	//TODO: avoid this copy
+	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
+	return {std::move(rows), std::move(finisher.prov_)};
+}
+
+
+
 std::string build_select_gadget_data_to_id(unsigned int rows) {
 	assert(rows >= 1);
 	vector<std::string> values;
@@ -1286,25 +1307,6 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 	}, 10);
 
 	return novel_gadgets;
-}
-
-
-SimpleOutput do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
-	Finisher<SimpleProvenance> finisher;
-	for (const auto& p : inputs) {
-		SimpleProvenance prov;
-		prov.input1 = p.first;
-		unique_ptr<WorkingAutomaton> a = inflate_outputrow(p.second);
-		//mirror copies.  We do need to know if mirroring changed the automaton,
-		//but maybe there's a way to do that while reusing *a?
-		pair<unique_ptr<WorkingAutomaton>, unsigned int> m = mirror(*a);
-		if (*m.first == *a) continue;
-		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(m.second);
-		finisher(deflate_outputrow(*m.first), prov);
-	}
-	//TODO: avoid this copy
-	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
-	return {std::move(rows), std::move(finisher.prov_)};
 }
 
 
