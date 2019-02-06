@@ -1035,6 +1035,29 @@ std::string build_insert_gadgets_query(unsigned int rows) {
 			"select input_rows.n, ins.id from input_rows join ins using (data);";
 }
 
+std::string build_insert_connect_edges_query(unsigned int rows) {
+	assert(rows >= 1);
+	vector<std::string> values;
+	values.reserve(rows);
+	values.push_back("  ($1::bigint, $2::bigint, $3::smallint, $4::smallint)");
+	for (unsigned int i = 1; i < rows; ++i)
+		values.push_back(fmt::format("(${}, ${}, ${}, ${})", 4*i + 1, 4*i + 2, 4*i+3, 4*i+4));
+	return "insert into connect_edges (input1, output1, connect_location, canonicalize_rotation) values\n" +
+			join(values, ",\n  ") + ";";
+}
+
+std::string build_insert_combine_edges_query(unsigned int rows) {
+	assert(rows >= 1);
+	vector<std::string> values;
+	values.reserve(rows);
+	values.push_back("  ($1::bigint, $2::bigint, $3::bigint, $4::smallint, $5::smallint, $6::smallint, $7::smallint)");
+	for (unsigned int i = 1; i < rows; ++i)
+		values.push_back(fmt::format("(${}, ${}, ${}, ${}, ${}, ${}, ${})",
+				7*i+1, 7*i+2, 7*i+3, 7*i+4, 7*i+5, 7*i+6, 7*i+7));
+	return "insert into connect_edges (input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation) values\n" +
+			join(values, ",\n  ") + ";";
+}
+
 std::string build_insert_simple_edges_query(unsigned int rows, std::string_view table_name, std::string_view column_name_list) {
 	assert(rows >= 1);
 	vector<std::string> values;
@@ -1063,6 +1086,35 @@ std::string build_insert_completion_query(unsigned int rows, std::string_view ta
 		values.push_back(fmt::format("(int8range(${}, ${}))", 2*i + 1, 2*i + 2));
 	return fmt::format("insert into {} (r) values\n", table_name) +
 			join(values, ",\n  ") + ";";
+}
+
+std::string build_insert_combine_completion_query(std::size_t lefts, std::size_t rights, unsigned int precision) {
+	//We use the same precision for all inserts in a batch, so we inline it into
+	//the query.
+	assert(lefts >= 1);
+	assert(rights >= 1);
+	vector<std::string> values;
+	values.reserve(std::max(lefts, rights));
+	unsigned int arg = 1;
+
+	values.push_back(fmt::format("(${}::bigint)", arg++));
+	for (unsigned int i = 1; i < lefts; ++i)
+		values.push_back(fmt::format("(${})", arg++));
+	std::string left_values = join(values, ", ");
+
+	values.clear();
+	values.push_back(fmt::format("(${}::bigint)", arg++));
+	for (unsigned int i = 1; i < rights; ++i)
+		values.push_back(fmt::format("(${})", arg++));
+	std::string right_values = join(values, ", ");
+
+	return "with lefts (input1) as values (\n  " +
+			left_values +
+			"\n), rights (input2) as values (\n  " +
+			right_values +
+			"\ninsert into completed_combines (input1, input2, precision)\n" +
+			fmt::format("select lefts.input1, rights.input2, {}::smallint from lefts cross join rights\n", precision) +
+			fmt::format("on conflict (input1, input2) do update set precision = {};", precision);
 }
 
 struct retry_failed_exception : public std::exception {
@@ -1300,6 +1352,109 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint
 	return ranges;
 }
 
+vector<std::uint64_t> do_connect_db(vector<std::uint64_t> input_gids) {
+	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
+
+	ConnectCommandOutput outputs = do_connect(std::move(inputs));
+
+	const unsigned int batch_size = 200;
+	if (outputs.rows.size() >= batch_size)
+		conn.prepare("insert_connect_edge_batch", build_insert_connect_edges_query(200));
+
+	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
+		transaction trans(conn);
+
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+
+		std::size_t edge_index = 0;
+		while (outputs.prov.size() - edge_index >= batch_size) {
+			pqxx::prepare::invocation inv = trans.prepared("insert_connect_edge_batch");
+			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
+				const ConnectProvenance& p = outputs.prov[edge_index];
+				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+		if (edge_index < outputs.prov.size()) {
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(
+					build_insert_connect_edges_query(outputs.prov.size() - edge_index));
+			for (; edge_index < outputs.prov.size(); ++edge_index) {
+				const ConnectProvenance& p = outputs.prov[edge_index];
+				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+
+		std::sort(input_gids.begin(), input_gids.end());
+		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_connects");
+
+		return std::move(selsert_result.novel_global_ids);
+	});
+	return novel_gadgets;
+}
+
+vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
+	vector<std::uint64_t> input_gids;
+	input_gids.reserve(left_gids.size() + right_gids.size());
+	input_gids.insert(input_gids.end(), left_gids.begin(), left_gids.end());
+	input_gids.insert(input_gids.end(), right_gids.begin(), right_gids.end());
+	std::sort(input_gids.begin(), input_gids.end());
+	input_gids.erase(std::unique(input_gids.begin(), input_gids.end()), input_gids.end());
+
+	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+
+	CombineCommandInput input;
+	//TODO: do_combine immediately builds a map from this vector; maybe we could build it directly
+	input.inputs = select_gadget_id_to_data(conn, input_gids);
+	//can't move these because we use them for completion logging
+	input.lefts = left_gids;
+	input.rights = right_gids;
+	input.precision = precision;
+	CombineCommandOutput outputs = do_combine(std::move(input));
+
+	const unsigned int batch_size = 200;
+	if (outputs.rows.size() >= batch_size)
+		conn.prepare("insert_combine_edge_batch", build_insert_combine_edges_query(200));
+
+	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
+		transaction trans(conn);
+
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+
+		std::size_t edge_index = 0;
+		while (outputs.prov.size() - edge_index >= batch_size) {
+			pqxx::prepare::invocation inv = trans.prepared("insert_combine_edge_batch");
+			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
+				const CombineProvenance& p = outputs.prov[edge_index];
+				inv(p.input1)(p.input2)(local_to_global[p.output1])
+						((unsigned short)p.splice)((unsigned short)p.rotation)
+						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+		if (edge_index < outputs.prov.size()) {
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(
+					build_insert_combine_edges_query(outputs.prov.size() - edge_index));
+			for (; edge_index < outputs.prov.size(); ++edge_index) {
+				const CombineProvenance& p = outputs.prov[edge_index];
+				inv(p.input1)(p.input2)(local_to_global[p.output1])
+						((unsigned short)p.splice)((unsigned short)p.rotation)
+						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+
+		trans.exec_params(build_insert_combine_completion_query(left_gids.size(), right_gids.size(), precision),
+				pqxx::prepare::make_dynamic_params(left_gids), pqxx::prepare::make_dynamic_params(right_gids));
+
+		return std::move(selsert_result.novel_global_ids);
+	});
+	return novel_gadgets;
+}
+
 vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 	//TODO: should allow command-line args, build this string, and store it globally
 	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
@@ -1319,8 +1474,6 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
 
-		//TODO: remember to sort for mirror (thus need to remap earlier)
-		//don't need to dedup because on conflict do nothing
 		std::size_t edge_index = 0;
 		while (outputs.prov.size() - edge_index >= 200) {
 			pqxx::prepare::invocation inv = trans.prepared("insert_close_edge_200");
@@ -1344,6 +1497,60 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 		input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
 		std::sort(input_gids.begin(), input_gids.end());
 		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_closes");
+
+		trans.commit();
+		return std::move(novel_global_ids);
+	}, 10);
+
+	return novel_gadgets;
+}
+
+vector<std::uint64_t> do_mirror_db(vector<std::uint64_t> input_gids) {
+	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
+
+	SimpleOutput outputs = do_mirror(std::move(inputs));
+
+	const unsigned int batch_size = 200;
+	if (outputs.prov.size() >= batch_size)
+		conn.prepare("insert_mirror_edge_batch", build_insert_mirror_edges_query(batch_size));
+
+	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
+		transaction trans(conn);
+
+		//could be structured bindings
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
+
+		//We have to sort the edge's vertices after remapping, but we don't need
+		//to deduplicate due "on conflict do nothing".
+		std::size_t edge_index = 0;
+		while (outputs.prov.size() - edge_index >= batch_size) {
+			pqxx::prepare::invocation inv = trans.prepared("insert_mirror_edge_batch");
+			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
+				const SimpleProvenance& p = outputs.prov[edge_index];
+				std::uint64_t output = local_to_global[p.output1];
+				inv(std::min(p.input1, output))(std::max(p.input1, output))((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+		if (edge_index < outputs.prov.size()) {
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(
+					build_insert_mirror_edges_query(outputs.prov.size() - edge_index));
+			for (; edge_index < outputs.prov.size(); ++edge_index) {
+				const SimpleProvenance& p = outputs.prov[edge_index];
+				std::uint64_t output = local_to_global[p.output1];
+				inv(std::min(p.input1, output))(std::max(p.input1, output))((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+
+		//Mirror is undirected, so we've also finished for any new gadgets.
+		input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
+		std::sort(input_gids.begin(), input_gids.end());
+		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_mirrors");
 
 		trans.commit();
 		return std::move(novel_global_ids);
@@ -1386,12 +1593,16 @@ msgpack::object_handle handler_adapter(const msgpack::object& arg_array) {
 using handler_ptr = msgpack::object_handle(*)(const msgpack::object&);
 const std::pair<string_view, handler_ptr> handlers[] = {
 	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
+
 	{"connect"sv, &handler_adapter<do_connect>},
 	{"combine"sv, &handler_adapter<do_combine>},
 	{"close"sv, &handler_adapter<do_close>},
 	{"mirror"sv, &handler_adapter<do_mirror>},
 
+	{"connect-db"sv, &handler_adapter<do_connect_db>},
+	{"combine-db"sv, &handler_adapter<do_combine_db>},
 	{"close-db"sv, &handler_adapter<do_close_db>},
+	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
 };
 
 msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
