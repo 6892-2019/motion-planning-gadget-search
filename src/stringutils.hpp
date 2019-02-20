@@ -52,6 +52,7 @@ T from_string(std::string_view view);
 #define FROM_STRING_CASE(TYPE,SHORTHAND) extern template TYPE from_string(std::string_view view); TYPE SHORTHAND(std::string_view view);
 		FROM_STRING_CASE(int,to_int)
 		FROM_STRING_CASE(unsigned int,to_uint)
+		FROM_STRING_CASE(std::uint64_t, to_uint64)
 #undef FROM_STRING_CASE
 
 

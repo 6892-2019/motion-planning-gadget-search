@@ -21,6 +21,10 @@ void writeAllLines(std::string filename, const std::vector<std::string>& lines) 
 
 std::vector<std::string> processFilenameArgs(const char** first, const char** last) {
 	vector<string> queue(first, last);
+	return processFilenameArgs(std::move(queue));
+}
+
+std::vector<std::string> processFilenameArgs(std::vector<std::string> queue) {
 	std::reverse(queue.begin(), queue.end());
 	vector<string> result;
 	while (!queue.empty()) {

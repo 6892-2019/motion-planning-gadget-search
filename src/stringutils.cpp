@@ -119,6 +119,7 @@ T from_string(std::string_view view) {
 	}
 		FROM_STRING_CASE(int,to_int)
 		FROM_STRING_CASE(unsigned int,to_uint)
+		FROM_STRING_CASE(std::uint64_t, to_uint64)
 #undef FROM_STRING_CASE
 
 StringBuilder& operator<<(StringBuilder& out, std::string_view view) {
