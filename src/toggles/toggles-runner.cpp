@@ -2,6 +2,7 @@
 #include "automaton.hpp"
 #include "canonicalize.hpp"
 #include "ops.hpp"
+#include "database.hpp"
 #include "stringutils.hpp"
 #include "hopscotch/hopscotch_set.h"
 #include "hopscotch/hopscotch_map.h"
@@ -20,9 +21,6 @@ using std::vector;
 using std::unique_ptr;
 using std::string_view;
 using namespace std::literals::string_view_literals;
-
-using transaction = pqxx::transaction<pqxx::serializable>;
-using ro_transaction = pqxx::transaction<pqxx::serializable, pqxx::read_only>;
 
 template<typename T>
 void debug_scream([[maybe_unused]] T& t) {
@@ -1115,96 +1113,6 @@ std::string build_insert_combine_completion_query(std::size_t lefts, std::size_t
 			"\ninsert into completed_combines (input1, input2, precision)\n" +
 			fmt::format("select lefts.input1, rights.input2, {}::smallint from lefts cross join rights\n", precision) +
 			fmt::format("on conflict (input1, input2) do update set precision = {};", precision);
-}
-
-struct retry_failed_exception : public std::exception {
-	retry_failed_exception(std::string&& msg, vector<std::exception_ptr>&& v) :
-			std::exception(), message(std::move(msg)), causes(std::move(v)) {}
-	//Technically we shouldn't use string or vector because they might throw
-	//when copied, and std::exceptions shouldn't.
-	std::string message;
-	std::vector<std::exception_ptr> causes;
-	const char* what() const noexcept override {
-		return message.c_str();
-	}
-};
-
-void retry_db_operation0(void(*delegate)(void*), void* context, unsigned int attempts = 10, std::string_view identifier = "<unnamed>"sv) {
-	assert(attempts);
-	vector<std::exception_ptr> suppressed;
-	//Ideally we'd wait to format these messages, but std::exception_ptr erases
-	//the exception type (in fact, we can't even dereference it).
-	vector<std::string> messages;
-
-	auto record_message = [&](unsigned int i, const char* type, const char* what) {
-		messages.push_back(fmt::format("  attempt {} got {}: {}", i, type, what));
-	};
-	auto record_stderr = [&](unsigned int i, const char* type, const char* what) {
-		fmt::print(stderr, "attempt {} of {} at {} got {}: {}\n",
-				i, attempts, identifier, type, what);
-	};
-
-	for (unsigned int i = 0; i < attempts; ++i) {
-		try {
-			(*delegate)(context);
-		} catch (const pqxx::serialization_failure& e) {
-			record_message(i, "serialization_failure", e.what());
-			record_stderr(i, "serialization_failure", e.what());
-			suppressed.push_back(std::current_exception());
-		} catch (const pqxx::deadlock_detected& e) {
-			record_message(i, "deadlock_detected", e.what());
-			record_stderr(i, "deadlock_detected", e.what());
-			suppressed.push_back(std::current_exception());
-		} catch (const pqxx::broken_connection& e) {
-			//It seems a bit odd to retry this, but pqxx::perform does, and if
-			//the transaction rolled back, it's safe to try again.
-			record_message(i, "broken_connection", e.what());
-			record_stderr(i, "broken_connection", e.what());
-			suppressed.push_back(std::current_exception());
-		} catch (const std::exception& e) {
-			//All non-whitelisted errors lead to termination, but we also tack
-			//on information from any suppressed exceptions from previous attempts.
-			record_message(i, typeid(e).name(), e.what());
-			record_stderr(i, "broken_connection", e.what());
-			suppressed.push_back(std::current_exception());
-			break; //common code path with attempts-exhausted
-		} catch (...) {
-			record_message(i, "[unknown exception]", "(what not available)");
-			record_stderr(i, "[unknown exception]", "(what not available)");
-			suppressed.push_back(std::current_exception());
-			break; //common code path with attempts-exhausted
-		}
-	}
-
-	if (suppressed.size() == 1) //if we failed immediately
-		std::rethrow_exception(suppressed.front());
-	std::string message = fmt::format("{} failed after {} of {} attempts:\n{}",
-			identifier, suppressed.size(), attempts,
-			join(messages, "\n"));
-	//I think std::nested_exception could be used to preserve the fatal
-	//exception's type if that was important.
-	throw retry_failed_exception(std::move(message), std::move(suppressed));
-}
-
-/**
- * Retries a database operation if transient errors occur (such as serialization
- * failures).
- *
- * pqxx::perform will retry things like a prepared statement getting the wrong
- * number of parameters, which is clearly a logic error, so we need our own
- * retry loop.
- */
-template<class Callback>
-auto retry_db_operation(Callback&& callback, unsigned int attempts = 10, std::string_view identifier = "<unnamed>"sv) {
-	using context_pair = pair<Callback*, std::optional<decltype(callback())>>;
-	context_pair context;
-	context.first = &callback;
-	auto delegate = [](void* context) -> void {
-		context_pair* ctx = reinterpret_cast<context_pair*>(context);
-		ctx->second = (*ctx->first)();
-	};
-	retry_db_operation0(+delegate, &context, attempts, identifier);
-	return std::move(*context.second);
 }
 
 vector<pair<std::uint64_t, vector<std::byte>>> select_gadget_id_to_data(pqxx::connection& conn, const vector<std::uint64_t>& gids) {
