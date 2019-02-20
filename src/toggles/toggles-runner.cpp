@@ -1001,7 +1001,7 @@ std::string build_select_gadget_id_to_data_immediate(const std::vector<std::uint
 	return "select id, data from gadgets where id in ("+in_clause_list+")";
 }
 
-std::string build_select_gadget_data_to_id(unsigned int rows) {
+std::string build_select_gadget_data_to_id(std::size_t rows) {
 	assert(rows >= 1);
 	vector<std::string> values;
 	values.reserve(rows);
@@ -1014,7 +1014,7 @@ std::string build_select_gadget_data_to_id(unsigned int rows) {
 			"select input_rows.n, gadgets.id from gadgets join input_rows using (data);";
 }
 
-std::string build_insert_gadgets_query(unsigned int rows) {
+std::string build_insert_gadgets_query(std::size_t rows) {
 	assert(rows >= 1);
 	vector<std::string> values;
 	values.reserve(rows);
@@ -1033,7 +1033,7 @@ std::string build_insert_gadgets_query(unsigned int rows) {
 			"select input_rows.n, ins.id from input_rows join ins using (data);";
 }
 
-std::string build_insert_connect_edges_query(unsigned int rows) {
+std::string build_insert_connect_edges_query(std::size_t rows) {
 	assert(rows >= 1);
 	vector<std::string> values;
 	values.reserve(rows);
@@ -1044,7 +1044,7 @@ std::string build_insert_connect_edges_query(unsigned int rows) {
 			join(values, ",\n  ") + ";";
 }
 
-std::string build_insert_combine_edges_query(unsigned int rows) {
+std::string build_insert_combine_edges_query(std::size_t rows) {
 	assert(rows >= 1);
 	vector<std::string> values;
 	values.reserve(rows);
@@ -1056,7 +1056,7 @@ std::string build_insert_combine_edges_query(unsigned int rows) {
 			join(values, ",\n  ") + ";";
 }
 
-std::string build_insert_simple_edges_query(unsigned int rows, std::string_view table_name, std::string_view column_name_list) {
+std::string build_insert_simple_edges_query(std::size_t rows, std::string_view table_name, std::string_view column_name_list) {
 	assert(rows >= 1);
 	vector<std::string> values;
 	values.reserve(rows);
@@ -1068,14 +1068,14 @@ std::string build_insert_simple_edges_query(unsigned int rows, std::string_view 
 			"\n on conflict do nothing;";
 }
 
-std::string build_insert_close_edges_query(unsigned int rows) {
+std::string build_insert_close_edges_query(std::size_t rows) {
 	return build_insert_simple_edges_query(rows, "close_edges", "input1, output1, canonicalize_rotation");
 }
-std::string build_insert_mirror_edges_query(unsigned int rows) {
+std::string build_insert_mirror_edges_query(std::size_t rows) {
 	return build_insert_simple_edges_query(rows, "mirror_edges", "a, b, canonicalize_rotation");
 }
 
-std::string build_insert_completion_query(unsigned int rows, std::string_view table_name) {
+std::string build_insert_completion_query(std::size_t rows, std::string_view table_name) {
 	assert(rows >= 1);
 	vector<std::string> values;
 	values.reserve(rows);
