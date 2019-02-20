@@ -1129,16 +1129,7 @@ struct retry_failed_exception : public std::exception {
 	}
 };
 
-/**
- * Retries a database operation if transient errors occur (such as serialization
- * failures).
- *
- * pqxx::perform will retry things like a prepared statement getting the wrong
- * number of parameters, which is clearly a logic error, so we need our own
- * retry loop.
- */
-template<class Callback>
-auto retry_db_operation(Callback&& callback, unsigned int attempts = 10, std::string_view identifier = "<unnamed>"sv) {
+void retry_db_operation0(void(*delegate)(void*), void* context, unsigned int attempts = 10, std::string_view identifier = "<unnamed>"sv) {
 	assert(attempts);
 	vector<std::exception_ptr> suppressed;
 	//Ideally we'd wait to format these messages, but std::exception_ptr erases
@@ -1155,7 +1146,7 @@ auto retry_db_operation(Callback&& callback, unsigned int attempts = 10, std::st
 
 	for (unsigned int i = 0; i < attempts; ++i) {
 		try {
-			return callback();
+			(*delegate)(context);
 		} catch (const pqxx::serialization_failure& e) {
 			record_message(i, "serialization_failure", e.what());
 			record_stderr(i, "serialization_failure", e.what());
@@ -1193,6 +1184,27 @@ auto retry_db_operation(Callback&& callback, unsigned int attempts = 10, std::st
 	//I think std::nested_exception could be used to preserve the fatal
 	//exception's type if that was important.
 	throw retry_failed_exception(std::move(message), std::move(suppressed));
+}
+
+/**
+ * Retries a database operation if transient errors occur (such as serialization
+ * failures).
+ *
+ * pqxx::perform will retry things like a prepared statement getting the wrong
+ * number of parameters, which is clearly a logic error, so we need our own
+ * retry loop.
+ */
+template<class Callback>
+auto retry_db_operation(Callback&& callback, unsigned int attempts = 10, std::string_view identifier = "<unnamed>"sv) {
+	using context_pair = pair<Callback*, std::optional<decltype(callback())>>;
+	context_pair context;
+	context.first = &callback;
+	auto delegate = [](void* context) -> void {
+		context_pair* ctx = reinterpret_cast<context_pair*>(context);
+		ctx->second = (*ctx->first)();
+	};
+	retry_db_operation0(+delegate, &context, attempts, identifier);
+	return std::move(*context.second);
 }
 
 vector<pair<std::uint64_t, vector<std::byte>>> select_gadget_id_to_data(pqxx::connection& conn, const vector<std::uint64_t>& gids) {
