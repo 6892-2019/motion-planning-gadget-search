@@ -4,6 +4,11 @@
 
 using std::vector;
 
+std::string format_connect_string(std::string_view user, std::string_view pass,
+		std::string_view address, std::string_view port, std::string_view database) {
+	return fmt::format("postgresql://{}:{}@{}:{}/{}", user, pass, address, port, database);
+}
+
 void retry_db_operation0(void(*delegate)(void*), void* context, unsigned int attempts, std::string_view identifier) {
 	assert(attempts);
 	vector<std::exception_ptr> suppressed;

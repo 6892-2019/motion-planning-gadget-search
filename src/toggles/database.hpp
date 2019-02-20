@@ -13,6 +13,9 @@
 using transaction = pqxx::transaction<pqxx::serializable>;
 using ro_transaction = pqxx::transaction<pqxx::serializable, pqxx::read_only>;
 
+std::string format_connect_string(std::string_view user, std::string_view pass,
+		std::string_view address, std::string_view port, std::string_view database);
+
 struct retry_failed_exception : public std::exception {
 	retry_failed_exception(std::string&& msg, std::vector<std::exception_ptr>&& v) :
 			std::exception(), message(std::move(msg)), causes(std::move(v)) {}

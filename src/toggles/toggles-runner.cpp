@@ -1272,8 +1272,10 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint
 	return ranges;
 }
 
+static std::string g_database_connect_string;
+
 vector<std::uint64_t> do_connect_db(vector<std::uint64_t> input_gids) {
-	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+	pqxx::connection conn(g_database_connect_string);
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
 
 	ConnectCommandOutput outputs = do_connect(std::move(inputs));
@@ -1323,7 +1325,7 @@ vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std:
 	std::sort(input_gids.begin(), input_gids.end());
 	input_gids.erase(std::unique(input_gids.begin(), input_gids.end()), input_gids.end());
 
-	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+	pqxx::connection conn(g_database_connect_string);
 
 	CombineCommandInput input;
 	//TODO: do_combine immediately builds a map from this vector; maybe we could build it directly
@@ -1376,8 +1378,7 @@ vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std:
 }
 
 vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
-	//TODO: should allow command-line args, build this string, and store it globally
-	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+	pqxx::connection conn(g_database_connect_string);
 
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
 
@@ -1426,7 +1427,7 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 }
 
 vector<std::uint64_t> do_mirror_db(vector<std::uint64_t> input_gids) {
-	pqxx::connection conn("postgresql://jbosboom@127.0.0.1:5432/togglesearch");
+	pqxx::connection conn(g_database_connect_string);
 
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
 
@@ -1640,6 +1641,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 //		else if (argv[a] == "--output-format=msgpack"sv)
 //			output_format = MessageFormat::msgpack;
 //	}
+
+	g_database_connect_string = format_connect_string("jbosboom", "", "127.0.0.1", "5432", "togglesearch");
 
 	msgpack::sbuffer response = dispatch(read_input());
 	write_output(response.data(), response.size());
