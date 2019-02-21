@@ -86,11 +86,16 @@ std::string build_ids_from_specs_immediate(const vector<uint64_t>& gids, const v
 	rstr.reserve(ranges.size());
 	for (auto r : ranges)
 		rstr.push_back(fmt::format("int8range({}, {})", r.first, r.second));
+	//'in ()' is a syntax error, so use known-invalid ids.
+	if (ids.empty())
+		ids.push_back("-1");
+	if (rstr.empty())
+		rstr.push_back("int8range(-2, -1)");
 	return "select id from gadgets where id in (" + join(ids, ", ") + ") or id <@ any(array[" + join(rstr, ", ") + "]);";
 }
 
-void collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs) {
-	retry_db_operation([&]() {
+vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs) {
+	return retry_db_operation([&]() {
 		ro_transaction trans(conn);
 
 		if (!gs.ids.empty()) {
@@ -104,7 +109,6 @@ void collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs) {
 			}
 		}
 		if (!gs.ranges.empty()) {
-			fmt::print("{}\n", build_missing_gadget_id_ranges_query_immediate(gs.ranges));
 			pqxx::result result = trans.exec(build_missing_gadget_id_ranges_query_immediate(gs.ranges));
 			if (result.size()) {
 				vector<std::string> missing;
@@ -126,8 +130,22 @@ void collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs) {
 			}
 		}
 
+		vector<uint64_t> ids = gs.ids;
+		if (!gs.names.empty()) {
+			pqxx::result result = trans.exec_params(build_name_to_ids_query(gs.names.size()),
+					pqxx::prepare::make_dynamic_params(gs.names));
+			for (const auto& r : result)
+				ids.push_back(r[0].as<uint64_t>());
+		}
+		vector<pair<uint64_t, uint64_t>> ranges = gs.ranges;
+		pqxx::result result = trans.exec(build_ids_from_specs_immediate(ids, gs.ranges));
+		ids.clear();
+		ids.reserve(result.size());
+		for (const auto& r : result)
+			ids.push_back(r[0].as<uint64_t>());
+
 		trans.commit();
-		return 0;
+		return ids;
 	}, 10, "collect_initial_gadget_set");
 }
 
