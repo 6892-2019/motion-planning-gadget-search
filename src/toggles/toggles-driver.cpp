@@ -38,6 +38,99 @@ GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs) {
 	return g;
 }
 
+std::string build_missing_gadget_ids_query_immediate(const vector<uint64_t>& gids) {
+	vector<std::string> things;
+	things.reserve(gids.size());
+	for (auto i : gids)
+		things.push_back(fmt::format("({})", i));
+	return "select * from (values " +
+			join(things, ", ") +
+			") as maybe(id) where not exists (select 1 from gadgets where gadgets.id = maybe.id limit 1)";
+}
+
+std::string build_missing_gadget_id_ranges_query_immediate(const vector<pair<uint64_t, uint64_t>>& ranges) {
+	vector<std::string> things;
+	things.reserve(ranges.size());
+	for (auto r : ranges)
+		things.push_back(fmt::format("(int8range({}, {}))", r.first, r.second));
+	return "select * from (values " +
+			join(things, ", ") +
+			") as maybe(r) where not exists (select 1 from gadgets where gadgets.id <@ maybe.r limit 1)";
+}
+
+std::string build_missing_names_query(std::size_t count) {
+	//The other two missing queries are immediates, but we want parameterized
+	//here to tolerate ' in gadget names.
+	vector<std::string> things;
+	things.reserve(count);
+	for (std::size_t i = 1; i <= count; ++i)
+		things.push_back(fmt::format("(${}::text)", i));
+	return "select * from (values " +
+			join(things, ", ") +
+			") as maybe(name) where not exists (select 1 from names where names.name = maybe.name limit 1)";
+}
+
+std::string build_name_to_ids_query(std::size_t count) {
+	vector<std::string> things;
+	things.reserve(count);
+	for (std::size_t i = 1; i <= count; ++i)
+		things.push_back(fmt::format("${}::text", i));
+	return "select gadget_id from names where name in (" + join(things, ", ") + ");";
+}
+
+std::string build_ids_from_specs_immediate(const vector<uint64_t>& gids, const vector<pair<uint64_t, uint64_t>>& ranges) {
+	vector<std::string> ids, rstr;
+	ids.reserve(gids.size());
+	for (auto i : gids)
+		ids.push_back(fmt::format("{}", i));
+	rstr.reserve(ranges.size());
+	for (auto r : ranges)
+		rstr.push_back(fmt::format("int8range({}, {})", r.first, r.second));
+	return "select id from gadgets where id in (" + join(ids, ", ") + ") or id <@ any(array[" + join(rstr, ", ") + "]);";
+}
+
+void collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs) {
+	retry_db_operation([&]() {
+		ro_transaction trans(conn);
+
+		if (!gs.ids.empty()) {
+			pqxx::result result = trans.exec(build_missing_gadget_ids_query_immediate(gs.ids));
+			if (result.size()) {
+				vector<std::string> missing;
+				missing.reserve(result.size());
+				for (const auto& r : result)
+					missing.push_back(fmt::format("{}", r[0].as<uint64_t>()));
+				throw std::runtime_error(fmt::format("ids not found in database: {}", join(missing, ", ")));
+			}
+		}
+		if (!gs.ranges.empty()) {
+			fmt::print("{}\n", build_missing_gadget_id_ranges_query_immediate(gs.ranges));
+			pqxx::result result = trans.exec(build_missing_gadget_id_ranges_query_immediate(gs.ranges));
+			if (result.size()) {
+				vector<std::string> missing;
+				missing.reserve(result.size());
+				for (const auto& r : result)
+					missing.push_back(fmt::format("{}", r[0].c_str()));
+				throw std::runtime_error(fmt::format("ranges did not contain any gadgets: {}", join(missing, ", ")));
+			}
+		}
+		if (!gs.names.empty()) {
+			pqxx::result result = trans.exec_params(build_missing_names_query(gs.names.size()),
+					pqxx::prepare::make_dynamic_params(gs.names));
+			if (result.size()) {
+				vector<std::string> missing;
+				missing.reserve(result.size());
+				for (const auto& r : result)
+					missing.push_back(r[0].c_str());
+				throw std::runtime_error(fmt::format("unknown gadget names: {}", join(missing, ", ")));
+			}
+		}
+
+		trans.commit();
+		return 0;
+	}, 10, "collect_initial_gadget_set");
+}
+
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
@@ -79,6 +172,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	GadgetSet spec = parse_gid_specs(gid_specs);
 
 	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
+	pqxx::connection conn(connect_str);
+	collect_initial_gadget_set(conn, spec);
 
 	return 0;
 }
