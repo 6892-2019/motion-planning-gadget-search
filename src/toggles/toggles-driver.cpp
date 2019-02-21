@@ -31,6 +31,7 @@ GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs) {
 				++upper;
 			if (!(lower < upper))
 				throw std::runtime_error(fmt::format("bad gid range: {}", v));
+			g.ranges.emplace_back(lower, upper);
 		} else
 			g.names.emplace_back(v);
 	}
