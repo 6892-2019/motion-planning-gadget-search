@@ -26,7 +26,7 @@ void retry_db_operation0(void(*delegate)(void*), void* context, unsigned int att
 
 	for (unsigned int i = 0; i < attempts; ++i) {
 		try {
-			(*delegate)(context);
+			return (*delegate)(context);
 		} catch (const pqxx::serialization_failure& e) {
 			record_message(i, "serialization_failure", e.what());
 			record_stderr(i, "serialization_failure", e.what());
