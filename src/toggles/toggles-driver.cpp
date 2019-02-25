@@ -94,6 +94,44 @@ std::string build_ids_from_specs_immediate(const vector<uint64_t>& gids, const v
 	return "select id from gadgets where id in (" + join(ids, ", ") + ") or id <@ any(array[" + join(rstr, ", ") + "]);";
 }
 
+std::string build_filter_ids_range_table(std::size_t count, std::string_view table) {
+	vector<std::string> things;
+	things.reserve(count);
+	for (std::size_t i = 1; i <= count; ++i)
+		things.push_back(fmt::format("(${}::int8)", i));
+	return "select * from (values " +
+			join(things, ", ") +
+			fmt::format(") as maybe(id) where not exists (select 1 from {} where maybe.id <@ {}.r)", table, table);
+}
+
+std::string build_filter_ids_needing_mirror(std::size_t count) {
+	return build_filter_ids_range_table(count, "completed_mirrors");
+}
+std::string build_filter_ids_needing_close(std::size_t count) {
+	return build_filter_ids_range_table(count, "completed_closes");
+}
+std::string build_filter_ids_needing_connect(std::size_t count) {
+	//TODO: probably also want to filter out any gadgets too small to connect
+	return build_filter_ids_range_table(count, "completed_connects");
+}
+
+
+
+const std::pair<std::size_t, std::string_view> filter_mirrors_prepared[] = {
+	{50000, "filter_mirrors_50000"sv},
+	{25000, "filter_mirrors_25000"sv},
+	{10000, "filter_mirrors_10000"sv},
+	{5000, "filter_mirrors_5000"sv},
+	{1000, "filter_mirrors_1000"sv},
+	{500, "filter_mirrors_500"sv},
+};
+
+void prepare_statements(pqxx::connection& conn) {
+	for (const auto& p : filter_mirrors_prepared)
+		conn.prepare(std::string(p.second), build_filter_ids_needing_mirror(p.first));
+}
+
+
 vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs) {
 	return retry_db_operation([&]() {
 		ro_transaction trans(conn);
@@ -149,6 +187,31 @@ vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const Gadget
 	}, 10, "collect_initial_gadget_set");
 }
 
+vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+	return retry_db_operation([&]() {
+		ro_transaction trans(conn);
+		vector<uint64_t> needs;
+		std::size_t cur = 0;
+		for (const auto& p : filter_mirrors_prepared) {
+			while (ids.size() - cur >= p.first) {
+				pqxx::result rows = trans.exec_prepared(std::string(p.second),
+						pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.begin()+cur+p.first));
+				for (const auto& r : rows)
+					needs.push_back(r[0].as<uint64_t>());
+				cur += p.first;
+			}
+		}
+		if (ids.size() - cur > 0) {
+			pqxx::result rows = trans.exec_params(build_filter_ids_needing_mirror(ids.size() - cur),
+					pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.end()));
+			for (const auto& r : rows)
+				needs.push_back(r[0].as<uint64_t>());
+		}
+		trans.commit();
+		return needs;
+	}, 10, "filter_ids_needing_mirror");
+}
+
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
@@ -191,7 +254,12 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 
 	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
 	pqxx::connection conn(connect_str);
-	collect_initial_gadget_set(conn, spec);
+	prepare_statements(conn);
+	vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
+	vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, initial);
+	for (auto i : needs_mirror)
+		fmt::print("{} ", i);
+	fmt::print("\n");
 
 	return 0;
 }
