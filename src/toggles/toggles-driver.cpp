@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "database.hpp"
+#include "rpc.hpp"
 #include "stringutils.hpp"
 #include "ioutils.hpp"
 #include <regex>

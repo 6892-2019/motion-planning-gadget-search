@@ -3,6 +3,7 @@
 #include "canonicalize.hpp"
 #include "ops.hpp"
 #include "database.hpp"
+#include "rpc.hpp"
 #include "stringutils.hpp"
 #include "hopscotch/hopscotch_set.h"
 #include "hopscotch/hopscotch_map.h"
@@ -1482,36 +1483,6 @@ vector<std::uint64_t> do_mirror_db(vector<std::uint64_t> input_gids) {
 
 
 
-template<typename T>
-struct callable_traits : callable_traits<decltype(&T::operator())> {};
-
-template<typename C, typename R, typename... Args>
-struct callable_traits<R(C::*)(Args...)> : callable_traits<R(*)(Args...)> {};
-
-template<typename C, typename R, typename... Args>
-struct callable_traits<R(C::*)(Args...) const> : callable_traits<R(*)(Args...)> {};
-
-template<typename R, typename... Args>
-struct callable_traits<R(*)(Args...)> {
-    using result_type = R;
-    using arity = std::integral_constant<std::size_t, sizeof...(Args)>;
-    using args_type = std::tuple<typename std::decay<Args>::type...>;
-	template<std::size_t idx>
-	using arg = typename std::tuple_element<idx, args_type>::type;
-};
-
-struct bad_arity {size_t expected, actual;};
-template<auto f>
-msgpack::object_handle handler_adapter(const msgpack::object& arg_array) {
-	using args_type = typename callable_traits<decltype(f)>::args_type;
-	if (arg_array.via.array.size != std::tuple_size<args_type>::value)
-		throw bad_arity{std::tuple_size<args_type>::value, arg_array.via.array.size};
-	auto zone = std::make_unique<msgpack::zone>();
-	msgpack::object result(std::apply(f, arg_array.as<args_type>()), *zone);
-	return {std::move(result), std::move(zone)};
-}
-
-using handler_ptr = msgpack::object_handle(*)(const msgpack::object&);
 const std::pair<string_view, handler_ptr> handlers[] = {
 	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 
@@ -1526,56 +1497,7 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
 };
 
-msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
-	msgpack::sbuffer buffer;
-	std::tuple<uint8_t, uint32_t, msgpack::type::nil_t, msgpack::object>
-			response(1, seq_no, msgpack::type::nil_t{}, result);
-	msgpack::pack(buffer, response);
-	return buffer;
-}
 
-msgpack::sbuffer pack_error(uint32_t seq_no, const std::string& error) {
-	msgpack::sbuffer buffer;
-	std::tuple<uint8_t, uint32_t, std::string, msgpack::type::nil_t>
-			response(1, seq_no, error, msgpack::type::nil_t{});
-	msgpack::pack(buffer, response);
-	return buffer;
-}
-
-msgpack::sbuffer dispatch(msgpack::object_handle hcmd) {
-	auto [msg_type, seq_no, command, arg_array] = hcmd.get().as<std::tuple<uint8_t, uint32_t, std::string, msgpack::object>>();
-	if (msg_type != 0) {
-		fmt::print(stderr, "bad msg_type {}\n", msg_type);
-		//TODO: send error response to stdout?  but this is a clearly-broken case
-		std::exit(1);
-	}
-	if (arg_array.type != msgpack::type::ARRAY)
-		return pack_error(seq_no,
-				fmt::format("argument for command '{}' not an array, actually a {}",
-				command, arg_array.type));
-
-	handler_ptr handler = nullptr;
-	for (auto [name, h] : handlers)
-		if (command == name)
-			handler = h;
-	if (!handler)
-		return pack_error(seq_no, fmt::format("no handler for command '{}'", command));
-
-	try {
-		msgpack::object_handle result = handler(arg_array);
-		return pack_success(seq_no, result.get());
-	} catch (bad_arity& e) {
-		return pack_error(seq_no, fmt::format("bad arity for command '{}': expected {}, got {}",
-				command, e.expected, e.actual));
-	} catch (std::exception& e) {
-		return pack_error(seq_no, fmt::format("command '{}' threw an exception: {}", command, e.what()));
-	} catch (...) {
-		return pack_error(seq_no, fmt::format("command '{}' threw an unusual exception", command));
-	}
-	//We only get here if we unwind out of one of the above catch blocks.  We'll
-	//probably just throw again for the same reason, but we might as well try:
-	return pack_error(seq_no, "somehow threw exception while reporting error?");
-}
 
 vector<char> exhaust_stdin() {
 	vector<char> data;
@@ -1644,7 +1566,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 
 	g_database_connect_string = format_connect_string("jbosboom", "", "127.0.0.1", "5432", "togglesearch");
 
-	msgpack::sbuffer response = dispatch(read_input());
+	msgpack::sbuffer response = dispatch(read_input(), std::begin(handlers), std::end(handlers));
 	write_output(response.data(), response.size());
 
 	return 0;
