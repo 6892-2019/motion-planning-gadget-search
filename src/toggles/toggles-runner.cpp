@@ -1483,7 +1483,22 @@ vector<std::uint64_t> do_mirror_db(vector<std::uint64_t> input_gids) {
 
 
 
+/**
+ * @return a string containing various information about this worker
+ */
+std::string do_ping() {
+	//maybe information about the parent process (might be socat)
+	//hostname
+	//try to get information about stdin/stdout if they're sockets
+	//information about slurm environment variables (if any)
+	return "pong";
+}
+
+
+
 const std::pair<string_view, handler_ptr> handlers[] = {
+	{"ping"sv, &handler_adapter<do_ping>},
+
 	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 
 	{"connect"sv, &handler_adapter<do_connect>},
@@ -1529,12 +1544,12 @@ msgpack::object_handle read_input() {
 	return msgpack::unpack(input.data(), input.size());
 }
 
-void write_output(const char* data, size_t size) {
+void write_output(const void* data, size_t size) {
 	//TODO: optional compression based on command-line option
 	size_t index = 0;
 	while (index < size) {
 		size_t count = size - index;
-		size_t bytes_written = std::fwrite(data+index, sizeof(char), count, stdout);
+		size_t bytes_written = std::fwrite(reinterpret_cast<const char*>(data) + index, sizeof(char), count, stdout);
 		if (bytes_written != count) {
 			if (std::ferror(stdout)) {
 				auto savederrno = errno;
@@ -1566,7 +1581,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 
 	g_database_connect_string = format_connect_string("jbosboom", "", "127.0.0.1", "5432", "togglesearch");
 
-	msgpack::sbuffer response = dispatch(read_input(), std::begin(handlers), std::end(handlers));
+	simple_buffer response = dispatch(read_input(), std::begin(handlers), std::end(handlers));
 	write_output(response.data(), response.size());
 
 	return 0;

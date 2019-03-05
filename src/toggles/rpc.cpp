@@ -1,23 +1,23 @@
 #include "precompiled.hpp"
 #include "rpc.hpp"
 
-msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result) {
-	msgpack::sbuffer buffer;
+simple_buffer pack_success(uint32_t seq_no, const msgpack::object result) {
+	simple_buffer buffer;
 	std::tuple<uint8_t, uint32_t, msgpack::type::nil_t, msgpack::object>
 			response(1, seq_no, msgpack::type::nil_t{}, result);
 	msgpack::pack(buffer, response);
 	return buffer;
 }
 
-msgpack::sbuffer pack_error(uint32_t seq_no, const std::string& error) {
-	msgpack::sbuffer buffer;
+simple_buffer pack_error(uint32_t seq_no, const std::string& error) {
+	simple_buffer buffer;
 	std::tuple<uint8_t, uint32_t, std::string, msgpack::type::nil_t>
 			response(1, seq_no, error, msgpack::type::nil_t{});
 	msgpack::pack(buffer, response);
 	return buffer;
 }
 
-msgpack::sbuffer dispatch(msgpack::object_handle hcmd,
+simple_buffer dispatch(msgpack::object_handle hcmd,
 		const std::pair<std::string_view, handler_ptr>* handlers_begin,
 		const std::pair<std::string_view, handler_ptr>* handlers_end) {
 	auto [msg_type, seq_no, command, arg_array] = hcmd.get().as<std::tuple<uint8_t, uint32_t, std::string, msgpack::object>>();
@@ -54,17 +54,20 @@ msgpack::sbuffer dispatch(msgpack::object_handle hcmd,
 	return pack_error(seq_no, "somehow threw exception while reporting error?");
 }
 
-msgpack::sbuffer dispatch(const std::byte* data_begin, const std::byte* data_end,
+simple_buffer dispatch(const std::byte* data_begin, const std::byte* data_end,
 		const std::pair<std::string_view, handler_ptr>* handlers_begin,
 		const std::pair<std::string_view, handler_ptr>* handlers_end) {
 	return dispatch(data_begin, data_end - data_begin, handlers_begin, handlers_end);
 }
-msgpack::sbuffer dispatch(const std::byte* data_begin, const std::size_t data_length,
+simple_buffer dispatch(const std::byte* data_begin, const std::size_t data_length,
 		const std::pair<std::string_view, handler_ptr>* handlers_begin,
 		const std::pair<std::string_view, handler_ptr>* handlers_end) {
 	return dispatch(msgpack::unpack(reinterpret_cast<const char*>(data_begin), data_length), handlers_begin, handlers_end);
 }
 
+Response unpack_response(const simple_buffer& buf) {
+	return unpack_response(reinterpret_cast<const std::byte*>(buf.data()), buf.size());
+}
 Response unpack_response(const std::byte* data, std::size_t len) {
 	msgpack::object_handle obj = msgpack::unpack(reinterpret_cast<const char*>(data), len);
 	if (obj->type != msgpack::type::ARRAY)

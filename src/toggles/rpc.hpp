@@ -30,6 +30,64 @@ struct callable_traits<R(*)(Args...)> {
 
 
 
+//TODO: use jemalloc functions to get some extra capacity
+/**
+ * A simple owning buffer class with a size/valid-data-mark and capacity.
+ */
+class simple_buffer {
+public:
+	simple_buffer() : data_(nullptr), size_(0), capacity_(0) {}
+	simple_buffer(std::size_t initial_size) : data_(std::malloc(initial_size)), size_(0), capacity_(initial_size) {}
+	std::size_t size() const {return size_;}
+	//this method provided for after asio reads into this buffer
+	void size(std::size_t new_size) {
+		if (new_size > capacity_)
+			throw std::logic_error(fmt::format("setting overlarge size; old size {}, capacity {}, new size {}",
+					size_, capacity_, new_size));
+		size_ = new_size;
+	}
+	std::size_t capacity() const {return capacity_;}
+	void* data() {
+		return data_.get();
+	}
+	const void* data() const {
+		return data_.get();
+	}
+	void grow(std::size_t min_capacity) {
+		std::size_t a = std::max(capacity_, 4096ul);
+		while (a < min_capacity)
+			//TODO: this growth policy is too aggressive for large sizes, should back down to 1.5
+			a *= 2;
+
+		void* n = std::realloc(data_.get(), a);
+		if (!n)
+			//data_ still owns the pointer and will free it
+			throw std::bad_alloc();
+		data_.release(); //realloc already freed this pointer (if moved), don't double-free it
+		data_.reset(n);
+		capacity_ = a;
+	}
+	void clear() {
+		size_ = 0;
+	}
+	void free() {
+		size_ = capacity_ = 0;
+	}
+
+	//for msgpack
+	void write(const char* src, std::size_t len) {
+		if (capacity_ - size_ < len)
+			grow(size_ + len);
+		std::copy(src, src + len, static_cast<unsigned char*>(data()) + size_);
+		size_ += len;
+	}
+private:
+	std::unique_ptr<void, free_deleter> data_;
+	std::size_t size_, capacity_;
+};
+
+
+
 struct bad_arity {size_t expected, actual;};
 template<auto f>
 msgpack::object_handle handler_adapter(const msgpack::object& arg_array) {
@@ -49,36 +107,44 @@ using handler_ptr = msgpack::object_handle(*)(const msgpack::object&);
 //msgpack::sbuffer pack_success(uint32_t seq_no, const msgpack::object result);
 //msgpack::sbuffer pack_error(uint32_t seq_no, const std::string& error);
 
-msgpack::sbuffer dispatch(msgpack::object_handle hcmd,
+simple_buffer dispatch(msgpack::object_handle hcmd,
 		const std::pair<std::string_view, handler_ptr>* handlers_begin,
 		const std::pair<std::string_view, handler_ptr>* handlers_end);
-msgpack::sbuffer dispatch(const std::byte* data_begin, const std::byte* data_end,
+simple_buffer dispatch(const std::byte* data_begin, const std::byte* data_end,
 		const std::pair<std::string_view, handler_ptr>* handlers_begin,
 		const std::pair<std::string_view, handler_ptr>* handlers_end);
-msgpack::sbuffer dispatch(const std::byte* data_begin, const std::size_t data_length,
+simple_buffer dispatch(const std::byte* data_begin, const std::size_t data_length,
 		const std::pair<std::string_view, handler_ptr>* handlers_begin,
 		const std::pair<std::string_view, handler_ptr>* handlers_end);
 
 
 
 template<typename ...Args>
-msgpack::sbuffer pack_call(uint32_t seq_no, std::string_view command, Args&& ...args) {
-	msgpack::sbuffer buffer;
+[[nodiscard]] simple_buffer pack_call(uint32_t seq_no, std::string_view command, Args&& ...args) {
+	simple_buffer buffer;
+	pack_call(buffer, seq_no, command, std::forward<Args&&>(args)...);
+	return buffer;
+}
+template<typename ...Args>
+void pack_call(simple_buffer& buffer, uint32_t seq_no, std::string_view command, Args&& ...args) {
 	using args_type = std::tuple<Args...>;
 	std::tuple<uint8_t, uint32_t, std::string, args_type>
 			call(0, seq_no, command, args_type(std::forward<Args&&>(args)...));
 	msgpack::pack(buffer, call);
-	return buffer;
 }
 
 class Response;
 
+Response unpack_response(const simple_buffer& buf);
 Response unpack_response(const std::byte* data, std::size_t len);
 
 class Response {
 public:
 	explicit operator bool() const {
 		return error_.type == msgpack::type::NIL;
+	}
+	uint32_t seq() const {
+		return seq_no_;
 	}
 	template<class T = std::string>
 	T error_as() const {
