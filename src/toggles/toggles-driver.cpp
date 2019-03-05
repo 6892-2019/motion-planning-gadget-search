@@ -271,9 +271,16 @@ public:
 		generator_ = generator;
 		//Try to launch one task per worker.  Finish callbacks will pull further
 		//work items when the worker's current item finishes.
-		for (std::size_t i = 0; i < workers_.size() && generator->next(buffers_[i]); ++i)
-			sockets_[i].async_connect(workers_[i], [=](const boost::system::error_code& ec){on_connect(i, ec);});
+		for (std::size_t i = 0; i < workers_.size(); ++i) {
+			buffers_[i].clear();
+			if (generator->next(buffers_[i]))
+				dispatch_connect(i);
+			else
+				break;
+		}
+		ctx_.restart(); //seems safe to call this even the first time around
 		ctx_.run();
+		generator_ = nullptr;
 	}
 	void run(std::function<bool(simple_buffer&)> next, std::function<void(simple_buffer&)> process) {
 		DelegateGenerator generator(std::move(next), std::move(process));
@@ -321,13 +328,16 @@ private:
 
 			buffers_[index].clear();
 			if (generator_->next(buffers_[index]))
-				dispatch_write(index);
+				dispatch_connect(index);
 			//TODO: We might want to shrink the buffer if we're going idle.
 		} else
 			throw std::system_error(ec, fmt::format("reading from worker {} at endpoint {}:{}, transferred {}, previously transferred {}",
 					index, workers_[index].address().to_string(), workers_[index].port(), bytes_transferred, buffers_[index].size()));
 	}
 
+	void dispatch_connect(std::size_t index) {
+		sockets_[index].async_connect(workers_[index], [=](const boost::system::error_code& ec){on_connect(index, ec);});
+	}
 	void dispatch_write(std::size_t index) {
 		asio::async_write(sockets_[index], asio::const_buffer(buffers_[index].data(), buffers_[index].size()),
 				[=](const boost::system::error_code& ec, std::size_t bytes){after_write(index, ec, bytes);});
@@ -370,7 +380,7 @@ void ping_all_workers(WorkerManager& manager) {
 		void process(simple_buffer& buffer) override {
 			Response response = unpack_response(buffer);
 			if (response)
-				fmt::print("worker {}: {}", response.seq(), response.result_as<std::string>());
+				fmt::print("worker {}: {}\n", response.seq(), response.result_as<std::string>());
 			else
 				fmt::print(stderr, "worker {} ping error: {}", response.seq(), response.error_as());
 		}
