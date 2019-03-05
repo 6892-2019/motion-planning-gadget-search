@@ -129,6 +129,7 @@ T from_string(std::string_view view) {
 	TYPE SHORTHAND(std::string_view view) { \
 	return from_string<TYPE>(view); \
 	}
+		FROM_STRING_CASE(unsigned short,to_ushort)
 		FROM_STRING_CASE(int,to_int)
 		FROM_STRING_CASE(unsigned int,to_uint)
 		FROM_STRING_CASE(std::uint64_t, to_uint64)
