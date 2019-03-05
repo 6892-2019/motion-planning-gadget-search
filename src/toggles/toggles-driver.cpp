@@ -3,6 +3,7 @@
 #include "rpc.hpp"
 #include "stringutils.hpp"
 #include "ioutils.hpp"
+#define BOOST_ASIO_SEPARATE_COMPILATION
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/connect.hpp>
