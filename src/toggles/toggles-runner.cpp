@@ -1522,8 +1522,10 @@ vector<char> exhaust_stdin() {
 		size_t count = data.size() - index;
 		size_t bytes_read = std::fread(&data[index], sizeof(unsigned char), count, stdin);
 		if (bytes_read != count) {
-			if (std::feof(stdin))
+			if (std::feof(stdin)) {
+				data.resize(index + bytes_read);
 				return data;
+			}
 			if (std::ferror(stdin)) {
 				auto savederrno = errno;
 				fmt::print(stderr, "error reading from stdin: {} ({}), after reading {} before and {} last\n",
