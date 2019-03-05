@@ -388,6 +388,29 @@ void ping_all_workers(WorkerManager& manager) {
 	manager.run(&generator);
 }
 
+void do_unary_operation(WorkerManager& manager, std::string_view operation, const vector<uint64_t>& operands) {
+	std::uint32_t seqno = 0;
+	std::size_t offset = 0;
+	const std::size_t batch_size = 5000; //TODO: should scale against number of workers, be customizable
+	//TODO: figure out how to pack a range without copying (probably a custom type with a pack method?)
+	vector<uint64_t> range;
+	manager.run([&](simple_buffer& buffer) {
+		fmt::print("generating unary work\n");
+		if (!(offset < operands.size())) return false;
+		range.clear();
+		std::size_t end = std::min(offset + batch_size, operands.size());
+		range.insert(range.end(), operands.begin()+offset, operands.begin()+end);
+		pack_call(buffer, seqno, operation, range);
+		offset = end;
+		return true;
+	}, [&](simple_buffer& buffer) {
+		//We don't actually care about the returned new gadget ids because we're
+		//going to get them from the database anyway (to account for anything
+		//previously computed).
+		fmt::print("successful operation\n");
+	});
+}
+
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
@@ -435,9 +458,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	prepare_statements(conn);
 	vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
 	vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, initial);
-	for (auto i : needs_mirror)
-		fmt::print("{} ", i);
-	fmt::print("\n");
+	do_unary_operation(manager, "mirror-db", needs_mirror);
 
 	return 0;
 }
