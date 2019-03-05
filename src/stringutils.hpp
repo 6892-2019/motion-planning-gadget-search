@@ -42,6 +42,8 @@ void split_view(std::vector<std::string_view>& out, const std::string&& temp, ch
 using Parts = std::tuple<std::string, std::string, std::string>;
 Parts partition(std::string_view haystack, char delimiter);
 Parts partition(std::string_view haystack, std::string_view delimiter);
+Parts rpartition(std::string_view haystack, char delimiter);
+Parts rpartition(std::string_view haystack, std::string_view delimiter);
 
 std::string join(const std::vector<std::string_view>& inputs, std::string_view delimiter);
 std::string join(const std::vector<std::string>& inputs, std::string_view delimiter);
