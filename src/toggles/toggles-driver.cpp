@@ -125,6 +125,21 @@ std::string build_filter_ids_needing_connect(std::size_t count) {
 	return build_filter_ids_range_table(count, "completed_connects");
 }
 
+std::string build_get_mirrors_query(std::size_t count) {
+	vector<std::string> things;
+	things.reserve(count);
+	for (std::size_t i = 1; i <= count; ++i)
+		things.push_back(fmt::format("${}::int8", i));
+	std::string parameters = join(things, ", ");
+	return "select b from mirror_edges where a in (" +
+			parameters +
+			")\n" +
+			"union all\n" +
+			"select a from mirror_edges where b in (" +
+			parameters +
+			")";
+}
+
 
 
 const std::pair<std::size_t, std::string_view> filter_mirrors_prepared[] = {
@@ -135,10 +150,20 @@ const std::pair<std::size_t, std::string_view> filter_mirrors_prepared[] = {
 	{1000, "filter_mirrors_1000"sv},
 	{500, "filter_mirrors_500"sv},
 };
+const std::pair<std::size_t, std::string_view> get_mirrors_prepared[] = {
+	{50000, "get_mirrors_50000"sv},
+	{25000, "get_mirrors_25000"sv},
+	{10000, "get_mirrors_10000"sv},
+	{5000, "get_mirrors_5000"sv},
+	{1000, "get_mirrors_1000"sv},
+	{500, "get_mirrors_500"sv},
+};
 
 void prepare_statements(pqxx::connection& conn) {
 	for (const auto& p : filter_mirrors_prepared)
 		conn.prepare(std::string(p.second), build_filter_ids_needing_mirror(p.first));
+	for (const auto& p : get_mirrors_prepared)
+		conn.prepare(std::string(p.second), build_get_mirrors_query(p.first));
 }
 
 
@@ -197,29 +222,46 @@ vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const Gadget
 	}, 10, "collect_initial_gadget_set");
 }
 
+vector<uint64_t> id_to_id_db_op(pqxx::connection& conn, const std::vector<uint64_t>& ids,
+		const std::pair<std::size_t, std::string_view>* prepared_begin,
+		const std::pair<std::size_t, std::string_view>* prepared_end,
+		std::string(*query_func)(std::size_t)) {
+	ro_transaction trans(conn);
+	vector<uint64_t> result;
+	std::size_t cur = 0;
+	for (const auto& p : make_range_for_pair(prepared_begin, prepared_end)) {
+		while (ids.size() - cur >= p.first) {
+			pqxx::result rows = trans.exec_prepared(std::string(p.second),
+					pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.begin()+cur+p.first));
+			for (const auto& r : rows)
+				result.push_back(r[0].as<uint64_t>());
+			cur += p.first;
+		}
+	}
+	if (ids.size() - cur > 0) {
+		pqxx::result rows = trans.exec_params(query_func(ids.size() - cur),
+				pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.end()));
+		for (const auto& r : rows)
+			result.push_back(r[0].as<uint64_t>());
+	}
+	trans.commit();
+	return result;
+}
+
 vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
 	return retry_db_operation([&]() {
-		ro_transaction trans(conn);
-		vector<uint64_t> needs;
-		std::size_t cur = 0;
-		for (const auto& p : filter_mirrors_prepared) {
-			while (ids.size() - cur >= p.first) {
-				pqxx::result rows = trans.exec_prepared(std::string(p.second),
-						pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.begin()+cur+p.first));
-				for (const auto& r : rows)
-					needs.push_back(r[0].as<uint64_t>());
-				cur += p.first;
-			}
-		}
-		if (ids.size() - cur > 0) {
-			pqxx::result rows = trans.exec_params(build_filter_ids_needing_mirror(ids.size() - cur),
-					pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.end()));
-			for (const auto& r : rows)
-				needs.push_back(r[0].as<uint64_t>());
-		}
-		trans.commit();
-		return needs;
+		return id_to_id_db_op(conn, ids,
+				std::begin(filter_mirrors_prepared), std::end(filter_mirrors_prepared),
+				&build_filter_ids_needing_mirror);
 	}, 10, "filter_ids_needing_mirror");
+}
+
+vector<uint64_t> get_mirrors(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+	return retry_db_operation([&]() {
+		return id_to_id_db_op(conn, ids,
+				std::begin(get_mirrors_prepared), std::end(get_mirrors_prepared),
+				&build_get_mirrors_query);
+	}, 10, "get_mirrors");
 }
 
 struct WorkGenerator {
@@ -458,7 +500,11 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	prepare_statements(conn);
 	vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
 	vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, initial);
-	do_unary_operation(manager, "mirror-db", needs_mirror);
+	if (needs_mirror.size())
+		do_unary_operation(manager, "mirror-db", needs_mirror);
+	vector<uint64_t> mirrors = get_mirrors(conn, initial);
+	for (auto i : mirrors)
+		fmt::print("{} ", i);
 
 	return 0;
 }
