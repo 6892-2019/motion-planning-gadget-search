@@ -140,8 +140,33 @@ std::string build_get_mirrors_query(std::size_t count) {
 			")";
 }
 
+std::string build_follow_close_edges_query(std::size_t count) {
+	vector<std::string> things;
+	things.reserve(count);
+	for (std::size_t i = 1; i <= count; ++i)
+		things.push_back(fmt::format("${}::int8", i));
+	return "select input1, output1 from close_edges where input1 in (" +
+			join(things, ", ") +
+			")";
+}
 
 
+const std::pair<std::size_t, std::string_view> filter_close_prepared[] = {
+	{50000, "filter_close_50000"sv},
+	{25000, "filter_close_25000"sv},
+	{10000, "filter_close_10000"sv},
+	{5000, "filter_close_5000"sv},
+	{1000, "filter_close_1000"sv},
+	{500, "filter_close_500"sv},
+};
+const std::pair<std::size_t, std::string_view> follow_close_edges_prepared[] = {
+	{50000, "follow_close_50000"sv},
+	{25000, "follow_close_25000"sv},
+	{10000, "follow_close_10000"sv},
+	{5000, "follow_close_5000"sv},
+	{1000, "follow_close_1000"sv},
+	{500, "follow_close_500"sv},
+};
 const std::pair<std::size_t, std::string_view> filter_mirrors_prepared[] = {
 	{50000, "filter_mirrors_50000"sv},
 	{25000, "filter_mirrors_25000"sv},
@@ -160,6 +185,8 @@ const std::pair<std::size_t, std::string_view> get_mirrors_prepared[] = {
 };
 
 void prepare_statements(pqxx::connection& conn) {
+	for (const auto& p : filter_close_prepared)
+		conn.prepare(std::string(p.second), build_filter_ids_needing_close(p.first));
 	for (const auto& p : filter_mirrors_prepared)
 		conn.prepare(std::string(p.second), build_filter_ids_needing_mirror(p.first));
 	for (const auto& p : get_mirrors_prepared)
@@ -246,6 +273,46 @@ vector<uint64_t> id_to_id_db_op(pqxx::connection& conn, const std::vector<uint64
 	}
 	trans.commit();
 	return result;
+}
+
+vector<uint64_t> filter_ids_needing_close(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+	return retry_db_operation([&]() {
+		return id_to_id_db_op(conn, ids,
+				std::begin(filter_close_prepared), std::end(filter_close_prepared),
+				&build_filter_ids_needing_close);
+	}, 10, "filter_ids_needing_close");
+}
+
+pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+	return retry_db_operation([&]() {
+		ro_transaction trans(conn);
+		//inputs aren't duplicated, but quickly removing them from the SearchState requires having them in a set
+		tsl::hopscotch_set<uint64_t> inputs;
+		//outputs might be duplicated, but we'll dedup when adding them to the SearchState.
+		vector<uint64_t> outputs;
+		std::size_t cur = 0;
+		for (const auto& p : follow_close_edges_prepared) {
+			while (ids.size() - cur >= p.first) {
+				pqxx::result rows = trans.exec_prepared(std::string(p.second),
+						pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.begin()+cur+p.first));
+				for (const auto& r : rows) {
+					inputs.insert(r[0].as<uint64_t>());
+					outputs.push_back(r[1].as<uint64_t>());
+				}
+				cur += p.first;
+			}
+		}
+		if (ids.size() - cur > 0) {
+			pqxx::result rows = trans.exec_params(build_follow_close_edges_query(ids.size() - cur),
+					pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.end()));
+			for (const auto& r : rows) {
+				inputs.insert(r[0].as<uint64_t>());
+				outputs.push_back(r[1].as<uint64_t>());
+			}
+		}
+		trans.commit();
+		return std::make_pair(std::move(inputs), std::move(outputs));
+	}, 10, "follow_close_edges");
 }
 
 vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
@@ -453,6 +520,82 @@ void do_unary_operation(WorkerManager& manager, std::string_view operation, cons
 	});
 }
 
+
+class SearchState {
+public:
+	SearchState() : subgen_start_(0) {}
+	bool operator()(uint64_t id) {
+		if (closed_.insert(id).second) {
+			curgen_.push_back(id);
+			return true;
+		}
+		return false;
+	}
+	bool operator()(const vector<uint64_t>& ids) {
+		bool modified = false;
+		for (uint64_t x : ids)
+			modified |= (*this)(x);
+		return modified;
+	}
+	/**
+	 * Gives access to the current subgeneration.  Do not append to the state
+	 * while iterating this view.
+	 * @return an iterator range spanning the current subgeneration
+	 */
+	auto subgeneration_view() const {
+		return make_range_for_pair(curgen_.cbegin(), curgen_.cend());
+	}
+	/**
+	 * Erases the ids in the given set from the current subgeneration.  They're
+	 * still in the closed set.
+	 */
+	void erase_from_subgeneration(tsl::hopscotch_set<uint64_t>& to_be_erased) {
+		curgen_.erase(std::remove_if(curgen_.begin()+subgen_start_, curgen_.end(),
+				[&](uint64_t i){return to_be_erased.count(i);}), curgen_.end());
+	}
+	/**
+	 * Begin a new generation.
+	 * @return the previous generation
+	 */
+	vector<uint64_t> flip_generation() {
+		vector<uint64_t> prev = std::move(curgen_);
+		curgen_.clear(); //make moved-from vector suitable for insertion again
+		return prev;
+	}
+	/**
+	 * Begin a new subgeneration.
+	 * @return the previous subgeneration
+	 */
+	vector<uint64_t> flip_subgeneration() {
+		//We can't return an iterator range because we'll be appending more to
+		//curgen_ (so it may reallocate), and returning an index range requires
+		//exposing curgen_.  Copying here does increase our memory footprint.
+		//TODO: we're buffering transactional results anyway (in case there were
+		//straggling worker transactions), so maybe we'd never have a read/write
+		//conflict on curgen_?
+		vector<uint64_t> subgen(curgen_.begin() + subgen_start_, curgen_.end());
+		//TODO: can't return iterator range because we'll be appending more to
+		//curgen_ so it might reallocate.
+		subgen_start_ = curgen_.size();
+		return subgen;
+	}
+private:
+	/**
+	 * The set of all gadget ids encountered so far, including those in the
+	 * current generation.
+	 */
+	tsl::hopscotch_set<uint64_t> closed_;
+	/**
+	 * The current generation: gadgets discovered since the previous combine.
+	 */
+	vector<uint64_t> curgen_;
+	/**
+	 * The start index of the current subgeneration: gadgets discovered since
+	 * the previous connect.
+	 */
+	std::size_t subgen_start_;
+};
+
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
@@ -498,13 +641,29 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
 	pqxx::connection conn(connect_str);
 	prepare_statements(conn);
+
+	SearchState state;
 	vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
-	vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, initial);
+	state(initial);
+
+	if (!multiplayer) {
+		vector<uint64_t> needs_close = filter_ids_needing_close(conn, initial);
+		if (needs_close.size())
+			do_unary_operation(manager, "close-db", needs_close);
+		//TODO: avoid this copy by letting follow_close_edges iterate the range? would prefer nontemplate...
+		vector<uint64_t> subgeneration(state.subgeneration_view().begin(), state.subgeneration_view().end());
+		pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> close_edges = follow_close_edges(conn, subgeneration);
+		state.erase_from_subgeneration(close_edges.first);
+		state(close_edges.second);
+	}
+
+	vector<uint64_t> subgeneration(state.subgeneration_view().begin(), state.subgeneration_view().end());
+	vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, subgeneration);
 	if (needs_mirror.size())
 		do_unary_operation(manager, "mirror-db", needs_mirror);
-	vector<uint64_t> mirrors = get_mirrors(conn, initial);
-	for (auto i : mirrors)
-		fmt::print("{} ", i);
+	//We can use the old subgeneration here because any mirrors of newly-mirrored
+	//gadgets were already in the closed set.
+	state(get_mirrors(conn, subgeneration));
 
 	return 0;
 }
