@@ -150,6 +150,31 @@ std::string build_follow_close_edges_query(std::size_t count) {
 			")";
 }
 
+std::string build_required_combines_query(std::size_t left_count, std::size_t right_count, unsigned int precision) {
+	vector<std::string> things;
+	things.reserve(std::max(left_count, right_count));
+	for (std::size_t i = 1; i <= left_count; ++i)
+		things.push_back(fmt::format("(${}::int8)", i));
+	std::string left_params = join(things, ", ");
+	things.clear();
+	for (std::size_t i = left_count + 1; i <= left_count + right_count; ++i)
+		things.push_back(fmt::format("(${}::int8)", i));
+	//TODO: we actually only care to get back rows with nonempty array, but I
+	//can't see how to filter them out.
+	return "with lefts (lid) as (values\n" +
+			left_params +
+			"\n), rights (rid) as (values\n" +
+			join(things, ", ") +
+			"\n)\n" +
+			"select lefts.lid, array(select rid from rights where\n" +
+			"  not exists (select 1 from combine_edges where\n" +
+			"    input1 = lid and input2 = rid limit 1)\n" +
+			"  and\n" +
+			//can't select a sum because we might combine a gadget against itself
+			"  (select locations from gadgets where id = lid) + (select locations from gadgets where id = rid)\n" +
+			fmt::format("    <= {}\n", precision) +
+			") from lefts";
+}
 
 const std::pair<std::size_t, std::string_view> filter_close_prepared[] = {
 	{50000, "filter_close_50000"sv},
@@ -191,6 +216,17 @@ void prepare_statements(pqxx::connection& conn) {
 		conn.prepare(std::string(p.second), build_filter_ids_needing_mirror(p.first));
 	for (const auto& p : get_mirrors_prepared)
 		conn.prepare(std::string(p.second), build_get_mirrors_query(p.first));
+}
+
+vector<std::pair<std::size_t, std::string>> required_combines_prepared;
+const unsigned int required_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
+
+void prepare_combine_statements(pqxx::connection& conn, std::size_t right_count, unsigned int precision) {
+	for (unsigned int left_count : required_combines_prepared_batch_sizes) {
+		std::string name = fmt::format("required_combines_{}", left_count);
+		conn.prepare(name, build_required_combines_query(left_count, right_count, precision));
+		required_combines_prepared.emplace_back(std::move(left_count), name);
+	}
 }
 
 
@@ -329,6 +365,58 @@ vector<uint64_t> get_mirrors(pqxx::connection& conn, const std::vector<uint64_t>
 				std::begin(get_mirrors_prepared), std::end(get_mirrors_prepared),
 				&build_get_mirrors_query);
 	}, 10, "get_mirrors");
+}
+
+struct vector_hash {
+	std::size_t operator()(const std::vector<uint64_t>& v) const {
+		return farmhash::Hash(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(v.front()));
+	}
+};
+
+//Note the key is the list of right ids and the value is the list of left ids (they're swapped).
+using combines_map = tsl::hopscotch_map<vector<uint64_t>, vector<uint64_t>, vector_hash>;
+combines_map find_required_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
+		const std::vector<uint64_t>& right_ids, unsigned int precision) {
+	return retry_db_operation([&]() {
+		ro_transaction trans(conn);
+		combines_map result;
+		vector<uint64_t> temp_key;
+		std::pair<pqxx::array_parser::juncture, std::string> array_element;
+		auto process_rows = [&](const pqxx::result& rows) {
+			for (const auto& r : rows) {
+				pqxx::array_parser parser = r[1].as_array();
+				temp_key.clear();
+				while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
+					if (array_element.first == pqxx::array_parser::string_value)
+						temp_key.push_back(to_uint64(array_element.second));
+				if (!temp_key.empty()) {
+				auto it = result.find(temp_key);
+					if (it == result.end())
+						it = result.try_emplace(std::move(temp_key)).first;
+					it.value().push_back(r[0].as<uint64_t>());
+				}
+			}
+		};
+
+		std::size_t cur = 0;
+		for (const auto& p : required_combines_prepared) {
+			while (left_ids.size() - cur >= p.first) {
+				pqxx::result rows = trans.exec_prepared(std::string(p.second),
+						pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.begin()+cur+p.first),
+						pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
+				process_rows(rows);
+				cur += p.first;
+			}
+		}
+		if (left_ids.size() - cur > 0) {
+			pqxx::result rows = trans.exec_params(build_required_combines_query(left_ids.size() - cur, right_ids.size(), precision),
+					pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.end()),
+					pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
+			process_rows(rows);
+		}
+		trans.commit();
+		return result;
+	});
 }
 
 struct WorkGenerator {
@@ -603,6 +691,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string_view checkpoint_file = ""; //TODO: split into resume file and path to save new checkpoints
 	bool multiplayer = false;
 	std::vector<std::string_view> gid_specs;
+	unsigned int precision = 8;
 	for (int i = 1; i < argc; ++i) {
 		if (argv[i] == "--db-user"sv)
 			db_user = argv[++i];
@@ -620,6 +709,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			checkpoint_file = argv[++i];
 		else if (argv[i] == "--multiplayer"sv)
 			multiplayer = true;
+		else if (argv[i] == "--precision"sv)
+			precision = to_uint(argv[++i]);
 		else
 			gid_specs.emplace_back(argv[i]);
 	}
@@ -664,6 +755,23 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	//We can use the old subgeneration here because any mirrors of newly-mirrored
 	//gadgets were already in the closed set.
 	state(get_mirrors(conn, subgeneration));
+
+	//The contents of generation 0 are the gadgets combined against.
+	vector<uint64_t> gen_zero = state.flip_generation();
+	prepare_combine_statements(conn, gen_zero.size(), precision);
+	combines_map combines = find_required_combines(conn, gen_zero, gen_zero, precision);
+	for (const auto& p : combines) {
+		fmt::print("{}: {}\n", p.first, p.second);
+	}
+
+//	for (std::size_t generation = 1; ; ++generation) {
+//
+//
+//
+//		for (std::size_t subgeneration = 1; ; ++subgeneration) {
+//
+//		}
+//	}
 
 	return 0;
 }
