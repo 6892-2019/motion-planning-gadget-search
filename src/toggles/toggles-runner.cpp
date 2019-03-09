@@ -1053,7 +1053,7 @@ std::string build_insert_combine_edges_query(std::size_t rows) {
 	for (unsigned int i = 1; i < rows; ++i)
 		values.push_back(fmt::format("(${}, ${}, ${}, ${}, ${}, ${}, ${})",
 				7*i+1, 7*i+2, 7*i+3, 7*i+4, 7*i+5, 7*i+6, 7*i+7));
-	return "insert into connect_edges (input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation) values\n" +
+	return "insert into combine_edges (input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation) values\n" +
 			join(values, ",\n  ") + ";";
 }
 
@@ -1284,6 +1284,7 @@ vector<std::uint64_t> do_connect_db(vector<std::uint64_t> input_gids) {
 		std::sort(input_gids.begin(), input_gids.end());
 		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_connects");
 
+		trans.commit();
 		return std::move(selsert_result.novel_global_ids);
 	});
 	return novel_gadgets;
@@ -1309,7 +1310,7 @@ vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std:
 	CombineCommandOutput outputs = do_combine(std::move(input));
 
 	const unsigned int batch_size = 200;
-	if (outputs.rows.size() >= batch_size)
+	if (outputs.prov.size() >= batch_size)
 		conn.prepare("insert_combine_edge_batch", build_insert_combine_edges_query(200));
 
 	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
@@ -1341,6 +1342,7 @@ vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std:
 			inv.exec();
 		}
 
+		trans.commit();
 		return std::move(selsert_result.novel_global_ids);
 	});
 	return novel_gadgets;
