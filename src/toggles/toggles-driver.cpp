@@ -375,6 +375,10 @@ struct vector_hash {
 
 //Note the key is the list of right ids and the value is the list of left ids (they're swapped).
 using combines_map = tsl::hopscotch_map<vector<uint64_t>, vector<uint64_t>, vector_hash>;
+/**
+ * Finds required combines.
+ * @return a map of lists of right ids to the left ids that need to be combined against them
+ */
 combines_map find_required_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
 		const std::vector<uint64_t>& right_ids, unsigned int precision) {
 	return retry_db_operation([&]() {
@@ -390,7 +394,8 @@ combines_map find_required_combines(pqxx::connection& conn, const std::vector<ui
 					if (array_element.first == pqxx::array_parser::string_value)
 						temp_key.push_back(to_uint64(array_element.second));
 				if (!temp_key.empty()) {
-				auto it = result.find(temp_key);
+					std::sort(temp_key.begin(), temp_key.end());
+					auto it = result.find(temp_key);
 					if (it == result.end())
 						it = result.try_emplace(std::move(temp_key)).first;
 					it.value().push_back(r[0].as<uint64_t>());
@@ -597,7 +602,7 @@ void do_unary_operation(WorkerManager& manager, std::string_view operation, cons
 		range.clear();
 		std::size_t end = std::min(offset + batch_size, operands.size());
 		range.insert(range.end(), operands.begin()+offset, operands.begin()+end);
-		pack_call(buffer, seqno, operation, range);
+		pack_call(buffer, seqno++, operation, range);
 		offset = end;
 		return true;
 	}, [&](simple_buffer& buffer) {
@@ -605,6 +610,34 @@ void do_unary_operation(WorkerManager& manager, std::string_view operation, cons
 		//going to get them from the database anyway (to account for anything
 		//previously computed).
 		fmt::print("successful operation\n");
+	});
+}
+
+void do_combine_operation(WorkerManager& manager, const combines_map& operands, unsigned int precision) {
+	const std::size_t batch_size = 5000; //TODO: should scale against number of workers, be customizable
+	std::uint32_t seqno = 0;
+	combines_map::const_iterator cur = operands.begin();
+	std::size_t offset = 0;
+	vector<uint64_t> lefts; //rights is just cur->first
+	manager.run([&](simple_buffer& buffer) {
+		fmt::print("generating combine work\n");
+		if (cur == operands.end()) return false;
+		lefts.clear();
+		std::size_t lefts_size = std::max<std::size_t>(batch_size / cur->first.size(), 1);
+		std::size_t end = std::min(offset + lefts_size, cur->second.size());
+		lefts.insert(lefts.end(), cur->second.begin()+offset, cur->second.begin()+end);
+		pack_call(buffer, seqno++, "combine-db", lefts, cur->first, precision);
+		offset = end;
+		if (offset == cur->second.size()) {
+			offset = 0;
+			++cur;
+		}
+		return true;
+	}, [&](simple_buffer& buffer) {
+		//We don't actually care about the returned new gadget ids because we're
+		//going to get them from the database anyway (to account for anything
+		//previously computed).
+		fmt::print("combine succeded\n");
 	});
 }
 
@@ -760,9 +793,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	vector<uint64_t> gen_zero = state.flip_generation();
 	prepare_combine_statements(conn, gen_zero.size(), precision);
 	combines_map combines = find_required_combines(conn, gen_zero, gen_zero, precision);
-	for (const auto& p : combines) {
-		fmt::print("{}: {}\n", p.first, p.second);
-	}
+	do_combine_operation(manager, combines, precision);
 
 //	for (std::size_t generation = 1; ; ++generation) {
 //
