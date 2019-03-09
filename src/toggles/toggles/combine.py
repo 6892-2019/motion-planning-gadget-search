@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql.array import CONTAINED_BY
 from psycopg2.extras import NumericRange
 
 from toggles.runner import local_toggles_runner
-from .models import session_scope, Name, Gadget, CompletedCombine, CombineEdge
+from .models import session_scope, Name, Gadget, CombineEdge
 from .util import parse_gid_spec
 
 # What do we do when we've combined some but not all of the lefts with the rights?
@@ -19,8 +19,7 @@ from .util import parse_gid_spec
 # only combine gadgets that have been closed (because closure is safe in
 # singleplayer), while in multiplayer we have to do everything.
 
-# combine is special because it's a binary relation with a precision value,
-# so we share relatively little code with the unary relations.
+# combine is the only binary relation, hence it gets its own file.
 
 
 def combine(args):
@@ -60,19 +59,15 @@ def combine(args):
         left_gids = set(map(itemgetter(0), session.query(Gadget.id).filter(
             and_(
                 or_(
-                    Gadget.id.in_(right_gids),
+                    Gadget.id.in_(left_gids),
                     range_array.any(Gadget.id, operator=CONTAINED_BY)
                 ),
                 Gadget.locations < args.precision,  # TODO: args.precision - max(right.locations)
-                # We only want those ids where a combine was missing or exists
-                # but wasn't computed to our current position, so we enforce
-                # that the count is less than len(right_gids).
-                # TODO: we want that the extra precision will be useful (so the old value is less than the sum of left and right's locations)
-                session.query(func.count(CompletedCombine.input1)).filter(
+                # We only want those ids where at least one combine is missing.
+                session.query(func.count(CombineEdge.input2)).filter(
                     and_(
-                        CompletedCombine.input1 == Gadget.id,
-                        CompletedCombine.input2.in_(right_gids),  # this could be an or_ to use ranges
-                        CompletedCombine.precision >= args.precision
+                        CombineEdge.input1 == Gadget.id,
+                        CombineEdge.input2.in_(right_gids)  # this could be an or_ to use ranges
                     )
                 ).as_scalar() < len(right_gids)
                 # TODO: single-player check would go here
@@ -117,14 +112,6 @@ def combine(args):
         for e in edges:
             e[2] = local_to_global[e[2]]
             session.add(CombineEdge.from_tuple(e))
-
-        for l, r in itertools.product(left_gids, right_gids):
-            # insert on conflict update
-            existing = session.query(CompletedCombine).filter_by(input1=l, input2=r).one_or_none()
-            if existing:
-                existing.precision = max(existing.precision, args.precision)
-            else:
-                session.add(CompletedCombine(input1=l, input2=r, precision=args.precision))
 
 
 def register_subcommand(parser: argparse.ArgumentParser, subparser_holder: argparse._SubParsersAction):

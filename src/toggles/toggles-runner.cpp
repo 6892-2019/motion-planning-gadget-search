@@ -1087,35 +1087,6 @@ std::string build_insert_completion_query(std::size_t rows, std::string_view tab
 			join(values, ",\n  ") + ";";
 }
 
-std::string build_insert_combine_completion_query(std::size_t lefts, std::size_t rights, unsigned int precision) {
-	//We use the same precision for all inserts in a batch, so we inline it into
-	//the query.
-	assert(lefts >= 1);
-	assert(rights >= 1);
-	vector<std::string> values;
-	values.reserve(std::max(lefts, rights));
-	unsigned int arg = 1;
-
-	values.push_back(fmt::format("(${}::bigint)", arg++));
-	for (unsigned int i = 1; i < lefts; ++i)
-		values.push_back(fmt::format("(${})", arg++));
-	std::string left_values = join(values, ", ");
-
-	values.clear();
-	values.push_back(fmt::format("(${}::bigint)", arg++));
-	for (unsigned int i = 1; i < rights; ++i)
-		values.push_back(fmt::format("(${})", arg++));
-	std::string right_values = join(values, ", ");
-
-	return "with lefts (input1) as values (\n  " +
-			left_values +
-			"\n), rights (input2) as values (\n  " +
-			right_values +
-			"\ninsert into completed_combines (input1, input2, precision)\n" +
-			fmt::format("select lefts.input1, rights.input2, {}::smallint from lefts cross join rights\n", precision) +
-			fmt::format("on conflict (input1, input2) do update set precision = {};", precision);
-}
-
 vector<pair<std::uint64_t, vector<std::byte>>> select_gadget_id_to_data(pqxx::connection& conn, const vector<std::uint64_t>& gids) {
 	pqxx::result input_data = retry_db_operation([&](){
 		ro_transaction trans(conn);
@@ -1369,9 +1340,6 @@ vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std:
 			}
 			inv.exec();
 		}
-
-		trans.exec_params(build_insert_combine_completion_query(left_gids.size(), right_gids.size(), precision),
-				pqxx::prepare::make_dynamic_params(left_gids), pqxx::prepare::make_dynamic_params(right_gids));
 
 		return std::move(selsert_result.novel_global_ids);
 	});

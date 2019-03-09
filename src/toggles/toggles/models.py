@@ -118,14 +118,6 @@ class CloseEdge(Base):
         return CloseEdge(input1=t[0], output1=t[1], canonicalize_rotation=t[2])
 
 
-class CompletedCombine(Base):
-    __tablename__ = 'completed_combines'
-    input1 = Column('input1', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
-    input2 = Column('input2', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
-    # max useful precision is input1.locations + input2.locations
-    precision = Column('precision', SmallInteger, nullable=False)
-
-
 class CompletedConnect(Base):
     __tablename__ = 'completed_connects'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
