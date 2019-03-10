@@ -121,8 +121,9 @@ std::string build_filter_ids_needing_close(std::size_t count) {
 	return build_filter_ids_range_table(count, "completed_closes");
 }
 std::string build_filter_ids_needing_connect(std::size_t count) {
-	//TODO: probably also want to filter out any gadgets too small to connect
-	return build_filter_ids_range_table(count, "completed_connects");
+	//Also filter out any gadgets too small to connect.
+	return build_filter_ids_range_table(count, "completed_connects") +
+			"and (select locations from gadgets where gadgets.id = maybe.id) >= 4";
 }
 
 std::string build_get_mirrors_query(std::size_t count) {
@@ -146,6 +147,16 @@ std::string build_follow_close_edges_query(std::size_t count) {
 	for (std::size_t i = 1; i <= count; ++i)
 		things.push_back(fmt::format("${}::int8", i));
 	return "select input1, output1 from close_edges where input1 in (" +
+			join(things, ", ") +
+			")";
+}
+
+std::string build_get_connects_query(std::size_t count) {
+	vector<std::string> things;
+	things.reserve(count);
+	for (std::size_t i = 1; i <= count; ++i)
+		things.push_back(fmt::format("${}::int8", i));
+	return "select output1 from connect_edges where input1 in (" +
 			join(things, ", ") +
 			")";
 }
@@ -174,6 +185,22 @@ std::string build_required_combines_query(std::size_t left_count, std::size_t ri
 			"  (select locations from gadgets where id = lid) + (select locations from gadgets where id = rid)\n" +
 			fmt::format("    <= {}\n", precision) +
 			") from lefts";
+}
+
+std::string build_get_combines_query(std::size_t left_count, std::size_t right_count) {
+	vector<std::string> things;
+	things.reserve(std::max(left_count, right_count));
+	for (std::size_t i = 1; i <= left_count; ++i)
+		things.push_back(fmt::format("(${}::int8)", i));
+	std::string left_params = join(things, ", ");
+	things.clear();
+	for (std::size_t i = left_count + 1; i <= left_count + right_count; ++i)
+		things.push_back(fmt::format("(${}::int8)", i));
+	return "select output1 from combine_edges where input1 in (\n" +
+			left_params +
+			"\n) and input2 in (\n" +
+			join(things, ", ") +
+			"\n) group by output1"; //group by is apparently faster than select distinct
 }
 
 const std::pair<std::size_t, std::string_view> filter_close_prepared[] = {
@@ -208,24 +235,54 @@ const std::pair<std::size_t, std::string_view> get_mirrors_prepared[] = {
 	{1000, "get_mirrors_1000"sv},
 	{500, "get_mirrors_500"sv},
 };
+const std::pair<std::size_t, std::string_view> filter_connect_prepared[] = {
+	{50000, "filter_connect_50000"sv},
+	{25000, "filter_connect_25000"sv},
+	{10000, "filter_connect_10000"sv},
+	{5000, "filter_connect_5000"sv},
+	{1000, "filter_connect_1000"sv},
+	{500, "filter_connect_500"sv},
+};
+const std::pair<std::size_t, std::string_view> get_connects_prepared[] = {
+	{50000, "get_connects_50000"sv},
+	{25000, "get_connects_25000"sv},
+	{10000, "get_connects_10000"sv},
+	{5000, "get_connects_5000"sv},
+	{1000, "get_connects_1000"sv},
+	{500, "get_connects_500"sv},
+};
 
 void prepare_statements(pqxx::connection& conn) {
 	for (const auto& p : filter_close_prepared)
 		conn.prepare(std::string(p.second), build_filter_ids_needing_close(p.first));
+	for (const auto& p : follow_close_edges_prepared)
+		conn.prepare(std::string(p.second), build_follow_close_edges_query(p.first));
 	for (const auto& p : filter_mirrors_prepared)
 		conn.prepare(std::string(p.second), build_filter_ids_needing_mirror(p.first));
 	for (const auto& p : get_mirrors_prepared)
 		conn.prepare(std::string(p.second), build_get_mirrors_query(p.first));
+	for (const auto& p : filter_connect_prepared)
+		conn.prepare(std::string(p.second), build_filter_ids_needing_connect(p.first));
+	for (const auto& p : get_connects_prepared)
+		conn.prepare(std::string(p.second), build_get_connects_query(p.first));
 }
 
 vector<std::pair<std::size_t, std::string>> required_combines_prepared;
 const unsigned int required_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
+vector<std::pair<std::size_t, std::string>> get_combines_prepared;
+const unsigned int get_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
 
 void prepare_combine_statements(pqxx::connection& conn, std::size_t right_count, unsigned int precision) {
 	for (unsigned int left_count : required_combines_prepared_batch_sizes) {
 		std::string name = fmt::format("required_combines_{}", left_count);
 		conn.prepare(name, build_required_combines_query(left_count, right_count, precision));
-		required_combines_prepared.emplace_back(std::move(left_count), name);
+		required_combines_prepared.emplace_back(left_count, std::move(name));
+	}
+	for (unsigned int batch_size : get_combines_prepared_batch_sizes) {
+		std::size_t left_count = std::max<std::size_t>(batch_size / right_count, 1);
+		std::string name = fmt::format("get_combines_{}", left_count);
+		conn.prepare(name, build_get_combines_query(left_count, right_count));
+		get_combines_prepared.emplace_back(left_count, std::move(name));
 	}
 }
 
@@ -285,25 +342,27 @@ vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const Gadget
 	}, 10, "collect_initial_gadget_set");
 }
 
-vector<uint64_t> id_to_id_db_op(pqxx::connection& conn, const std::vector<uint64_t>& ids,
+vector<uint64_t> id_to_id_db_op(pqxx::connection& conn,
+		const vector<uint64_t>::const_iterator ids_begin,
+		const vector<uint64_t>::const_iterator ids_end,
 		const std::pair<std::size_t, std::string_view>* prepared_begin,
 		const std::pair<std::size_t, std::string_view>* prepared_end,
 		std::string(*query_func)(std::size_t)) {
 	ro_transaction trans(conn);
 	vector<uint64_t> result;
-	std::size_t cur = 0;
+	vector<uint64_t>::const_iterator cur = ids_begin;
 	for (const auto& p : make_range_for_pair(prepared_begin, prepared_end)) {
-		while (ids.size() - cur >= p.first) {
+		while (numeric_cast<std::size_t>(std::distance(cur, ids_end)) >= p.first) {
 			pqxx::result rows = trans.exec_prepared(std::string(p.second),
-					pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.begin()+cur+p.first));
+					pqxx::prepare::make_dynamic_params(cur, cur + p.first));
 			for (const auto& r : rows)
 				result.push_back(r[0].as<uint64_t>());
 			cur += p.first;
 		}
 	}
-	if (ids.size() - cur > 0) {
-		pqxx::result rows = trans.exec_params(query_func(ids.size() - cur),
-				pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.end()));
+	if (cur != ids_end) {
+		pqxx::result rows = trans.exec_params(query_func(std::distance(cur, ids_end)),
+				pqxx::prepare::make_dynamic_params(cur, ids_end));
 		for (const auto& r : rows)
 			result.push_back(r[0].as<uint64_t>());
 	}
@@ -311,26 +370,35 @@ vector<uint64_t> id_to_id_db_op(pqxx::connection& conn, const std::vector<uint64
 	return result;
 }
 
-vector<uint64_t> filter_ids_needing_close(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+//vector<uint64_t> id_to_id_db_op(pqxx::connection& conn, const std::vector<uint64_t>& ids,
+//		const std::pair<std::size_t, std::string_view>* prepared_begin,
+//		const std::pair<std::size_t, std::string_view>* prepared_end,
+//		std::string(*query_func)(std::size_t)) {
+//	return id_to_id_db_op(conn, ids.cbegin(), ids.cend(), prepared_begin, prepared_end, query_func);
+//}
+
+vector<uint64_t> filter_ids_needing_close(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
+		const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids,
+		return id_to_id_db_op(conn, ids_begin, ids_end,
 				std::begin(filter_close_prepared), std::end(filter_close_prepared),
 				&build_filter_ids_needing_close);
 	}, 10, "filter_ids_needing_close");
 }
 
-pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::connection& conn,
+		const vector<uint64_t>::const_iterator ids_begin, const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
 		ro_transaction trans(conn);
 		//inputs aren't duplicated, but quickly removing them from the SearchState requires having them in a set
 		tsl::hopscotch_set<uint64_t> inputs;
 		//outputs might be duplicated, but we'll dedup when adding them to the SearchState.
 		vector<uint64_t> outputs;
-		std::size_t cur = 0;
+		vector<uint64_t>::const_iterator cur = ids_begin;
 		for (const auto& p : follow_close_edges_prepared) {
-			while (ids.size() - cur >= p.first) {
+			while (numeric_cast<std::size_t>(std::distance(cur, ids_end)) >= p.first) {
 				pqxx::result rows = trans.exec_prepared(std::string(p.second),
-						pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.begin()+cur+p.first));
+						pqxx::prepare::make_dynamic_params(cur, cur + p.first));
 				for (const auto& r : rows) {
 					inputs.insert(r[0].as<uint64_t>());
 					outputs.push_back(r[1].as<uint64_t>());
@@ -338,9 +406,9 @@ pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::co
 				cur += p.first;
 			}
 		}
-		if (ids.size() - cur > 0) {
-			pqxx::result rows = trans.exec_params(build_follow_close_edges_query(ids.size() - cur),
-					pqxx::prepare::make_dynamic_params(ids.begin()+cur, ids.end()));
+		if (cur != ids_end) {
+			pqxx::result rows = trans.exec_params(build_follow_close_edges_query(std::distance(cur, ids_end)),
+					pqxx::prepare::make_dynamic_params(cur, ids_end));
 			for (const auto& r : rows) {
 				inputs.insert(r[0].as<uint64_t>());
 				outputs.push_back(r[1].as<uint64_t>());
@@ -351,20 +419,40 @@ pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::co
 	}, 10, "follow_close_edges");
 }
 
-vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
+		const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids,
+		return id_to_id_db_op(conn, ids_begin, ids_end,
 				std::begin(filter_mirrors_prepared), std::end(filter_mirrors_prepared),
 				&build_filter_ids_needing_mirror);
 	}, 10, "filter_ids_needing_mirror");
 }
 
-vector<uint64_t> get_mirrors(pqxx::connection& conn, const std::vector<uint64_t>& ids) {
+vector<uint64_t> get_mirrors(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
+		const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids,
+		return id_to_id_db_op(conn, ids_begin, ids_end,
 				std::begin(get_mirrors_prepared), std::end(get_mirrors_prepared),
 				&build_get_mirrors_query);
 	}, 10, "get_mirrors");
+}
+
+vector<uint64_t> filter_ids_needing_connect(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
+		const vector<uint64_t>::const_iterator ids_end) {
+	return retry_db_operation([&]() {
+		return id_to_id_db_op(conn, ids_begin, ids_end,
+				std::begin(filter_connect_prepared), std::end(filter_connect_prepared),
+				&build_filter_ids_needing_connect);
+	}, 10, "filter_ids_needing_connect");
+}
+
+vector<uint64_t> get_connects(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
+		const vector<uint64_t>::const_iterator ids_end) {
+	return retry_db_operation([&]() {
+		return id_to_id_db_op(conn, ids_begin, ids_end,
+				std::begin(get_connects_prepared), std::end(get_connects_prepared),
+				&build_get_connects_query);
+	}, 10, "get_connects");
 }
 
 struct vector_hash {
@@ -418,6 +506,34 @@ combines_map find_required_combines(pqxx::connection& conn, const std::vector<ui
 					pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.end()),
 					pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
 			process_rows(rows);
+		}
+		trans.commit();
+		return result;
+	});
+}
+
+vector<uint64_t> get_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
+		const std::vector<uint64_t>& right_ids, unsigned int precision) {
+	return retry_db_operation([&]() {
+		ro_transaction trans(conn);
+		vector<uint64_t> result;
+		std::size_t cur = 0;
+		for (const auto& p : get_combines_prepared) {
+			while (left_ids.size() - cur >= p.first) {
+				pqxx::result rows = trans.exec_prepared(std::string(p.second),
+						pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.begin()+cur+p.first),
+						pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
+				for (const auto& r : rows)
+					result.push_back(r[0].as<uint64_t>());
+				cur += p.first;
+			}
+		}
+		if (left_ids.size() - cur > 0) {
+			pqxx::result rows = trans.exec_params(build_required_combines_query(left_ids.size() - cur, right_ids.size(), precision),
+					pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.end()),
+					pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
+			for (const auto& r : rows)
+				result.push_back(r[0].as<uint64_t>());
 		}
 		trans.commit();
 		return result;
@@ -664,7 +780,13 @@ public:
 	 * @return an iterator range spanning the current subgeneration
 	 */
 	auto subgeneration_view() const {
-		return make_range_for_pair(curgen_.cbegin(), curgen_.cend());
+		return make_range_for_pair(subgeneration_begin(), subgeneration_end());
+	}
+	vector<uint64_t>::const_iterator subgeneration_begin() const {
+		return curgen_.cbegin() + subgen_start_;
+	}
+	vector<uint64_t>::const_iterator subgeneration_end() const {
+		return curgen_.cend();
 	}
 	/**
 	 * Erases the ids in the given set from the current subgeneration.  They're
@@ -681,24 +803,19 @@ public:
 	vector<uint64_t> flip_generation() {
 		vector<uint64_t> prev = std::move(curgen_);
 		curgen_.clear(); //make moved-from vector suitable for insertion again
+		subgen_start_ = 0;
 		return prev;
 	}
 	/**
-	 * Begin a new subgeneration.
-	 * @return the previous subgeneration
+	 * Begin a new subgeneration.  Don't use the returned iterator range after
+	 * doing any further appending to the state (the pointed-to vector may have
+	 * to reallocate).
+	 * @return an iterator range over the elements in the previous subgeneration
 	 */
-	vector<uint64_t> flip_subgeneration() {
-		//We can't return an iterator range because we'll be appending more to
-		//curgen_ (so it may reallocate), and returning an index range requires
-		//exposing curgen_.  Copying here does increase our memory footprint.
-		//TODO: we're buffering transactional results anyway (in case there were
-		//straggling worker transactions), so maybe we'd never have a read/write
-		//conflict on curgen_?
-		vector<uint64_t> subgen(curgen_.begin() + subgen_start_, curgen_.end());
-		//TODO: can't return iterator range because we'll be appending more to
-		//curgen_ so it might reallocate.
+	auto flip_subgeneration() {
+		auto prev_subgen = make_range_for_pair(curgen_.cbegin() + subgen_start_, curgen_.cend());
 		subgen_start_ = curgen_.size();
-		return subgen;
+		return prev_subgen;
 	}
 private:
 	/**
@@ -767,42 +884,66 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	prepare_statements(conn);
 
 	SearchState state;
-	vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
-	state(initial);
 
-	if (!multiplayer) {
-		vector<uint64_t> needs_close = filter_ids_needing_close(conn, initial);
-		if (needs_close.size())
-			do_unary_operation(manager, "close-db", needs_close);
-		//TODO: avoid this copy by letting follow_close_edges iterate the range? would prefer nontemplate...
-		vector<uint64_t> subgeneration(state.subgeneration_view().begin(), state.subgeneration_view().end());
-		pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> close_edges = follow_close_edges(conn, subgeneration);
-		state.erase_from_subgeneration(close_edges.first);
-		state(close_edges.second);
+	auto close_and_mirror = [&]() {
+		if (!multiplayer) {
+			vector<uint64_t> needs_close = filter_ids_needing_close(conn, state.subgeneration_begin(), state.subgeneration_end());
+			if (needs_close.size())
+				do_unary_operation(manager, "close-db", needs_close);
+			pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> close_edges = follow_close_edges(conn, state.subgeneration_begin(), state.subgeneration_end());
+			state.erase_from_subgeneration(close_edges.first);
+			state(close_edges.second);
+		}
+
+		vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, state.subgeneration_begin(), state.subgeneration_end());
+		if (needs_mirror.size())
+			do_unary_operation(manager, "mirror-db", needs_mirror);
+		state(get_mirrors(conn, state.subgeneration_begin(), state.subgeneration_end()));
+	};
+
+	vector<uint64_t> combine_rights;
+	for (std::size_t generation = 0; ; ++generation) {
+		if (generation == 0) {
+			vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
+			state(initial);
+		} else {
+			vector<uint64_t> combine_lefts = state.flip_generation();
+			if (combine_lefts.empty()) {
+				fmt::print("exiting\n");
+				break;
+			}
+			combines_map needs_combine = find_required_combines(conn, combine_lefts, combine_rights, precision);
+			if (needs_combine.size())
+				do_combine_operation(manager, needs_combine, precision);
+			state(get_combines(conn, combine_lefts, combine_rights, precision));
+		}
+
+		close_and_mirror();
+		//I suppose we could wait until after any subgenerations (closing) to
+		//choose the set of combine rights, but this matches how the old
+		//generational search worked.
+		if (generation == 0) {
+			combine_rights.assign(state.subgeneration_begin(), state.subgeneration_end());
+			prepare_combine_statements(conn, combine_rights.size(), precision);
+		}
+
+		fmt::print("Finished {}.{}\n", generation, 0);
+
+		for (std::size_t subgeneration = 1; ; ++subgeneration) {
+			auto prev_subgen = state.flip_subgeneration();
+			using std::begin; using std::end;
+			vector<uint64_t> needs_connect = filter_ids_needing_connect(conn, begin(prev_subgen), end(prev_subgen));
+			if (needs_connect.size())
+				do_unary_operation(manager, "connect-db", needs_connect);
+			vector<uint64_t> connects = get_connects(conn, begin(prev_subgen), end(prev_subgen));
+			state(connects);
+			if (connects.empty())
+				break;
+			close_and_mirror();
+			fmt::print("Finished {}.{}\n", generation, subgeneration);
+		}
+		fmt::print("Finished {}\n", generation);
 	}
-
-	vector<uint64_t> subgeneration(state.subgeneration_view().begin(), state.subgeneration_view().end());
-	vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, subgeneration);
-	if (needs_mirror.size())
-		do_unary_operation(manager, "mirror-db", needs_mirror);
-	//We can use the old subgeneration here because any mirrors of newly-mirrored
-	//gadgets were already in the closed set.
-	state(get_mirrors(conn, subgeneration));
-
-	//The contents of generation 0 are the gadgets combined against.
-	vector<uint64_t> gen_zero = state.flip_generation();
-	prepare_combine_statements(conn, gen_zero.size(), precision);
-	combines_map combines = find_required_combines(conn, gen_zero, gen_zero, precision);
-	do_combine_operation(manager, combines, precision);
-
-//	for (std::size_t generation = 1; ; ++generation) {
-//
-//
-//
-//		for (std::size_t subgeneration = 1; ; ++subgeneration) {
-//
-//		}
-//	}
 
 	return 0;
 }
