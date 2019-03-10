@@ -529,7 +529,7 @@ vector<uint64_t> get_combines(pqxx::connection& conn, const std::vector<uint64_t
 			}
 		}
 		if (left_ids.size() - cur > 0) {
-			pqxx::result rows = trans.exec_params(build_required_combines_query(left_ids.size() - cur, right_ids.size(), precision),
+			pqxx::result rows = trans.exec_params(build_get_combines_query(left_ids.size() - cur, right_ids.size()),
 					pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.end()),
 					pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
 			for (const auto& r : rows)

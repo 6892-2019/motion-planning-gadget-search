@@ -1253,7 +1253,7 @@ vector<std::uint64_t> do_connect_db(vector<std::uint64_t> input_gids) {
 	ConnectCommandOutput outputs = do_connect(std::move(inputs));
 
 	const unsigned int batch_size = 200;
-	if (outputs.rows.size() >= batch_size)
+	if (outputs.prov.size() >= batch_size)
 		conn.prepare("insert_connect_edge_batch", build_insert_connect_edges_query(200));
 
 	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
