@@ -565,6 +565,7 @@ struct Finisher {
 	//machinery to reduce fragmentation.
 	tsl::ordered_set<OutputRow> rows_;
 	vector<Provenance> prov_;
+	std::size_t pruned_ = 0;
 	bool operator()(WorkingAutomaton&& a, Provenance prov) {
 		//TODO: calling active_alphabet_size again here is wasteful, should pass it in instead
 		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(canonicalize(a, a.active_alphabet_size(), false));
@@ -573,6 +574,7 @@ struct Finisher {
 	bool operator()(OutputRow&& r, Provenance prov) {
 		//caller is responsible for setting canonicalizePermutation
 		auto pair = rows_.insert(r);
+		if (!pair.second) ++pruned_;
 		//When we successfully insert, we know the index is size()-1, but deque
 		//operator- is cheap enough that it's not worth branching on .second.
 		prov.output1 = numeric_cast<decltype(prov.output1)>(std::distance(rows_.begin(), pair.first));
@@ -718,6 +720,13 @@ void connect(const AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProve
 	}
 }
 
+Finisher<ConnectProvenance> do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+	Finisher<ConnectProvenance> finisher;
+	for (auto& i : inputs)
+		connect(*inflate_outputrow(i.second), i.first, finisher);
+	return finisher;
+}
+
 struct ConnectCommandOutput {
 //	decltype(Finisher<ConnectProvenance>::rows_.values_container()) rows;
 	vector<OutputRow> rows;
@@ -725,10 +734,8 @@ struct ConnectCommandOutput {
 	//if we ever return toughies, we need Python-side changes, as the other unary commands don't
 	MSGPACK_DEFINE_ARRAY(rows, prov)
 };
-ConnectCommandOutput do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) { //TODO: ensure we're moving, not copying the arg
-	Finisher<ConnectProvenance> finisher;
-	for (auto& i : inputs)
-		connect(*inflate_outputrow(i.second), i.first, finisher);
+ConnectCommandOutput do_connect_for_python(vector<pair<std::uint64_t, vector<std::byte>>> inputs) { //TODO: ensure we're moving, not copying the arg
+	Finisher<ConnectProvenance> finisher = do_connect(std::move(inputs));
 	//TODO: Ideally we'd just put values_container (a deque) in the ConnectCommandOutput,
 	//but msgpack only provides a packer, and MSGPACK_DEFINE_ARRAY also demands
 	//a packer (I guess -- we shouldn't be using it).  Though we end up copying
@@ -850,6 +857,72 @@ void combine(const Automaton<Precision>& la, AutomatonBase::state_type leftLocat
 	}
 }
 
+template<unsigned int Precision>
+Finisher<CombineProvenance> do_combine0(const tsl::hopscotch_map<std::uint64_t, vector<std::byte>>& map,
+		const vector<std::uint64_t>& left_gids, const vector<std::uint64_t>& right_gids) {
+	vector<unique_ptr<Automaton<Precision>>> right_autos;
+	vector<unsigned int> right_locations;
+	vector<RotationVec> right_rotations;
+	for (std::uint64_t r : right_gids) {
+		auto it = map.find(r);
+		if (it == map.end())
+			throw std::logic_error(fmt::format("right gid {} not in map", r));
+		right_autos.push_back(inflate_outputrow<Precision>(it->second));
+		right_locations.push_back(right_autos.back()->active_alphabet_size());
+		right_rotations.push_back(find_useful_rotations(*right_autos.back()));
+	}
+
+	CombineProvenance prov;
+	Finisher<CombineProvenance> finisher;
+	for (std::uint64_t l : left_gids) {
+		prov.input1 = l;
+		auto it = map.find(l);
+		if (it == map.end())
+			throw std::logic_error(fmt::format("left gid {} not in map", l));
+		unique_ptr<Automaton<Precision>> pla = inflate_outputrow<Precision>(it->second);
+		auto leftLocations = pla->active_alphabet_size();
+		for (auto ri : xrange(right_gids.size())) {
+			if (leftLocations + right_locations[ri] > Precision) {
+				fmt::print(stderr, "WARNING: skipping combine between {} ({} locations) and {} ({} locations) which exceeds precision {}\n",
+						l, leftLocations, right_gids[ri], right_locations[ri], Precision);
+				continue;
+			}
+			prov.input2 = right_gids[ri];
+			combine(*pla, leftLocations, *right_autos[ri], right_locations[ri], right_rotations[ri], prov, finisher);
+		}
+	}
+	return finisher;
+}
+
+Finisher<CombineProvenance> do_combine(tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map,
+		const vector<std::uint64_t>& left_gids, const vector<std::uint64_t>& right_gids, unsigned int precision) {
+	switch (precision) {
+#define TOGGLESRUNNER_DO_COMBINE_CASE(N) case N: return do_combine0<N>(map, left_gids, right_gids);
+		TOGGLESRUNNER_DO_COMBINE_CASE(4)
+		TOGGLESRUNNER_DO_COMBINE_CASE(5)
+		TOGGLESRUNNER_DO_COMBINE_CASE(6)
+		TOGGLESRUNNER_DO_COMBINE_CASE(7)
+		TOGGLESRUNNER_DO_COMBINE_CASE(8)
+		TOGGLESRUNNER_DO_COMBINE_CASE(9)
+		TOGGLESRUNNER_DO_COMBINE_CASE(10)
+		TOGGLESRUNNER_DO_COMBINE_CASE(11)
+		TOGGLESRUNNER_DO_COMBINE_CASE(12)
+		TOGGLESRUNNER_DO_COMBINE_CASE(13)
+		TOGGLESRUNNER_DO_COMBINE_CASE(14)
+		TOGGLESRUNNER_DO_COMBINE_CASE(15)
+		TOGGLESRUNNER_DO_COMBINE_CASE(16)
+#undef TOGGLESRUNNER_DO_COMBINE_CASE
+		case 1:
+		case 2:
+		case 3:
+			fmt::print(stderr, "impossibly small precision for do_combine: {}\n", precision);
+			std::terminate();
+		default:
+			fmt::print(stderr, "unhandled do_combine for precision {}\n", precision);
+			std::terminate();
+	}
+}
+
 struct CombineCommandInput {
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs;
 	vector<std::uint64_t> lefts, rights;
@@ -868,71 +941,19 @@ struct CombineCommandOutput {
 	vector<pair<std::uint64_t, std::uint64_t>> toughies;
 	MSGPACK_DEFINE_ARRAY(rows, prov, toughies)
 };
-template<unsigned int Precision>
-CombineCommandOutput do_combine0(CombineCommandInput cmd) {
+CombineCommandOutput do_combine_for_python(CombineCommandInput cmd) {
 	tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map;
 	for (auto& p : cmd.inputs)
 		map[p.first] = std::move(p.second);
 	cmd.inputs.clear();
-
-	vector<unique_ptr<Automaton<Precision>>> right_autos;
-	vector<unsigned int> right_locations;
-	vector<RotationVec> right_rotations;
-	for (std::uint64_t r : cmd.rights) {
-		right_autos.push_back(inflate_outputrow<Precision>(map[r]));
-		right_locations.push_back(right_autos.back()->active_alphabet_size());
-		right_rotations.push_back(find_useful_rotations(*right_autos.back()));
-	}
-
-	CombineProvenance prov;
-	Finisher<CombineProvenance> finisher;
+	Finisher<CombineProvenance> finisher = do_combine(std::move(map), cmd.lefts, cmd.rights, cmd.precision);
 	vector<pair<std::uint64_t, std::uint64_t>> toughies;
-	for (std::uint64_t l : cmd.lefts) {
-		prov.input1 = l;
-		unique_ptr<Automaton<Precision>> pla = inflate_outputrow<Precision>(map[prov.input1]);
-		auto leftLocations = pla->active_alphabet_size();
-		for (auto ri : xrange(cmd.rights.size())) {
-			if (leftLocations + right_locations[ri] > Precision) continue;
-			prov.input2 = cmd.rights[ri];
-			//TODO: try-catch for toughies.
-			combine(*pla, leftLocations, *right_autos[ri], right_locations[ri], right_rotations[ri], prov, finisher);
-		}
-	}
-
 	//TODO: Ideally we'd just put values_container (a deque) in the ConnectCommandOutput,
 	//but msgpack only provides a packer, and MSGPACK_DEFINE_ARRAY also demands
 	//a packer (I guess -- we shouldn't be using it).  Though we end up copying
 	//it either way because we can't move it -- maybe tsl::ordered_set needs a release() method?
 	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
 	return {std::move(rows), std::move(finisher.prov_), std::move(toughies)};
-}
-
-CombineCommandOutput do_combine(CombineCommandInput cmd) {
-	switch (cmd.precision) {
-#define TOGGLESRUNNER_DO_COMBINE_CASE(N) case N: return do_combine0<N>(std::move(cmd));
-		TOGGLESRUNNER_DO_COMBINE_CASE(4)
-		TOGGLESRUNNER_DO_COMBINE_CASE(5)
-		TOGGLESRUNNER_DO_COMBINE_CASE(6)
-		TOGGLESRUNNER_DO_COMBINE_CASE(7)
-		TOGGLESRUNNER_DO_COMBINE_CASE(8)
-		TOGGLESRUNNER_DO_COMBINE_CASE(9)
-		TOGGLESRUNNER_DO_COMBINE_CASE(10)
-		TOGGLESRUNNER_DO_COMBINE_CASE(11)
-		TOGGLESRUNNER_DO_COMBINE_CASE(12)
-		TOGGLESRUNNER_DO_COMBINE_CASE(13)
-		TOGGLESRUNNER_DO_COMBINE_CASE(14)
-		TOGGLESRUNNER_DO_COMBINE_CASE(15)
-		TOGGLESRUNNER_DO_COMBINE_CASE(16)
-#undef TOGGLESRUNNER_DO_COMBINE_CASE
-		case 1:
-		case 2:
-		case 3:
-			fmt::print(stderr, "impossibly small precision for do_combine: {}\n", cmd.precision);
-			std::terminate();
-		default:
-			fmt::print(stderr, "unhandled do_combine for precision {}\n", cmd.precision);
-			std::terminate();
-	}
 }
 
 
@@ -949,7 +970,9 @@ struct SimpleOutput {
 	vector<SimpleProvenance> prov;
 	MSGPACK_DEFINE_ARRAY(rows, prov)
 };
-SimpleOutput do_close(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+
+
+Finisher<SimpleProvenance> do_close(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 	Finisher<SimpleProvenance> finisher;
 	for (const auto& p : inputs) {
 		SimpleProvenance prov;
@@ -967,13 +990,18 @@ SimpleOutput do_close(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 		if (r.edges != p.second)
 			finisher(std::move(r), prov);
 	}
+	return finisher;
+}
+
+SimpleOutput do_close_for_python(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+	Finisher<SimpleProvenance> finisher = do_close(std::move(inputs));
 	//TODO: avoid this copy
 	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
 	return {std::move(rows), std::move(finisher.prov_)};
 }
 
 
-SimpleOutput do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+Finisher<SimpleProvenance> do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 	Finisher<SimpleProvenance> finisher;
 	for (const auto& p : inputs) {
 		SimpleProvenance prov;
@@ -986,6 +1014,11 @@ SimpleOutput do_mirror(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(m.second);
 		finisher(deflate_outputrow(*m.first), prov);
 	}
+	return finisher;
+}
+
+SimpleOutput do_mirror_for_python(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
+	Finisher<SimpleProvenance> finisher = do_mirror(std::move(inputs));
 	//TODO: avoid this copy
 	std::vector<OutputRow> rows(finisher.rows_.values_container().begin(), finisher.rows_.values_container().end());
 	return {std::move(rows), std::move(finisher.prov_)};
@@ -1116,7 +1149,10 @@ struct SelsertGadgetByDataResult {
  * Returns the global gadget id of each of the given rows, inserting the row if
  * not already present.  The vector of ids matches the order of the rows.
  */
-SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans, vector<OutputRow> rows) {
+SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans,
+		//using a specific Finisher instantiation here because it's the same for all of them
+		decltype(Finisher<ConnectProvenance>::rows_)&& rows_from_finisher) {
+	auto& rows = rows_from_finisher.values_container();
 	//TODO: decide if we can persistently prepare when pgbouncer starts a new
 	//transaction (for this and other prepared statements)
 	if (rows.size() >= 100)
@@ -1246,36 +1282,42 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint
 
 static std::string g_database_connect_string;
 
-vector<std::uint64_t> do_connect_db(vector<std::uint64_t> input_gids) {
+struct DatabaseOperationStatistics {
+	std::size_t pruned_locally, pruned_database, novel_gadgets, edges;
+	MSGPACK_DEFINE(pruned_locally, pruned_database, novel_gadgets, edges)
+};
+
+DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
 	pqxx::connection conn(g_database_connect_string);
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
 
-	ConnectCommandOutput outputs = do_connect(std::move(inputs));
+	Finisher outputs = do_connect(std::move(inputs));
+	std::size_t survivor_size = outputs.rows_.size();
 
 	const unsigned int batch_size = 200;
-	if (outputs.prov.size() >= batch_size)
+	if (outputs.prov_.size() >= batch_size)
 		conn.prepare("insert_connect_edge_batch", build_insert_connect_edges_query(200));
 
-	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
+	std::size_t novel_gadgets_size = retry_db_operation([&](){
 		transaction trans(conn);
 
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 
 		std::size_t edge_index = 0;
-		while (outputs.prov.size() - edge_index >= batch_size) {
+		while (outputs.prov_.size() - edge_index >= batch_size) {
 			pqxx::prepare::invocation inv = trans.prepared("insert_connect_edge_batch");
 			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
-				const ConnectProvenance& p = outputs.prov[edge_index];
+				const ConnectProvenance& p = outputs.prov_[edge_index];
 				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
 		}
-		if (edge_index < outputs.prov.size()) {
+		if (edge_index < outputs.prov_.size()) {
 			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_connect_edges_query(outputs.prov.size() - edge_index));
-			for (; edge_index < outputs.prov.size(); ++edge_index) {
-				const ConnectProvenance& p = outputs.prov[edge_index];
+					build_insert_connect_edges_query(outputs.prov_.size() - edge_index));
+			for (; edge_index < outputs.prov_.size(); ++edge_index) {
+				const ConnectProvenance& p = outputs.prov_[edge_index];
 				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
@@ -1285,12 +1327,12 @@ vector<std::uint64_t> do_connect_db(vector<std::uint64_t> input_gids) {
 		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_connects");
 
 		trans.commit();
-		return std::move(selsert_result.novel_global_ids);
+		return selsert_result.novel_global_ids.size();
 	});
-	return novel_gadgets;
+	return {outputs.pruned_, survivor_size - novel_gadgets_size, novel_gadgets_size, outputs.prov_.size()};
 }
 
-vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
+DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
 	vector<std::uint64_t> input_gids;
 	input_gids.reserve(left_gids.size() + right_gids.size());
 	input_gids.insert(input_gids.end(), left_gids.begin(), left_gids.end());
@@ -1300,41 +1342,40 @@ vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std:
 
 	pqxx::connection conn(g_database_connect_string);
 
-	CombineCommandInput input;
-	//TODO: do_combine immediately builds a map from this vector; maybe we could build it directly
-	input.inputs = select_gadget_id_to_data(conn, input_gids);
-	//can't move these because we use them for completion logging
-	input.lefts = left_gids;
-	input.rights = right_gids;
-	input.precision = precision;
-	CombineCommandOutput outputs = do_combine(std::move(input));
+	//TODO: select_gadget_id_to_data should be templated on the result container so we can directly build this map
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
+	tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map;
+	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
+		map.try_emplace(p.first, std::move(p.second));
+	Finisher outputs = do_combine(std::move(map), left_gids, right_gids, precision);
+	std::size_t survivor_size = outputs.rows_.size();
 
 	const unsigned int batch_size = 200;
-	if (outputs.prov.size() >= batch_size)
+	if (outputs.prov_.size() >= batch_size)
 		conn.prepare("insert_combine_edge_batch", build_insert_combine_edges_query(200));
 
-	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
+	std::size_t novel_gadgets_size = retry_db_operation([&](){
 		transaction trans(conn);
 
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 
 		std::size_t edge_index = 0;
-		while (outputs.prov.size() - edge_index >= batch_size) {
+		while (outputs.prov_.size() - edge_index >= batch_size) {
 			pqxx::prepare::invocation inv = trans.prepared("insert_combine_edge_batch");
 			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
-				const CombineProvenance& p = outputs.prov[edge_index];
+				const CombineProvenance& p = outputs.prov_[edge_index];
 				inv(p.input1)(p.input2)(local_to_global[p.output1])
 						((unsigned short)p.splice)((unsigned short)p.rotation)
 						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
 		}
-		if (edge_index < outputs.prov.size()) {
+		if (edge_index < outputs.prov_.size()) {
 			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_combine_edges_query(outputs.prov.size() - edge_index));
-			for (; edge_index < outputs.prov.size(); ++edge_index) {
-				const CombineProvenance& p = outputs.prov[edge_index];
+					build_insert_combine_edges_query(outputs.prov_.size() - edge_index));
+			for (; edge_index < outputs.prov_.size(); ++edge_index) {
+				const CombineProvenance& p = outputs.prov_[edge_index];
 				inv(p.input1)(p.input2)(local_to_global[p.output1])
 						((unsigned short)p.splice)((unsigned short)p.rotation)
 						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
@@ -1343,43 +1384,44 @@ vector<std::uint64_t> do_combine_db(vector<std::uint64_t> left_gids, vector<std:
 		}
 
 		trans.commit();
-		return std::move(selsert_result.novel_global_ids);
+		return selsert_result.novel_global_ids.size();
 	});
-	return novel_gadgets;
+	return {outputs.pruned_, survivor_size - novel_gadgets_size, novel_gadgets_size, outputs.prov_.size()};
 }
 
-vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
+DatabaseOperationStatistics do_close_db(vector<std::uint64_t> input_gids) {
 	pqxx::connection conn(g_database_connect_string);
 
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
 
-	SimpleOutput outputs = do_close(std::move(inputs));
+	Finisher<SimpleProvenance> outputs = do_close(std::move(inputs));
+	std::size_t survivor_size = outputs.rows_.size();
 
-	if (outputs.prov.size() >= 200)
+	if (outputs.prov_.size() >= 200)
 		conn.prepare("insert_close_edge_200", build_insert_close_edges_query(200));
 
-	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
+	std::size_t novel_gadgets_size = retry_db_operation([&](){
 		transaction trans(conn);
 
 		//could be structured bindings
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
 
 		std::size_t edge_index = 0;
-		while (outputs.prov.size() - edge_index >= 200) {
+		while (outputs.prov_.size() - edge_index >= 200) {
 			pqxx::prepare::invocation inv = trans.prepared("insert_close_edge_200");
 			for (std::size_t max = edge_index + 200; edge_index < max; ++edge_index) {
-				const SimpleProvenance& p = outputs.prov[edge_index];
+				const SimpleProvenance& p = outputs.prov_[edge_index];
 				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
 		}
-		if (edge_index < outputs.prov.size()) {
+		if (edge_index < outputs.prov_.size()) {
 			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_close_edges_query(outputs.prov.size() - edge_index));
-			for (; edge_index < outputs.prov.size(); ++edge_index) {
-				const SimpleProvenance& p = outputs.prov[edge_index];
+					build_insert_close_edges_query(outputs.prov_.size() - edge_index));
+			for (; edge_index < outputs.prov_.size(); ++edge_index) {
+				const SimpleProvenance& p = outputs.prov_[edge_index];
 				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
@@ -1391,48 +1433,49 @@ vector<std::uint64_t> do_close_db(vector<std::uint64_t> input_gids) {
 		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_closes");
 
 		trans.commit();
-		return std::move(novel_global_ids);
+		return novel_global_ids.size();
 	}, 10);
 
-	return novel_gadgets;
+	return {outputs.pruned_, survivor_size - novel_gadgets_size, novel_gadgets_size, outputs.prov_.size()};
 }
 
-vector<std::uint64_t> do_mirror_db(vector<std::uint64_t> input_gids) {
+DatabaseOperationStatistics do_mirror_db(vector<std::uint64_t> input_gids) {
 	pqxx::connection conn(g_database_connect_string);
 
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
 
-	SimpleOutput outputs = do_mirror(std::move(inputs));
+	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
+	std::size_t survivor_size = outputs.rows_.size();
 
 	const unsigned int batch_size = 200;
-	if (outputs.prov.size() >= batch_size)
+	if (outputs.prov_.size() >= batch_size)
 		conn.prepare("insert_mirror_edge_batch", build_insert_mirror_edges_query(batch_size));
 
-	vector<std::uint64_t> novel_gadgets = retry_db_operation([&](){
+	std::size_t novel_gadgets_size = retry_db_operation([&](){
 		transaction trans(conn);
 
 		//could be structured bindings
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows));
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
 
 		//We have to sort the edge's vertices after remapping, but we don't need
 		//to deduplicate due "on conflict do nothing".
 		std::size_t edge_index = 0;
-		while (outputs.prov.size() - edge_index >= batch_size) {
+		while (outputs.prov_.size() - edge_index >= batch_size) {
 			pqxx::prepare::invocation inv = trans.prepared("insert_mirror_edge_batch");
 			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
-				const SimpleProvenance& p = outputs.prov[edge_index];
+				const SimpleProvenance& p = outputs.prov_[edge_index];
 				std::uint64_t output = local_to_global[p.output1];
 				inv(std::min(p.input1, output))(std::max(p.input1, output))((unsigned short)p.canonicalizePermutation);
 			}
 			inv.exec();
 		}
-		if (edge_index < outputs.prov.size()) {
+		if (edge_index < outputs.prov_.size()) {
 			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_mirror_edges_query(outputs.prov.size() - edge_index));
-			for (; edge_index < outputs.prov.size(); ++edge_index) {
-				const SimpleProvenance& p = outputs.prov[edge_index];
+					build_insert_mirror_edges_query(outputs.prov_.size() - edge_index));
+			for (; edge_index < outputs.prov_.size(); ++edge_index) {
+				const SimpleProvenance& p = outputs.prov_[edge_index];
 				std::uint64_t output = local_to_global[p.output1];
 				inv(std::min(p.input1, output))(std::max(p.input1, output))((unsigned short)p.canonicalizePermutation);
 			}
@@ -1445,10 +1488,10 @@ vector<std::uint64_t> do_mirror_db(vector<std::uint64_t> input_gids) {
 		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_mirrors");
 
 		trans.commit();
-		return std::move(novel_global_ids);
+		return novel_global_ids.size();
 	}, 10);
 
-	return novel_gadgets;
+	return {outputs.pruned_, survivor_size - novel_gadgets_size, novel_gadgets_size, outputs.prov_.size()};
 }
 
 
@@ -1471,10 +1514,10 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 
 	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 
-	{"connect"sv, &handler_adapter<do_connect>},
-	{"combine"sv, &handler_adapter<do_combine>},
-	{"close"sv, &handler_adapter<do_close>},
-	{"mirror"sv, &handler_adapter<do_mirror>},
+	{"connect"sv, &handler_adapter<do_connect_for_python>},
+	{"combine"sv, &handler_adapter<do_combine_for_python>},
+	{"close"sv, &handler_adapter<do_close_for_python>},
+	{"mirror"sv, &handler_adapter<do_mirror_for_python>},
 
 	{"connect-db"sv, &handler_adapter<do_connect_db>},
 	{"combine-db"sv, &handler_adapter<do_combine_db>},
