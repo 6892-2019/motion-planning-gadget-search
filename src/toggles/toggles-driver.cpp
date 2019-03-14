@@ -1,8 +1,10 @@
 #include "precompiled.hpp"
 #include "database.hpp"
 #include "rpc.hpp"
+#include "toggles-shared.hpp"
 #include "stringutils.hpp"
 #include "ioutils.hpp"
+#include "stopwatch.hpp"
 #define BOOST_ASIO_SEPARATE_COMPILATION
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -706,14 +708,16 @@ void ping_all_workers(WorkerManager& manager) {
 	manager.run(&generator);
 }
 
-void do_unary_operation(WorkerManager& manager, std::string_view operation, const vector<uint64_t>& operands) {
+DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation, const vector<uint64_t>& operands) {
 	std::uint32_t seqno = 0;
 	std::size_t offset = 0;
 	const std::size_t batch_size = 5000; //TODO: should scale against number of workers, be customizable
 	//TODO: figure out how to pack a range without copying (probably a custom type with a pack method?)
 	vector<uint64_t> range;
+	DatabaseOperationStatistics overall_stats = {};
+	bool error_happened = false;
 	manager.run([&](simple_buffer& buffer) {
-		fmt::print("generating unary work\n");
+		if (error_happened) return false; //stop generating work, but let existing issued work finish
 		if (!(offset < operands.size())) return false;
 		range.clear();
 		std::size_t end = std::min(offset + batch_size, operands.size());
@@ -722,21 +726,32 @@ void do_unary_operation(WorkerManager& manager, std::string_view operation, cons
 		offset = end;
 		return true;
 	}, [&](simple_buffer& buffer) {
-		//We don't actually care about the returned new gadget ids because we're
-		//going to get them from the database anyway (to account for anything
-		//previously computed).
-		fmt::print("successful operation\n");
+		Response resp = unpack_response(buffer);
+		if (!resp) {
+			fmt::print("ERROR: task {} failed: {}\n", resp.seq(), resp.error_as());
+			error_happened = true;
+		} else {
+			DatabaseOperationStatistics stats = resp.result_as<DatabaseOperationStatistics>();
+			fmt::print("task {} completed: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
+					resp.seq(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			overall_stats += stats;
+		}
 	});
+	if (error_happened)
+		throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
+	return overall_stats;
 }
 
-void do_combine_operation(WorkerManager& manager, const combines_map& operands, unsigned int precision) {
+DatabaseOperationStatistics do_combine_operation(WorkerManager& manager, const combines_map& operands, unsigned int precision) {
 	const std::size_t batch_size = 5000; //TODO: should scale against number of workers, be customizable
 	std::uint32_t seqno = 0;
 	combines_map::const_iterator cur = operands.begin();
 	std::size_t offset = 0;
 	vector<uint64_t> lefts; //rights is just cur->first
+	DatabaseOperationStatistics overall_stats = {};
+	bool error_happened = false;
 	manager.run([&](simple_buffer& buffer) {
-		fmt::print("generating combine work\n");
+		if (error_happened) return false; //stop generating work, but let existing issued work finish
 		if (cur == operands.end()) return false;
 		lefts.clear();
 		std::size_t lefts_size = std::max<std::size_t>(batch_size / cur->first.size(), 1);
@@ -750,11 +765,20 @@ void do_combine_operation(WorkerManager& manager, const combines_map& operands, 
 		}
 		return true;
 	}, [&](simple_buffer& buffer) {
-		//We don't actually care about the returned new gadget ids because we're
-		//going to get them from the database anyway (to account for anything
-		//previously computed).
-		fmt::print("combine succeded\n");
+		Response resp = unpack_response(buffer);
+		if (!resp) {
+			fmt::print("ERROR: task {} failed: {}\n", resp.seq(), resp.error_as());
+			error_happened = true;
+		} else {
+			DatabaseOperationStatistics stats = resp.result_as<DatabaseOperationStatistics>();
+			fmt::print("task {} completed: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
+					resp.seq(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			overall_stats += stats;
+		}
 	});
+	if (error_happened)
+		throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
+	return overall_stats;
 }
 
 
@@ -773,6 +797,15 @@ public:
 		for (uint64_t x : ids)
 			modified |= (*this)(x);
 		return modified;
+	}
+	std::size_t subgeneration_size() const {
+		return curgen_.size() - subgen_start_;
+	}
+	std::size_t generation_size() const {
+		return curgen_.size();
+	}
+	std::size_t closed_size() const {
+		return closed_.size();
 	}
 	/**
 	 * Gives access to the current subgeneration.  Do not append to the state
@@ -878,6 +911,14 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	ping_all_workers(manager);
 
 	GadgetSet spec = parse_gid_specs(gid_specs);
+	fmt::print("Gadget spec:");
+	for (uint64_t id : spec.ids)
+		fmt::print(" {}", id);
+	for (pair<uint64_t, uint64_t> p : spec.ranges)
+		fmt::print(" [{},{})", p.first, p.second);
+	for (std::string& n : spec.names)
+		fmt::print(" {}", n);
+	fmt::print("\n");
 
 	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
 	pqxx::connection conn(connect_str);
@@ -885,64 +926,129 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 
 	SearchState state;
 
+	auto filter_unary = [&](auto filter_fxn, auto first, auto last, std::string_view log_name) {
+		Stopwatch stopwatch = Stopwatch::process();
+		vector<uint64_t> needs = filter_fxn(conn, first, last);
+		fmt::print("Found {} of {} gadgets needing {} in {}\n",
+				needs.size(), std::distance(first, last), log_name, stopwatch.elapsed().hms());
+		//Sorting here means tasks will contain consecutive ids more often,
+		//reducing fragmentation in the completion tables.
+		std::sort(needs.begin(), needs.end());
+		return needs;
+	};
+	auto operate_unary = [&](std::vector<uint64_t>&& ids, std::string_view operation_name, std::string_view log_name) {
+		Stopwatch stopwatch = Stopwatch::process();
+		DatabaseOperationStatistics stats = do_unary_operation(manager, operation_name, ids);
+		fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+				log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+	};
+	auto follow_unary_simple = [&](auto follow_fxn, auto first, auto last, std::string_view log_name) {
+		Stopwatch stopwatch = Stopwatch::process();
+		vector<uint64_t> ids = follow_fxn(conn, first, last);
+		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, ids.size(), stopwatch.elapsed().hms());
+		return ids;
+	};
+
 	auto close_and_mirror = [&]() {
 		if (!multiplayer) {
-			vector<uint64_t> needs_close = filter_ids_needing_close(conn, state.subgeneration_begin(), state.subgeneration_end());
+			vector<uint64_t> needs_close = filter_unary(filter_ids_needing_close, state.subgeneration_begin(), state.subgeneration_end(), "close");
 			if (needs_close.size())
-				do_unary_operation(manager, "close-db", needs_close);
+				operate_unary(std::move(needs_close), "close-db", "Close");
+
+			Stopwatch stopwatch = Stopwatch::process();
 			pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> close_edges = follow_close_edges(conn, state.subgeneration_begin(), state.subgeneration_end());
+			fmt::print("Followed close edges from {} gadgets to {} gadgets in {}\n",
+					close_edges.first.size(), close_edges.second.size(), stopwatch.elapsed().hms());
 			state.erase_from_subgeneration(close_edges.first);
 			state(close_edges.second);
 		}
 
-		vector<uint64_t> needs_mirror = filter_ids_needing_mirror(conn, state.subgeneration_begin(), state.subgeneration_end());
+		vector<uint64_t> needs_mirror = filter_unary(filter_ids_needing_mirror, state.subgeneration_begin(), state.subgeneration_end(), "mirror");
 		if (needs_mirror.size())
-			do_unary_operation(manager, "mirror-db", needs_mirror);
-		state(get_mirrors(conn, state.subgeneration_begin(), state.subgeneration_end()));
+			operate_unary(std::move(needs_mirror), "mirror-db", "Mirror");
+		state(follow_unary_simple(get_mirrors, state.subgeneration_begin(), state.subgeneration_end(), "mirror"));
 	};
 
 	vector<uint64_t> combine_rights;
 	for (std::size_t generation = 0; ; ++generation) {
+		Stopwatch generation_stopwatch = Stopwatch::process();
 		if (generation == 0) {
+			Stopwatch stopwatch = Stopwatch::process();
 			vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
+			fmt::print("Collected {} initial gadgets in {}ms\n", initial.size(), stopwatch.elapsed().millis());
 			state(initial);
 		} else {
 			vector<uint64_t> combine_lefts = state.flip_generation();
 			if (combine_lefts.empty()) {
-				fmt::print("exiting\n");
+				fmt::print("previous generation was empty, exiting\n");
 				break;
 			}
+
+			Stopwatch stopwatch = Stopwatch::process();
 			combines_map needs_combine = find_required_combines(conn, combine_lefts, combine_rights, precision);
-			if (needs_combine.size())
-				do_combine_operation(manager, needs_combine, precision);
-			state(get_combines(conn, combine_lefts, combine_rights, precision));
+			//This is sloppy because it doesn't list the number of pairs to be combined.
+			fmt::print("Found {} of {} gadgets needing combine in {}\n",
+					needs_combine.size(), combine_lefts.size(), stopwatch.elapsed().hms());
+
+			if (needs_combine.size()) {
+				//like operate_unary, but not quite
+				stopwatch.reset();
+				DatabaseOperationStatistics stats = do_combine_operation(manager, needs_combine, precision);
+				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			}
+
+			stopwatch.reset();
+			vector<uint64_t> combines = get_combines(conn, combine_lefts, combine_rights, precision);
+			fmt::print("Followed combine edges to {} gadgets in {}\n", combines.size(), stopwatch.elapsed().hms());
+			state(std::move(combines));
 		}
 
 		close_and_mirror();
-		//I suppose we could wait until after any subgenerations (closing) to
+		//I suppose we could wait until after any subgenerations (connects) to
 		//choose the set of combine rights, but this matches how the old
 		//generational search worked.
 		if (generation == 0) {
 			combine_rights.assign(state.subgeneration_begin(), state.subgeneration_end());
+			std::sort(combine_rights.begin(), combine_rights.end());
+			fmt::print("Combine rights ({}:", combine_rights.size());
+			for (uint64_t id : combine_rights)
+				fmt::print(" {}", id);
+			fmt::print("\n");
 			prepare_combine_statements(conn, combine_rights.size(), precision);
 		}
 
-		fmt::print("Finished {}.{}\n", generation, 0);
+		Stopwatch::Result generation_elapsed = generation_stopwatch.elapsed();
+		fmt::print("Finished combine {}.{} in {}; curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
+				generation, 0, generation_elapsed.hms(), state.generation_size(), state.closed_size(),
+				generation_elapsed.absolute().highwaterGibibytes(), generation_elapsed.highwaterGibibytes());
 
 		for (std::size_t subgeneration = 1; ; ++subgeneration) {
+			Stopwatch subgeneration_stopwatch = Stopwatch::process();
 			auto prev_subgen = state.flip_subgeneration();
 			using std::begin; using std::end;
-			vector<uint64_t> needs_connect = filter_ids_needing_connect(conn, begin(prev_subgen), end(prev_subgen));
-			if (needs_connect.size())
-				do_unary_operation(manager, "connect-db", needs_connect);
-			vector<uint64_t> connects = get_connects(conn, begin(prev_subgen), end(prev_subgen));
-			state(connects);
-			if (connects.empty())
+			if (begin(prev_subgen) == end(prev_subgen))
 				break;
+
+			vector<uint64_t> needs_connect = filter_unary(filter_ids_needing_connect, begin(prev_subgen), end(prev_subgen), "connect");
+			if (needs_connect.size())
+				operate_unary(std::move(needs_connect), "connect-db", "Connect");
+
+			vector<uint64_t> connects = follow_unary_simple(get_connects, begin(prev_subgen), end(prev_subgen), "connect");
+			state(connects);
 			close_and_mirror();
-			fmt::print("Finished {}.{}\n", generation, subgeneration);
+
+			Stopwatch::Result subgeneration_elapsed = subgeneration_stopwatch.elapsed();
+			fmt::print("Finished connect {}.{} in {}; subgen size {}, curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
+					generation, subgeneration, subgeneration_elapsed.hms(), state.subgeneration_size(),
+					state.generation_size(), state.closed_size(),
+					subgeneration_elapsed.absolute().highwaterGibibytes(), subgeneration_elapsed.highwaterGibibytes());
 		}
-		fmt::print("Finished {}\n", generation);
+
+		generation_elapsed = generation_stopwatch.elapsed();
+		fmt::print("Finished generation {} in {}; curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
+				generation, generation_elapsed.hms(), state.generation_size(), state.closed_size(),
+				generation_elapsed.absolute().highwaterGibibytes(), generation_elapsed.highwaterGibibytes());
 	}
 
 	return 0;

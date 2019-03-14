@@ -4,6 +4,7 @@
 #include "ops.hpp"
 #include "database.hpp"
 #include "rpc.hpp"
+#include "toggles-shared.hpp"
 #include "stringutils.hpp"
 #include "hopscotch/hopscotch_set.h"
 #include "hopscotch/hopscotch_map.h"
@@ -1281,11 +1282,6 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint
 }
 
 static std::string g_database_connect_string;
-
-struct DatabaseOperationStatistics {
-	std::size_t pruned_locally, pruned_database, novel_gadgets, edges;
-	MSGPACK_DEFINE(pruned_locally, pruned_database, novel_gadgets, edges)
-};
 
 DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
 	pqxx::connection conn(g_database_connect_string);
