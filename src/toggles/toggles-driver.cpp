@@ -1015,7 +1015,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 		if (generation == 0) {
 			combine_rights.assign(state.subgeneration_begin(), state.subgeneration_end());
 			std::sort(combine_rights.begin(), combine_rights.end());
-			fmt::print("Combine rights ({}:", combine_rights.size());
+			fmt::print("Combine rights ({}):", combine_rights.size());
 			for (uint64_t id : combine_rights)
 				fmt::print(" {}", id);
 			fmt::print("\n");
