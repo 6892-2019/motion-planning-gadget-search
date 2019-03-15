@@ -26,5 +26,12 @@ connect_url = 'postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db
 engine = create_engine(connect_url, isolation_level='SERIALIZABLE')
 models.Session.configure(bind=engine)
 models.Base.metadata.create_all(engine)
+# Until https://github.com/sqlalchemy/sqlalchemy/issues/4458 is implemented,
+# we have to do this manually after calling create_all.
+with models.session_scope() as s:
+    s.execute('create index if not exists idx_combine_edges_follow on combine_edges(input1, input2) include(output1)')
+    s.execute('create index if not exists idx_connect_edges_follow on connect_edges(input1) include(output1)')
+    s.execute('create index if not exists idx_mirror_edges_a_b on mirror_edges(a) include(b)')
+    s.execute('create index if not exists idx_mirror_edges_b_a on mirror_edges(b) include(a)')
 
 args.command_func(args)
