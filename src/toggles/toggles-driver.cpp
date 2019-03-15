@@ -986,9 +986,13 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 
 			Stopwatch stopwatch = Stopwatch::process();
 			combines_map needs_combine = find_required_combines(conn, combine_lefts, combine_rights, precision);
-			//This is sloppy because it doesn't list the number of pairs to be combined.
-			fmt::print("Found {} of {} gadgets needing combine in {}\n",
-					needs_combine.size(), combine_lefts.size(), stopwatch.elapsed().hms());
+			std::size_t needy_lefts = 0, needy_pairs = 0;
+			for (const pair<vector<uint64_t>, vector<uint64_t>>& p : needs_combine) {
+				needy_lefts += p.second.size();
+				needy_pairs += p.second.size() * p.first.size();
+			}
+			fmt::print("Found {} of {} lefts needing combine ({} total pairs) in {}\n",
+					needy_lefts, combine_lefts.size(), needy_pairs, stopwatch.elapsed().hms());
 
 			if (needs_combine.size()) {
 				//like operate_unary, but not quite
