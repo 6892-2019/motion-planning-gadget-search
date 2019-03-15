@@ -34,18 +34,24 @@ void debug_scream([[maybe_unused]] T& t) {
 
 class GadgetBuilder {
 public:
-	GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type preinitialized_states = 0) : gadget(make_working(alphabet_size)) {
-		//TODO: should we just translateState(preinitialized_states)?  but better to reserve, etc.
-		for (WorkingAutomaton::state_type i = 0; i < preinitialized_states; ++i)
+	GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type gadget_state_estimate = 1) : gadget(make_working(alphabet_size)) {
+		//Every gadget has at least one state, and it's important that automaton
+		//state 0 correspond to a gadget state (to accept the empty string).
+		//For other states we can freely intermix the states that correspond to
+		//gadget states and those that don't.
+		gadget_state_estimate = std::max(gadget_state_estimate, 1u);
+		for (WorkingAutomaton::state_type i = 0; i < gadget_state_estimate; ++i)
 			translateState(i);
 	}
 	GadgetBuilder& trans(WorkingAutomaton::state_type start, WorkingAutomaton::symbol_type from,
 			WorkingAutomaton::symbol_type to, WorkingAutomaton::state_type end) {
-		assert(gadget->accept(translateState(start)));
-		assert(gadget->accept(translateState(end)));
+		start = translateState(start);
+		end = translateState(end);
+		assert(gadget->accept(start));
+		assert(gadget->accept(end));
 		WorkingAutomaton::state_type t = gadget->addState();
-		gadget->addTrans(translateState(start), from, t);
-		gadget->addTrans(t, to, translateState(end));
+		gadget->addTrans(start, from, t);
+		gadget->addTrans(t, to, end);
 		return *this;
 	}
 	unique_ptr<WorkingAutomaton> build() {
@@ -192,15 +198,21 @@ struct SLLS {
 };
 
 unique_ptr<WorkingAutomaton> inflate_slls(SLLS gadget, unsigned int alphabetSize = 0) {
+	unsigned int states = 0;
 	if (!alphabetSize) {
 		//Size-to-fit by finding the largest used symbol.
-		for (auto e : gadget.uedges)
+		for (auto e : gadget.uedges) {
 			alphabetSize = std::max({alphabetSize, e.from, e.to});
-		for (auto e : gadget.dedges)
+			states = std::max({states, e.start, e.end});
+		}
+		for (auto e : gadget.dedges) {
 			alphabetSize = std::max({alphabetSize, e.from, e.to});
+			states = std::max({states, e.start, e.end});
+		}
 		++alphabetSize;
+		++states;
 	}
-	GadgetBuilder b(alphabetSize);
+	GadgetBuilder b(alphabetSize, states);
 	for (auto e : gadget.uedges)
 		b.trans(e.start, e.from, e.to, e.end).trans(e.end, e.to, e.from, e.start);
 	for (auto e : gadget.dedges)
@@ -452,11 +464,11 @@ private:
 
 unique_ptr<WorkingAutomaton> inflate_outputrow(const std::vector<std::byte>& bytes, unsigned int automaton_size = 0) {
 	PackReader data(bytes);
-	[[maybe_unused]] unsigned int states = data.readVarint(); //TODO: do we really not need this here? at least use it for checking the divisions...
+	[[maybe_unused]] unsigned int states = data.readVarint(); //TODO: use this for checking the divisions?
 	unsigned int locations = data.readVarint();
 	if (automaton_size && locations > automaton_size)
 		throw std::logic_error(fmt::format("inflate_outputrow: specified size too small: {} {}", automaton_size, locations));
-	GadgetBuilder builder(automaton_size ? automaton_size : locations); //TODO: estimate how many automaton states to reserve?
+	GadgetBuilder builder(automaton_size ? automaton_size : locations, states);
 	unsigned int undirected_edges = data.readVarint();
 	unsigned int directed_edges = data.readVarint();
 	//TODO: locations should be less than 16 (for supported inputs), so we
