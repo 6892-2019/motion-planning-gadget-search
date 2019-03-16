@@ -995,13 +995,12 @@ Finisher<SimpleProvenance> do_close(vector<pair<std::uint64_t, vector<std::byte>
 		auto activealpha = a->active_alphabet_size();
 		bool possibly_changed = acceptingClosure(*a, activealpha);
 		if (!possibly_changed) continue;
-		//Even if we changed the automaton, we may not have changed the gadget
-		//because true nop edges (same state and location) aren't stored in the
-		//database version of the gadget, so acceptingClosure's return isn't conclusive.
 		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(canonicalize(*a, activealpha, false));
 		OutputRow r = deflate_outputrow(*a);
 		if (r.edges != p.second)
 			finisher(std::move(r), prov);
+		//TODO: should always be more edges (with undirected counting twice) after
+		//successful (modified the automaton) closure, never the same or fewer
 	}
 	return finisher;
 }
