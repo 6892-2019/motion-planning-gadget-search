@@ -33,7 +33,7 @@ class Gadget(Base):
     data = Column('data', BYTEA, nullable=False)
 
     # We'd make this a unique index but postgres doesn't support that yet.
-    __table_args__ = (Index('idx_gadgets_data', data, postgresql_using='hash'),)
+    __table_args__ = (Index('gadgets_data', data, postgresql_using='hash'),)
 
     @classmethod
     def from_tuple(cls, t):
@@ -122,7 +122,7 @@ class CompletedConnect(Base):
     __tablename__ = 'completed_connects'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
-    __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compconnect_r'),)
+    __table_args__ = (ExcludeConstraint(('r', '&&'), name='completed_connects_excl'),)
 
     @classmethod
     def singleton(cls, gadget_id):
@@ -137,7 +137,7 @@ class CompletedMirror(Base):
     __tablename__ = 'completed_mirrors'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
-    __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compmirror_r'),)
+    __table_args__ = (ExcludeConstraint(('r', '&&'), name='completed_mirrors_excl'),)
 
     @classmethod
     def singleton(cls, gadget_id):
@@ -156,7 +156,7 @@ class CompletedClose(Base):
     __tablename__ = 'completed_closes'
     id = Column('id', BigInteger, primary_key=True, nullable=False)
     r = Column('r', INT8RANGE, CheckConstraint('lower_inc(r) and not upper_inc(r)'), nullable=False)
-    __table_args__ = (ExcludeConstraint(('r', '&&'), name='exc_compclose_r'),)
+    __table_args__ = (ExcludeConstraint(('r', '&&'), name='completed_closes_excl'),)
 
     @classmethod
     def singleton(cls, gadget_id):

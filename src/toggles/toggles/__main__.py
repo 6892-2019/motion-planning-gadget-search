@@ -29,9 +29,9 @@ models.Base.metadata.create_all(engine)
 # Until https://github.com/sqlalchemy/sqlalchemy/issues/4458 is implemented,
 # we have to do this manually after calling create_all.
 with models.session_scope() as s:
-    s.execute('create index if not exists idx_combine_edges_follow on combine_edges(input1, input2) include(output1)')
-    s.execute('create index if not exists idx_connect_edges_follow on connect_edges(input1) include(output1)')
-    s.execute('create index if not exists idx_mirror_edges_a_b on mirror_edges(a) include(b)')
-    s.execute('create index if not exists idx_mirror_edges_b_a on mirror_edges(b) include(a)')
+    s.execute('create index if not exists combine_edges_follow on combine_edges(input1, input2) include(output1)')
+    s.execute('create index if not exists connect_edges_follow on connect_edges(input1) include(output1)')
+    s.execute('create index if not exists mirror_edges_follow_a_b on mirror_edges(a) include(b)')
+    s.execute('create index if not exists mirror_edges_follow_b_a on mirror_edges(b) include(a)')
 
 args.command_func(args)
