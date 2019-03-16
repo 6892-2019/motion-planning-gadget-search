@@ -148,6 +148,10 @@ std::string build_follow_close_edges_query(std::size_t count) {
 	things.reserve(count);
 	for (std::size_t i = 1; i <= count; ++i)
 		things.push_back(fmt::format("${}::int8", i));
+	//TODO: Some other queries ask the database to deduplicate the results for
+	//us, but in this case we need the inputs as well as the outputs.  But we
+	//don't care which input corresponds to which output; we just need the two
+	//sets.  Can we have the database dedup the outputs but preserve all inputs?
 	return "select input1, output1 from close_edges where input1 in (" +
 			join(things, ", ") +
 			")";
@@ -160,7 +164,7 @@ std::string build_get_connects_query(std::size_t count) {
 		things.push_back(fmt::format("${}::int8", i));
 	return "select output1 from connect_edges where input1 in (" +
 			join(things, ", ") +
-			")";
+			") group by output1"; //group by is apparently faster than select distinct
 }
 
 std::string build_required_combines_query(std::size_t left_count, std::size_t right_count, unsigned int precision) {
@@ -174,6 +178,9 @@ std::string build_required_combines_query(std::size_t left_count, std::size_t ri
 		things.push_back(fmt::format("(${}::int8)", i));
 	//TODO: we actually only care to get back rows with nonempty array, but I
 	//can't see how to filter them out.
+	//TODO: this sends the array of rights multiple times, only for us to group
+	//by that array manually.  We'd prefer to get all lefts having the same
+	//array of rights together as one row.
 	return "with lefts (lid) as (values\n" +
 			left_params +
 			"\n), rights (rid) as (values\n" +
