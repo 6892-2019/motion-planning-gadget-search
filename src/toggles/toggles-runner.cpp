@@ -597,18 +597,6 @@ struct Finisher {
 };
 
 
-/**
- * A row (minus the primary key) of an edge in the connect_provenance table.  We
- * use smaller types to save space.
- */
-struct ConnectProvenance {
-	std::uint64_t input1;
-	std::uint32_t output1;
-	std::uint8_t connectPoint;
-	std::uint8_t canonicalizePermutation;
-	MSGPACK_DEFINE_ARRAY(input1, output1, connectPoint, canonicalizePermutation)
-};
-
 template<unsigned int N>
 bool enjoin(Automaton<N>& a, typename Automaton<N>::symbol_type l, typename Automaton<N>::symbol_type m) {
 	using state_type = typename Automaton<N>::state_type;
@@ -757,18 +745,6 @@ ConnectCommandOutput do_connect_for_python(vector<pair<std::uint64_t, vector<std
 	return {std::move(rows), std::move(finisher.prov_)};
 }
 
-
-/**
- * A row (minus the primary key) of an edge in the combine_provenance table.  We
- * use smaller types to save space.
- */
-struct CombineProvenance {
-	std::uint64_t input1, input2;
-	std::uint32_t output1;
-	std::uint8_t splice, rotation, connectPoint;
-	std::uint8_t canonicalizePermutation;
-	MSGPACK_DEFINE_ARRAY(input1, input2, output1, splice, rotation, connectPoint, canonicalizePermutation)
-};
 
 using RotationVec = boost::container::small_vector<unsigned int, 16>;
 template<unsigned int N>
@@ -969,13 +945,6 @@ CombineCommandOutput do_combine_for_python(CombineCommandInput cmd) {
 	return {std::move(rows), std::move(finisher.prov_), std::move(toughies)};
 }
 
-
-struct SimpleProvenance {
-	std::uint64_t input1;
-	std::uint32_t output1;
-	std::uint8_t canonicalizePermutation;
-	MSGPACK_DEFINE_ARRAY(input1, output1, canonicalizePermutation)
-};
 
 struct SimpleOutput {
 //	decltype(Finisher<SimpleProvenance>::rows_.values_container()) rows;

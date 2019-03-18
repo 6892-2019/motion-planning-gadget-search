@@ -312,6 +312,8 @@
       </item>
       <item path="src/toggles/toggles-runner.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/toggles/toggles-shared.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="src/toggles/toggles-shared.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/worker.cpp" ex="false" tool="1" flavor2="0">
