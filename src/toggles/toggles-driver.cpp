@@ -339,7 +339,6 @@ vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const Gadget
 			for (const auto& r : result)
 				ids.push_back(r[0].as<uint64_t>());
 		}
-		vector<pair<uint64_t, uint64_t>> ranges = gs.ranges;
 		pqxx::result result = trans.exec(build_ids_from_specs_immediate(ids, gs.ranges));
 		ids.clear();
 		ids.reserve(result.size());
