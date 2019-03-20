@@ -30,6 +30,17 @@ GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs) {
 	return g;
 }
 
+std::string format_gadget_set(const GadgetSet& spec) {
+	vector<std::string> parts;
+	for (uint64_t id : spec.ids)
+		parts.push_back(fmt::format("{}", id));
+	for (pair<uint64_t, uint64_t> p : spec.ranges)
+		parts.push_back(fmt::format("[{},{})", p.first, p.second));
+	for (const std::string& n : spec.names)
+		parts.push_back(fmt::format("{}", n));
+	return join(parts, " ");
+}
+
 namespace {
 std::string build_missing_gadget_ids_query_immediate(const vector<uint64_t>& gids) {
 	vector<std::string> things;

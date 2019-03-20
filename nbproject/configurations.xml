@@ -43,9 +43,13 @@
         <in>ops.cpp</in>
         <in>provenance.cpp</in>
         <in>provenance.hpp</in>
+        <in>rpc.cpp</in>
         <in>test-gadgetdefs.cpp</in>
         <in>toggles-driver.cpp</in>
+        <in>toggles-report.cpp</in>
         <in>toggles-runner.cpp</in>
+        <in>toggles-shared.cpp</in>
+        <in>toggles-shared.hpp</in>
       </df>
       <in>alphabet.cpp</in>
       <in>automaton-instantiations-0.cpp</in>
@@ -296,19 +300,17 @@
       </item>
       <item path="src/toggles/ops.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/precompiled-asio.cpp" ex="false" tool="1" flavor2="0">
-      </item>
       <item path="src/toggles/provenance.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/provenance.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/rpc.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/toggles/test-gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/toggles-driver.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/toggles-report.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/toggles-runner.cpp" ex="false" tool="1" flavor2="0">
       </item>

@@ -777,14 +777,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	ping_all_workers(manager);
 
 	GadgetSet spec = parse_gid_specs(gid_specs);
-	fmt::print("Gadget spec:");
-	for (uint64_t id : spec.ids)
-		fmt::print(" {}", id);
-	for (pair<uint64_t, uint64_t> p : spec.ranges)
-		fmt::print(" [{},{})", p.first, p.second);
-	for (std::string& n : spec.names)
-		fmt::print(" {}", n);
-	fmt::print("\n");
+	fmt::print("Gadget spec: {}\n", format_gadget_set(spec));
 
 	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
 	pqxx::connection conn(connect_str);

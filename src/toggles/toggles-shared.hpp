@@ -30,6 +30,7 @@ struct GadgetSet {
 };
 
 GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs);
+std::string format_gadget_set(const GadgetSet& gs);
 std::vector<std::uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs);
 
 
