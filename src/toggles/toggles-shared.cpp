@@ -82,9 +82,11 @@ std::string build_ids_from_specs_immediate(const vector<uint64_t>& gids, const v
 	//'in ()' is a syntax error, so use known-invalid ids.
 	if (ids.empty())
 		ids.push_back("-1");
-	if (rstr.empty())
-		rstr.push_back("int8range(-2, -1)");
-	return "select id from gadgets where id in (" + join(ids, ", ") + ") or id <@ any(array[" + join(rstr, ", ") + "]);";
+	//We previously used a range of negative ids here, but that triggers postgres
+	//to do a (parallel) sequential scan.  Instead we have to skip the condition
+	//if we don't need it.  (And yes, when we do need it, it will be slow.)
+	return "select id from gadgets where id in (" + join(ids, ", ") + ")" +
+			(rstr.empty() ? "" : " or id <@ any(array[" + join(rstr, ", ") + "])");
 }
 } //anonymous namespace
 
