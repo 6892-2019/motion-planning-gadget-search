@@ -294,10 +294,9 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			transaction trans(conn);
 			trans.exec("create temporary table closedset ("
 					//can't add "references gadgets" because temp tables can't reference perm tables
-					"id bigint primary key,"
-					"gen smallint"
+					"id bigint primary key not null,"
+					"gen smallint not null"
 					") on commit preserve rows");
-			trans.exec("create index on closedset(gen) include(id)");
 			trans.exec_params(build_insert_closedset_query(source_ids.size(), 0),
 					pqxx::prepare::make_dynamic_params(source_ids));
 			trans.commit();
