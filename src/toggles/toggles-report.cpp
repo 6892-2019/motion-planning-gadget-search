@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "toggles-shared.hpp"
 #include "stringutils.hpp"
+#include "stopwatch.hpp"
 
 using std::vector;
 using std::pair;
@@ -43,21 +44,34 @@ public:
 			uint8_t canonicalizePermutation) {
 		return {EdgeKind::combine, output1, input1, input2, splice, rotation, connectPoint, canonicalizePermutation};
 	}
+	static AnyProv combine(const pqxx::row& r) {
+		return combine(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint64_t>(),
+				r[3].as<uint8_t>(), r[4].as<uint8_t>(), r[5].as<uint8_t>(), r[6].as<uint8_t>());
+	}
 	static AnyProv connect(uint64_t input1, uint64_t output1,
 			uint8_t connectPoint, uint8_t canonicalizePermutation) {
 		return {EdgeKind::connect, output1, input1, std::numeric_limits<uint64_t>::max(),
 				std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max(),
 				connectPoint, canonicalizePermutation};
 	}
+	static AnyProv connect(const pqxx::row& r) {
+		return connect(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>(), r[3].as<uint8_t>());
+	}
 	static AnyProv close(uint64_t input1, uint64_t output1, uint8_t canonicalizePermutation) {
 		return {EdgeKind::close, output1, input1, std::numeric_limits<uint64_t>::max(),
 				std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max(),
 				std::numeric_limits<uint8_t>::max(), canonicalizePermutation};
 	}
+	static AnyProv close(const pqxx::row& r) {
+		return close(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
+	}
 	static AnyProv mirror(uint64_t input1, uint64_t output1, uint8_t canonicalizePermutation) {
 		return {EdgeKind::mirror, output1, input1, std::numeric_limits<uint64_t>::max(),
 				std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max(),
 				std::numeric_limits<uint8_t>::max(), canonicalizePermutation};
+	}
+	static AnyProv mirror(const pqxx::row& r) {
+		return mirror(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
 	}
 
 	EdgeKind kind() const {
@@ -207,6 +221,26 @@ std::string build_follow_mirror_query(unsigned int subgeneration_start) {
 			subgeneration_start);
 }
 
+std::size_t do_stuff(pqxx::connection& conn, tsl::hopscotch_map<uint64_t, AnyProv>& prov,
+		std::string query, AnyProv(*ctor)(const pqxx::row&), std::string_view op_name,
+		unsigned int generation, unsigned int subgeneration) {
+	Stopwatch stopwatch = Stopwatch::process();
+	transaction trans(conn);
+	pqxx::result res = trans.exec(query);
+	std::size_t size = res.size();
+	for (const pqxx::row& r : res) {
+		AnyProv p = ctor(r);
+		auto iter_bool = prov.try_emplace(p.output(), p);
+		if (!iter_bool.second)
+			throw std::logic_error(fmt::format("conflict while {}:\n  {}\n  {}",
+					op_name, iter_bool.first->second, p));
+	}
+	trans.commit();
+	fmt::print("{} {}.{} found {} in {}, closed size {}\n", op_name,
+			generation, subgeneration, size, stopwatch.elapsed().hms(), prov.size());
+	return size;
+}
+
 int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
@@ -248,31 +282,12 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	vector<uint64_t> source_ids, target_ids;
 	unsigned int generation_start = 0, subgeneration_start = 0;
 
-	auto close_and_mirror = [&]() {
-		if (!multiplayer) {
-			transaction trans(conn);
-			pqxx::result res = trans.exec(build_follow_close_query(subgeneration_start));
-			for (const pqxx::row& r : res) {
-				AnyProv p = AnyProv::close(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
-				auto iter_bool = prov.try_emplace(p.output(), p);
-				if (!iter_bool.second)
-					throw std::logic_error(fmt::format("conflict while closing:\n  {}\n  {}",
-							iter_bool.first->second, p));
-			}
-			trans.commit();
-		}
-		{
-			transaction trans(conn);
-			pqxx::result res = trans.exec(build_follow_mirror_query(subgeneration_start));
-			for (const pqxx::row& r : res) {
-				AnyProv p = AnyProv::mirror(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
-				auto iter_bool = prov.try_emplace(p.output(), p);
-				if (!iter_bool.second)
-					throw std::logic_error(fmt::format("conflict while mirroring:\n  {}\n  {}",
-							iter_bool.first->second, p));
-			}
-			trans.commit();
-		}
+	auto close_and_mirror = [&](unsigned int generation, unsigned int subgeneration) {
+		if (!multiplayer)
+			do_stuff(conn, prov, build_follow_close_query(subgeneration_start),
+					AnyProv::close, "closing", generation, subgeneration);
+		do_stuff(conn, prov, build_follow_mirror_query(subgeneration_start),
+				AnyProv::mirror, "mirroring", generation, subgeneration);
 	};
 
 	for (unsigned int generation = 0; ; generation++) {
@@ -295,43 +310,36 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 					pqxx::prepare::make_dynamic_params(source_ids));
 			trans.commit();
 		} else {
-			transaction trans(conn);
-			pqxx::result res = trans.exec(build_follow_combine_query(generation_start, subgeneration_start+1));
-			if (res.empty()) break;
-			for (const pqxx::row& r : res) {
-				AnyProv p = AnyProv::combine(r[0].as<uint64_t>(), r[1].as<uint64_t>(),
-						r[2].as<uint64_t>(), r[3].as<uint8_t>(), r[4].as<uint8_t>(),
-						r[5].as<uint8_t>(), r[6].as<uint8_t>());
-				auto iter_bool = prov.try_emplace(p.output(), p);
-				if (!iter_bool.second)
-					throw std::logic_error(fmt::format("conflict while combining:\n  {}\n  {}",
-							iter_bool.first->second, p));
-			}
-			trans.commit();
+			std::size_t discovered = do_stuff(conn, prov,
+					build_follow_combine_query(generation_start, subgeneration_start+1),
+					AnyProv::combine, "combining", generation, 0);
+			if (!discovered)
+				break;
 			generation_start = subgeneration_start = subgeneration_start+1;
 		}
 
-		close_and_mirror();
+		close_and_mirror(generation, 0);
+
 		for (unsigned int subgeneration = 1; ; subgeneration++) {
-			bool progress = false;
-			{
-				transaction trans(conn);
-				pqxx::result res = trans.exec(build_follow_connect_query(subgeneration_start, subgeneration_start+1));
-				progress = !res.empty();
-				for (const pqxx::row& r : res) {
-					AnyProv p = AnyProv::connect(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>(), r[3].as<uint8_t>());
-					auto iter_bool = prov.try_emplace(p.output(), p);
-					if (!iter_bool.second)
-						throw std::logic_error(fmt::format("conflict while connecting:\n  {}\n  {}",
-								iter_bool.first->second, p));
-				}
-				trans.commit();
-			}
-			if (!progress) break;
+			std::size_t discovered = do_stuff(conn, prov,
+					build_follow_connect_query(subgeneration_start, subgeneration_start+1),
+					AnyProv::connect, "connecting", generation, subgeneration);
+			if (!discovered)
+				break;
 			++subgeneration_start;
-			close_and_mirror();
+			close_and_mirror(generation, subgeneration);
 		}
-		fmt::print("{}\n", prov.size());
+
+		{
+			transaction trans(conn);
+			trans.exec("analyze closedset");
+			trans.commit();
+		}
+
+//		fmt::print("{}\n", prov.size());
+		for (const auto& p : prov)
+			fmt::print("({}, 0), ", p.first);
+		fmt::print("\n");
 	}
 	return 0;
 }
