@@ -101,6 +101,38 @@ private:
 	EdgeKind kind_;
 };
 
+template<>
+struct fmt::formatter<AnyProv> {
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
+	template<typename FormatContext>
+	auto format(const AnyProv& p, FormatContext& ctx) {
+		switch (p.kind()) {
+			case EdgeKind::combine:
+				return fmt::format_to(ctx.out(), "{} = combine {} splice {:d} with {} rotate {:d} connect at {:d} @{:d}",
+						p.output(), p.input1(), p.splice(), p.input2(), p.rotation(),
+						p.connectPoint(), p.canonicalizePermutation());
+			case EdgeKind::connect:
+				return fmt::format_to(ctx.out(), "{} = connect {} at {:d} @{:d}",
+						p.output(), p.input1(), p.connectPoint(), p.canonicalizePermutation());
+			case EdgeKind::close:
+				return fmt::format_to(ctx.out(), "{} = close {} @{:d}",
+						p.output(), p.input1(), p.canonicalizePermutation());
+			case EdgeKind::mirror:
+				return fmt::format_to(ctx.out(), "{} = mirror {} @{:d}",
+						p.output(), p.input1(), p.canonicalizePermutation());
+			case EdgeKind::source:
+				return fmt::format_to(ctx.out(), "{} = source", p.output());
+			default:
+				//TODO: We'd like to dump the other members to help track down
+				//the corruption, but we'd hit the asserts in the methods.
+				//Figure out how friending a future full specialization works,
+				//then print the members directly.
+				return fmt::format_to(ctx.out(), "unknown AnyProv kind {}", static_cast<unsigned char>(p.kind()));
+		}
+	}
+};
+
 std::string build_insert_closedset_query(std::size_t count, unsigned int generation) {
 	vector<std::string> things;
 	for (std::size_t i = 1; i <= count; ++i)
@@ -108,28 +140,38 @@ std::string build_insert_closedset_query(std::size_t count, unsigned int generat
 	return "insert into closedset (id, gen) values " + join(things, ", ");
 }
 
-std::string build_follow_combine_query(unsigned int previous_combine, unsigned int next_generation) {
+std::string build_follow_combine_query(unsigned int generation_start, unsigned int next_generation) {
 	return fmt::format(
 			"with edges as (select distinct on(output1) * from combine_edges join closedset on ((\n"
-			"      input1 = id\n"
+			"      input1 = closedset.id\n"
 			"    and \n"
 			"      input2 in (select id from closedset where gen >= {0})\n"
 			"  or\n"
-			"      input2 = id\n"
+			"      input2 = closedset.id\n"
 			"    and\n"
 			"      input1 in (select id from closedset where gen >= {0})\n"
 			") and not exists (select 1 from closedset where id = output1 limit 1)\n"
 			")),\n"
 			"generation (gen) as (values ({1})),\n"
-			"ins as (insert into closedset(id, gen) select edges.output1, generation.gen from edges cross join generation on conflict do nothing)\n"
+			"ins as (insert into closedset(id, gen) select edges.output1, generation.gen from edges cross join generation)\n"
 			//everything but the id
 			"select input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation from edges",
-			previous_combine, next_generation);
+			generation_start, next_generation);
 }
 
-std::string build_follow_connect_query(unsigned int previous_connect, unsigned int next_generation) {
-	return "TODO";
+std::string build_follow_connect_query(unsigned int subgeneration_start, unsigned int next_generation) {
+	return fmt::format(
+			"with edges as (select distinct on(output1) * from connect_edges join closedset on (\n"
+			"  closedset.id = input1 and\n"
+			"  gen = {0}\n"
+			"  and not exists (select 1 from closedset where closedset.id = output1 limit 1)\n"
+			")),\n"
+			"nextgen(gen) as (values ({1})),\n"
+			"ins as (insert into closedset(id, gen) select edges.output1, nextgen.gen from edges cross join nextgen)\n"
+			"select input1, output1, connect_location, canonicalize_rotation from edges",
+			subgeneration_start, next_generation);
 }
+
 std::string build_follow_close_query(unsigned int subgeneration_start) {
 	return fmt::format(
 			"with edges as (select distinct on(output1) * from close_edges join closedset on (\n"
@@ -138,12 +180,31 @@ std::string build_follow_close_query(unsigned int subgeneration_start) {
 			"  and not exists (select 1 from closedset where id = output1)\n"
 			")),\n"
 			"generation (gen) as (values ({0})),\n"
-			"ins as (insert into closedset(id, gen) select edges.output1, generation.gen from edges cross join generation on conflict do nothing)\n"
+			"ins as (insert into closedset(id, gen) select edges.output1, generation.gen from edges cross join generation)\n"
 			"select input1, output1, canonicalize_rotation from edges",
 			subgeneration_start);
 }
-std::string build_follow_mirror_query(unsigned int previous_connect, unsigned int next_generation) {
-	return "TODO";
+
+std::string build_follow_mirror_query(unsigned int subgeneration_start) {
+	//select distinct doesn't just work here because of a/b symmetry
+	return fmt::format(
+			"with aedges as (select * from mirror_edges join closedset on (\n"
+			"  id = a\n"
+			"  and gen = {0}\n"
+			"  and not exists (select 1 from closedset where id = b)\n"
+			")),\n"
+			"bedges as (select * from mirror_edges join closedset on (\n"
+			"  id = b\n"
+			"  and gen = {0}\n"
+			"  and not exists (select 1 from closedset where id = a)\n"
+			")),\n"
+			"generation (gen) as (values ({0})),\n"
+			"ains as (insert into closedset(id, gen) select aedges.b, generation.gen from aedges cross join generation),\n"
+			"bins as (insert into closedset(id, gen) select bedges.a, generation.gen from bedges cross join generation)\n"
+			"select a, b, canonicalize_rotation from aedges\n"
+			"union all\n"
+			"select b, a, canonicalize_rotation from bedges",
+			subgeneration_start);
 }
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
@@ -186,6 +247,34 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	tsl::hopscotch_map<uint64_t, AnyProv> prov;
 	vector<uint64_t> source_ids, target_ids;
 	unsigned int generation_start = 0, subgeneration_start = 0;
+
+	auto close_and_mirror = [&]() {
+		if (!multiplayer) {
+			transaction trans(conn);
+			pqxx::result res = trans.exec(build_follow_close_query(subgeneration_start));
+			for (const pqxx::row& r : res) {
+				AnyProv p = AnyProv::close(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
+				auto iter_bool = prov.try_emplace(p.output(), p);
+				if (!iter_bool.second)
+					throw std::logic_error(fmt::format("conflict while closing:\n  {}\n  {}",
+							iter_bool.first->second, p));
+			}
+			trans.commit();
+		}
+		{
+			transaction trans(conn);
+			pqxx::result res = trans.exec(build_follow_mirror_query(subgeneration_start));
+			for (const pqxx::row& r : res) {
+				AnyProv p = AnyProv::mirror(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
+				auto iter_bool = prov.try_emplace(p.output(), p);
+				if (!iter_bool.second)
+					throw std::logic_error(fmt::format("conflict while mirroring:\n  {}\n  {}",
+							iter_bool.first->second, p));
+			}
+			trans.commit();
+		}
+	};
+
 	for (unsigned int generation = 0; ; generation++) {
 		if (generation == 0) {
 			source_ids = collect_initial_gadget_set(conn, source_set);
@@ -206,23 +295,43 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 					pqxx::prepare::make_dynamic_params(source_ids));
 			trans.commit();
 		} else {
-			//TODO: combine
-//				AnyProv p = AnyProv::combine(r[0].as<uint64_t>(), r[1].as<uint64_t>(),
-//						r[2].as<uint64_t>(), r[3].as<uint8_t>(), r[4].as<uint8_t>(),
-//						r[5].as<uint8_t>(), r[6].as<uint8_t>());
+			transaction trans(conn);
+			pqxx::result res = trans.exec(build_follow_combine_query(generation_start, subgeneration_start+1));
+			if (res.empty()) break;
+			for (const pqxx::row& r : res) {
+				AnyProv p = AnyProv::combine(r[0].as<uint64_t>(), r[1].as<uint64_t>(),
+						r[2].as<uint64_t>(), r[3].as<uint8_t>(), r[4].as<uint8_t>(),
+						r[5].as<uint8_t>(), r[6].as<uint8_t>());
+				auto iter_bool = prov.try_emplace(p.output(), p);
+				if (!iter_bool.second)
+					throw std::logic_error(fmt::format("conflict while combining:\n  {}\n  {}",
+							iter_bool.first->second, p));
+			}
+			trans.commit();
+			generation_start = subgeneration_start = subgeneration_start+1;
 		}
 
-		if (!multiplayer) {
-			transaction trans(conn);
-			pqxx::result res = trans.exec(build_follow_close_query(subgeneration_start));
-			for (const pqxx::row& r : res) {
-				AnyProv p = AnyProv::close(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
-				fmt::print(stderr, "{} {} {}\n", p.input1(), p.output(), p.canonicalizePermutation());
-				if (!prov.try_emplace(p.output(), p).second) {
-					fmt::print(stderr, "complain {}\n", p.output());
+		close_and_mirror();
+		for (unsigned int subgeneration = 1; ; subgeneration++) {
+			bool progress = false;
+			{
+				transaction trans(conn);
+				pqxx::result res = trans.exec(build_follow_connect_query(subgeneration_start, subgeneration_start+1));
+				progress = !res.empty();
+				for (const pqxx::row& r : res) {
+					AnyProv p = AnyProv::connect(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>(), r[3].as<uint8_t>());
+					auto iter_bool = prov.try_emplace(p.output(), p);
+					if (!iter_bool.second)
+						throw std::logic_error(fmt::format("conflict while connecting:\n  {}\n  {}",
+								iter_bool.first->second, p));
 				}
+				trans.commit();
 			}
+			if (!progress) break;
+			++subgeneration_start;
+			close_and_mirror();
 		}
-		return 0;
+		fmt::print("{}\n", prov.size());
 	}
+	return 0;
 }
