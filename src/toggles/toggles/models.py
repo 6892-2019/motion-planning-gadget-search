@@ -87,6 +87,8 @@ class MirrorEdge(Base):
     b = Column('b', BigInteger, ForeignKey(Gadget.id), primary_key=True, nullable=False)
     canonicalize_rotation = Column('canonicalize_rotation', SmallInteger, nullable=False)
     # Mirror edges are undirected, so we canonicalize by sorting the ids.
+    # Note that the same canonicalize rotation applies to both directions, so we
+    # don't lose any information by sorting here.
     # TODO: this doesn't prevent (a,c)/(b,c); we want this table to be a (partial) matching
     __table_args__ = (CheckConstraint('a < b', name='chk_mirror_sorted'),)
 
