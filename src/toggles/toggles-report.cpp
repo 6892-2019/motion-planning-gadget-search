@@ -166,8 +166,7 @@ std::string build_follow_combine_query(unsigned int generation_start, unsigned i
 			"      input1 in (select id from closedset where gen >= {0})\n"
 			") and not exists (select 1 from closedset where id = output1 limit 1)\n"
 			")),\n"
-			"generation (gen) as (values ({1})),\n"
-			"ins as (insert into closedset(id, gen) select edges.output1, generation.gen from edges cross join generation)\n"
+			"ins as (insert into closedset(id, gen) select edges.output1, {1} from edges)\n"
 			//everything but the id
 			"select input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation from edges",
 			generation_start, next_generation);
@@ -180,8 +179,7 @@ std::string build_follow_connect_query(unsigned int subgeneration_start, unsigne
 			"  gen = {0}\n"
 			"  and not exists (select 1 from closedset where closedset.id = output1 limit 1)\n"
 			")),\n"
-			"nextgen(gen) as (values ({1})),\n"
-			"ins as (insert into closedset(id, gen) select edges.output1, nextgen.gen from edges cross join nextgen)\n"
+			"ins as (insert into closedset(id, gen) select edges.output1, {1} from edges)\n"
 			"select input1, output1, connect_location, canonicalize_rotation from edges",
 			subgeneration_start, next_generation);
 }
@@ -193,8 +191,7 @@ std::string build_follow_close_query(unsigned int subgeneration_start) {
 			"  and gen = {0}\n"
 			"  and not exists (select 1 from closedset where id = output1)\n"
 			")),\n"
-			"generation (gen) as (values ({0})),\n"
-			"ins as (insert into closedset(id, gen) select edges.output1, generation.gen from edges cross join generation)\n"
+			"ins as (insert into closedset(id, gen) select edges.output1, {0} from edges)\n"
 			"select input1, output1, canonicalize_rotation from edges",
 			subgeneration_start);
 }
@@ -212,9 +209,8 @@ std::string build_follow_mirror_query(unsigned int subgeneration_start) {
 			"  and gen = {0}\n"
 			"  and not exists (select 1 from closedset where id = a)\n"
 			")),\n"
-			"generation (gen) as (values ({0})),\n"
-			"ains as (insert into closedset(id, gen) select aedges.b, generation.gen from aedges cross join generation),\n"
-			"bins as (insert into closedset(id, gen) select bedges.a, generation.gen from bedges cross join generation)\n"
+			"ains as (insert into closedset(id, gen) select aedges.b, {0} from aedges),\n"
+			"bins as (insert into closedset(id, gen) select bedges.a, {0} from bedges)\n"
 			"select a, b, canonicalize_rotation from aedges\n"
 			"union all\n"
 			"select b, a, canonicalize_rotation from bedges",
