@@ -107,7 +107,7 @@ private:
 			uint8_t splice, uint8_t rotation, uint8_t connectPoint,
 			uint8_t canonicalizeRotation) : output1_(output1), input1_(input1),
 					input2_(input2), splice_(splice), rotation_(rotation),
-					connectPoint_(connectPoint), canonicalizePermutation_(canonicalizeRotation) {}
+					connectPoint_(connectPoint), canonicalizePermutation_(canonicalizeRotation), kind_(kind) {}
 	std::uint64_t output1_, input1_, input2_;
 	std::uint8_t splice_, rotation_, connectPoint_;
 	std::uint8_t canonicalizePermutation_;
