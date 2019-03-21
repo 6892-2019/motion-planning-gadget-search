@@ -327,10 +327,11 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			trans.commit();
 		}
 
-//		fmt::print("{}\n", prov.size());
-		for (const auto& p : prov)
-			fmt::print("({}, 0), ", p.first);
-		fmt::print("\n");
+		for (uint64_t t : target_ids) {
+			auto it = prov.find(t);
+			if (it != prov.end())
+				fmt::print("{}\n", it->second);
+		}
 	}
 	return 0;
 }
