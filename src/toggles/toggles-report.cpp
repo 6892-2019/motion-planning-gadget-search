@@ -156,16 +156,25 @@ std::string build_insert_closedset_query(std::size_t count, unsigned int generat
 
 std::string build_follow_combine_query(unsigned int generation_start, unsigned int next_generation) {
 	return fmt::format(
-			"with edges as (select distinct on(output1) * from combine_edges join closedset on ((\n"
-			"      input1 = closedset.id\n"
-			"    and \n"
-			"      input2 in (select id from closedset where gen >= {0})\n"
-			"  or\n"
-			"      input2 = closedset.id\n"
-			"    and\n"
-			"      input1 in (select id from closedset where gen >= {0})\n"
-			") and not exists (select 1 from closedset where id = output1 limit 1)\n"
+//			"with edges as (select distinct on(output1) * from combine_edges join closedset on ((\n"
+//			"      input1 = closedset.id\n"
+//			"    and \n"
+//			"      input2 in (select id from closedset where gen >= {0})\n"
+//			"  or\n"
+//			"      input2 = closedset.id\n"
+//			"    and\n"
+//			"      input1 in (select id from closedset where gen >= {0})\n"
+//			") and not exists (select 1 from closedset where id = output1 limit 1)\n"
+//			")),\n"
+
+			"with edges as (select distinct on(output1) * from combine_edges where (\n"
+			"  not exists (select 1 from closedset where closedset.id = output1) and\n"
+			"  exists (select 1 from closedset where closedset.id = input1) and\n"
+			"  exists (select 1 from closedset where closedset.id = input2) and\n"
+			"    ((select gen from closedset where closedset.id = input1) >= {0} or\n"
+			"     (select gen from closedset where closedset.id = input2) >= {0})\n"
 			")),\n"
+
 			"ins as (insert into closedset(id, gen) select edges.output1, {1} from edges)\n"
 			//everything but the id
 			"select input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation from edges",
