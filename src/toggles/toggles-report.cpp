@@ -395,21 +395,38 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			trans.commit();
 		}
 
+		auto get_names = [&](uint64_t id) -> std::string {
+			ro_transaction trans(conn);
+			pqxx::result res = trans.exec_params("select name from names where gadget_id = $1 and "
+					"not exists (select 1 from names as n2 where n2.gadget_id != $1 and n2.name = names.name) order by name", id);
+			vector<std::string_view> names;
+			for (const pqxx::row& r : res)
+				names.push_back(r[0].c_str());
+			return join(names, ", ");
+		};
+
 		using prov_iterator = tsl::hopscotch_map<uint64_t, AnyProv>::iterator;
 		for (prov_iterator target = target_prov.begin(); target != target_prov.end();) {
 			prov_iterator leaf = prov.find(target->first);
 			if (leaf != prov.end()) {
 				vector<AnyProv> target_trace = toposort_provs(target_prov, target->first);
 				fmt::print("Target trace:\n");
-				for (const AnyProv& p : target_trace)
-					fmt::print("{}\n", p);
+				for (const AnyProv& p : target_trace) {
+					if (p.kind() == EdgeKind::source)
+						fmt::print("{} {}\n", p, get_names(p.output()));
+					else
+						fmt::print("{}\n", p);
+				}
 				//Don't report finding it again in the future.
 				target = target_prov.erase(target);
 
 				vector<AnyProv> source_trace = toposort_provs(prov, leaf->first);
 				fmt::print("Source trace:\n");
 				for (const AnyProv& p : source_trace)
-					fmt::print("{}\n", p);
+					if (p.kind() == EdgeKind::source)
+						fmt::print("{} {}\n", p, get_names(p.output()));
+					else
+						fmt::print("{}\n", p);
 			} else
 				++target;
 		}
