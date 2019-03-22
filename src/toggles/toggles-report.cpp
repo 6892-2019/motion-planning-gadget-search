@@ -102,6 +102,16 @@ public:
 	uint8_t canonicalizePermutation() const {
 		return canonicalizePermutation_;
 	}
+
+	vector<uint64_t> inputs() const {
+		//Returning a vector isn't great for perf, but is convenient.
+		vector<uint64_t> r;
+		if (input1_ != std::numeric_limits<uint64_t>::max())
+			r.push_back(input1_);
+		if (input2_ != std::numeric_limits<uint64_t>::max())
+			r.push_back(input2_);
+		return r;
+	}
 private:
 	AnyProv(EdgeKind kind, uint64_t output1, uint64_t input1, uint64_t input2,
 			uint8_t splice, uint8_t rotation, uint8_t connectPoint,
@@ -146,6 +156,47 @@ struct fmt::formatter<AnyProv> {
 		}
 	}
 };
+
+vector<AnyProv> toposort_provs(const tsl::hopscotch_map<uint64_t, AnyProv>& prov, uint64_t root) {
+	tsl::hopscotch_map<uint64_t, uint64_t> needs;
+	tsl::hopscotch_map<uint64_t, vector<uint64_t>> releases;
+	vector<uint64_t> stack;
+	stack.push_back(root);
+	while (!stack.empty()) {
+		uint64_t cur = stack.back();
+		stack.pop_back();
+		const AnyProv& p = prov.at(cur);
+		needs[cur] = 0;
+		for (uint64_t i : p.inputs()) {
+			++needs[cur];
+			if (releases[i].empty()) //constructs if not existing
+				stack.push_back(i);
+			releases[i].push_back(cur);
+		}
+	}
+
+	for (auto it = needs.begin(); it != needs.end(); ++it)
+		if (!it->second)
+			stack.push_back(it->first);
+	assert(!stack.empty());
+	std::sort(stack.begin(), stack.end(), std::greater<>());
+	vector<uint64_t> released_now;
+	vector<AnyProv> ret;
+	while (!stack.empty()) {
+		uint64_t cur = stack.back();
+		stack.pop_back();
+		ret.push_back(prov.at(cur));
+		released_now.clear();
+		for (uint64_t r : releases[cur]) {
+			--needs[r];
+			if (!needs[r])
+				released_now.push_back(r);
+		}
+		std::sort(released_now.begin(), released_now.end(), std::greater<>());
+		stack.insert(stack.end(), released_now.begin(), released_now.end());
+	}
+	return ret;
+}
 
 std::string build_insert_closedset_query(std::size_t count, unsigned int generation) {
 	vector<std::string> things;
@@ -270,11 +321,12 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
 	pqxx::connection conn(connect_str);
 
-	tsl::hopscotch_map<uint64_t, AnyProv> prov;
+	tsl::hopscotch_map<uint64_t, AnyProv> prov, target_prov;
 	vector<uint64_t> source_ids, target_ids;
 	unsigned int generation_start = 0, subgeneration_start = 0;
 
-	auto close_and_mirror = [&](unsigned int generation, unsigned int subgeneration) {
+	auto close_and_mirror = [&conn, multiplayer](tsl::hopscotch_map<uint64_t, AnyProv>& prov,
+			unsigned int subgeneration_start, unsigned int generation, unsigned int subgeneration) {
 		if (!multiplayer)
 			do_stuff(conn, prov, build_follow_close_query(subgeneration_start),
 					AnyProv::close, "closing", generation, subgeneration);
@@ -287,16 +339,32 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			source_ids = collect_initial_gadget_set(conn, source_set);
 			std::sort(source_ids.begin(), source_ids.end());
 			for (uint64_t i : source_ids)
-				prov.try_emplace(i, AnyProv::source(i)); //default-construct the variant
+				prov.try_emplace(i, AnyProv::source(i));
 			target_ids = collect_initial_gadget_set(conn, target_set);
 			std::sort(target_ids.begin(), target_ids.end());
+			for (uint64_t i : target_ids)
+				target_prov.try_emplace(i, AnyProv::source(i));
+
+			{
+				transaction trans(conn);
+				trans.exec("create temporary table closedset ("
+						//can't add "references gadgets" because temp tables can't reference perm tables
+						"id bigint primary key not null,"
+						"gen smallint not null"
+						") on commit preserve rows");
+				//We want to close and mirror the targets in the same way as sources
+				//so we can recognize when we've build a closed/mirrored gadget.
+				trans.exec_params(build_insert_closedset_query(target_ids.size(), 0),
+						pqxx::prepare::make_dynamic_params(target_ids));
+				trans.commit();
+			}
+
+			//do_stuff starts its own transaction so we have to do this outside.
+			close_and_mirror(target_prov, 0, 0, 0);
 
 			transaction trans(conn);
-			trans.exec("create temporary table closedset ("
-					//can't add "references gadgets" because temp tables can't reference perm tables
-					"id bigint primary key not null,"
-					"gen smallint not null"
-					") on commit preserve rows");
+			//Delete the target stuff and insert the sources.
+			trans.exec("delete from closedset");
 			trans.exec_params(build_insert_closedset_query(source_ids.size(), 0),
 					pqxx::prepare::make_dynamic_params(source_ids));
 			trans.commit();
@@ -309,7 +377,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			generation_start = subgeneration_start = subgeneration_start+1;
 		}
 
-		close_and_mirror(generation, 0);
+		close_and_mirror(prov, subgeneration_start, generation, 0);
 
 		for (unsigned int subgeneration = 1; ; subgeneration++) {
 			std::size_t discovered = do_stuff(conn, prov,
@@ -318,7 +386,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			if (!discovered)
 				break;
 			++subgeneration_start;
-			close_and_mirror(generation, subgeneration);
+			close_and_mirror(prov, subgeneration_start, generation, subgeneration);
 		}
 
 		{
@@ -327,10 +395,23 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			trans.commit();
 		}
 
-		for (uint64_t t : target_ids) {
-			auto it = prov.find(t);
-			if (it != prov.end())
-				fmt::print("{}\n", it->second);
+		using prov_iterator = tsl::hopscotch_map<uint64_t, AnyProv>::iterator;
+		for (prov_iterator target = target_prov.begin(); target != target_prov.end();) {
+			prov_iterator leaf = prov.find(target->first);
+			if (leaf != prov.end()) {
+				vector<AnyProv> target_trace = toposort_provs(target_prov, target->first);
+				fmt::print("Target trace:\n");
+				for (const AnyProv& p : target_trace)
+					fmt::print("{}\n", p);
+				//Don't report finding it again in the future.
+				target = target_prov.erase(target);
+
+				vector<AnyProv> source_trace = toposort_provs(prov, leaf->first);
+				fmt::print("Source trace:\n");
+				for (const AnyProv& p : source_trace)
+					fmt::print("{}\n", p);
+			} else
+				++target;
 		}
 	}
 	return 0;
