@@ -394,6 +394,12 @@ gadgets:
   s3l3_14:
     uedges: [[0, 0, 1, 1], [0, 1, 2, 1], [0, 2, 0, 2], [1, 0, 2, 2]]
 
+  # Yevhenii's self-closing door gadget from 6.892
+  directed-self-closing-door:
+    dedges: [[0, 0, 1, 1], [0, 2, 2, 0], [1, 2, 2, 0]]
+  undirected-self-closing-door:
+    dedges: [[0, 0, 1, 1], [0, 1, 0, 1], [0, 2, 2, 0], [1, 2, 2, 0]]
+
 aliases:
   crossing-wire-wire: crossover
   split: 3-split
