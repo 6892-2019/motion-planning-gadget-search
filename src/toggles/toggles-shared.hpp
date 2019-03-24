@@ -27,6 +27,7 @@ struct GadgetSet {
 	std::vector<std::uint64_t> ids;
 	std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges; //inclusive, exclusive
 	std::vector<std::string> names;
+	MSGPACK_DEFINE_ARRAY(ids, ranges, names)
 };
 
 GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs);

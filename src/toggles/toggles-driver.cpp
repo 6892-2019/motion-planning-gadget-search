@@ -650,7 +650,20 @@ DatabaseOperationStatistics do_combine_operation(WorkerManager& manager, const c
 
 class SearchState {
 public:
-	SearchState() : subgen_start_(0) {}
+	class Serialized;
+	SearchState() : subgen_start_(0), prev_subgen_start_(0) {}
+	SearchState(const Serialized& s) : closed_(s.closed.begin(), s.closed.end()),
+			curgen_(s.curgen), subgen_start_(s.subgen_start), prev_subgen_start_(s.prev_subgen_start) {
+		if (subgen_start_ >= curgen_.size())
+			throw std::runtime_error(fmt::format("subgen_start_ {} curgen_.size() {} while restoring",
+					subgen_start_, curgen_.size()));
+	}
+	SearchState(Serialized&& s) : closed_(s.closed.begin(), s.closed.end()),
+			curgen_(std::move(s.curgen)), subgen_start_(s.subgen_start), prev_subgen_start_(s.prev_subgen_start) {
+		if (subgen_start_ >= curgen_.size())
+			throw std::runtime_error(fmt::format("subgen_start_ {} curgen_.size() {} while restoring",
+					subgen_start_, curgen_.size()));
+	}
 	bool operator()(uint64_t id) {
 		if (closed_.insert(id).second) {
 			curgen_.push_back(id);
@@ -687,6 +700,12 @@ public:
 	vector<uint64_t>::const_iterator subgeneration_end() const {
 		return curgen_.cend();
 	}
+	vector<uint64_t>::const_iterator prev_subgeneration_begin() const {
+		return curgen_.cbegin() + prev_subgen_start_;
+	}
+	vector<uint64_t>::const_iterator prev_subgeneration_end() const {
+		return subgeneration_begin();
+	}
 	/**
 	 * Erases the ids in the given set from the current subgeneration.  They're
 	 * still in the closed set.
@@ -702,19 +721,59 @@ public:
 	vector<uint64_t> flip_generation() {
 		vector<uint64_t> prev = std::move(curgen_);
 		curgen_.clear(); //make moved-from vector suitable for insertion again
-		subgen_start_ = 0;
+		prev_subgen_start_ = subgen_start_ = 0;
 		return prev;
 	}
 	/**
-	 * Begin a new subgeneration.  Don't use the returned iterator range after
-	 * doing any further appending to the state (the pointed-to vector may have
-	 * to reallocate).
-	 * @return an iterator range over the elements in the previous subgeneration
+	 * Begin a new subgeneration.
 	 */
-	auto flip_subgeneration() {
-		auto prev_subgen = make_range_for_pair(curgen_.cbegin() + subgen_start_, curgen_.cend());
+	void flip_subgeneration() {
+		prev_subgen_start_ = subgen_start_;
 		subgen_start_ = curgen_.size();
-		return prev_subgen;
+	}
+
+	/**
+	 * Serialization proxy for SearchState.  The vectors are sorted (curgen's
+	 * parts separately) so the on-disk representation is deterministic, at the
+	 * cost of making the resumed state not exactly the same as the suspended
+	 * state (in which they were not sorted).
+	 *
+	 * TODO: consider delta-compressing the vectors.  (may help to break curgen
+	 * into two parts rather than deal with the discontinuity in sorting)
+	 * TODO: Serialized maybe should have constructors taking SearchState&& and
+	 * const SearchState&
+	 */
+	struct Serialized {
+		vector<uint64_t> closed;
+		vector<uint64_t> curgen;
+		std::size_t subgen_start, prev_subgen_start;
+		void canonicalize() {
+			std::sort(closed.begin(), closed.end());
+			std::sort(curgen.begin(), curgen.begin()+prev_subgen_start);
+			std::sort(curgen.begin()+prev_subgen_start, curgen.begin()+subgen_start);
+			std::sort(curgen.begin()+subgen_start, curgen.end());
+		}
+		MSGPACK_DEFINE_ARRAY(closed, curgen, subgen_start)
+	};
+	Serialized serialized() const & {
+		Serialized s;
+		s.closed.assign(closed_.begin(), closed_.end());
+		s.curgen = curgen_;
+		s.subgen_start = subgen_start_;
+		s.prev_subgen_start = prev_subgen_start_;
+		s.canonicalize();
+		return s;
+	}
+	Serialized serialized() && {
+		Serialized s;
+		//can't just move from the set, unfortunately.
+		s.closed.assign(closed_.begin(), closed_.end());
+		//TODO: figure out how to free closed_'s memory (no shrink_to_fit(), rehash(0) will iterate the map)
+		s.curgen = std::move(curgen_);
+		s.subgen_start = subgen_start_;
+		s.prev_subgen_start = prev_subgen_start_;
+		s.canonicalize();
+		return s;
 	}
 private:
 	/**
@@ -731,6 +790,383 @@ private:
 	 * the previous connect.
 	 */
 	std::size_t subgen_start_;
+	std::size_t prev_subgen_start_;
+};
+
+class Search {
+private:
+	/**
+	 * The states of the generational search state machine.  The flow is
+	 * combine -> close -> mirror -> connect -> close -> mirror -> connect -> ...
+	 * with discover_needs_connect branching to the next combine step when the
+	 * previous subgeneration was empty, and with the first combine replaced by
+	 * collecting the initial gadget set.
+	 */
+	enum class Phase {
+		collect_initial,
+
+		discover_needs_combine,
+		compute_combine,
+		follow_combine,
+
+		discover_needs_close,
+		compute_close,
+		follow_close,
+
+		discover_needs_mirror,
+		compute_mirror,
+		follow_mirror,
+
+		discover_needs_connect,
+		compute_connect,
+		follow_connect,
+	};
+
+	enum class Control {
+		/**
+		 * Continue with the next phase.  ("continue" is a keyword.)
+		 */
+		proceed,
+		/**
+		 * Create a new checkpoint and exit.
+		 */
+		suspend_new_checkpoint,
+		/**
+		 * Exit, preserving the existing checkpoint because no state has changed.
+		 * (Presumably we queued tasks that will cause state changes in the future.)
+		 */
+		suspend_unmodified,
+		/**
+		 * The search has completed; no more gadgets can be made.  (Storing the
+		 * closed set might be useful for future "can make X?" queries.)
+		 */
+		stop,
+	};
+
+public:
+	class Serialized;
+	Search(vector<std::string>&& cmdline_specs, GadgetSet&& source_specs,
+			unsigned int precision, bool multiplayer) :
+			generation_(0), subgeneration_(0), phase_(Phase::collect_initial),
+			cmdline_specs_(std::move(cmdline_specs)),
+			source_specs_(std::move(source_specs)), precision_(precision), multiplayer_(multiplayer),
+			conn_(nullptr), workers_(nullptr),
+			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
+	Search(Serialized&& s) : state_(std::move(s.state)), combine_rights_(std::move(s.combine_rights)),
+			unary_needs_(std::move(s.unary_needs)), combine_needs_(s.combine_needs.begin(), s.combine_needs.end()),
+			generation_(s.generation), subgeneration_(s.subgeneration), phase_{s.phase},
+			cmdline_specs_(std::move(s.cmdline_specs)), source_specs_(std::move(s.source_specs)),
+			precision_(s.precision), multiplayer_(s.multiplayer), conn_(nullptr), workers_(nullptr),
+			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
+
+	void execute(pqxx::connection& conn, WorkerManager* workers) {
+		conn_ = &conn;
+		workers_ = workers;
+
+		Control control = Control::proceed;
+		while (control == Control::proceed) {
+			switch (phase_) {
+				case Phase::collect_initial: control = collect_initial(); break;
+				case Phase::discover_needs_combine: control = discover_needs_combine(); break;
+				case Phase::compute_combine: control = compute_combine(); break;
+				case Phase::follow_combine: control = follow_combine(); break;
+				case Phase::discover_needs_close: control = discover_needs_close(); break;
+				case Phase::compute_close: control = compute_close(); break;
+				case Phase::follow_close: control = follow_close(); break;
+				case Phase::discover_needs_mirror: control = discover_needs_mirror(); break;
+				case Phase::compute_mirror: control = compute_mirror(); break;
+				case Phase::follow_mirror: control = follow_mirror(); break;
+				case Phase::discover_needs_connect: control = discover_needs_connect(); break;
+				case Phase::compute_connect: control = compute_connect(); break;
+				case Phase::follow_connect: control = follow_connect(); break;
+			}
+		}
+
+		conn_ = nullptr;
+		workers_ = nullptr;
+	}
+
+private:
+	Control collect_initial() {
+		generation_stopwatch_.reset();
+		Stopwatch stopwatch = Stopwatch::process();
+		vector<uint64_t> initial = collect_initial_gadget_set(*conn_, source_specs_);
+		fmt::print("Collected {} initial gadgets in {}ms\n", initial.size(), stopwatch.elapsed().millis());
+		state_(std::move(initial));
+		phase_ = Phase::discover_needs_close;
+		return Control::proceed;
+	}
+
+	Control discover_needs_combine() {
+		unary_needs_ = state_.flip_generation();
+		if (unary_needs_.empty()) {
+			fmt::print("previous generation was empty, exiting\n");
+			return Control::stop;
+		}
+		++generation_;
+		subgeneration_ = 0;
+		generation_stopwatch_.reset();
+		subgeneration_stopwatch_.reset();
+
+		Stopwatch stopwatch = Stopwatch::process();
+		combines_map needs_combine = find_required_combines(*conn_, unary_needs_, combine_rights_, precision_);
+		std::size_t needy_lefts = 0, needy_pairs = 0;
+		for (const pair<vector<uint64_t>, vector<uint64_t>>& p : needs_combine) {
+			needy_lefts += p.second.size();
+			needy_pairs += p.second.size() * p.first.size();
+		}
+		fmt::print("Found {} of {} lefts needing combine ({} total pairs) in {}\n",
+				needy_lefts, unary_needs_.size(), needy_pairs, stopwatch.elapsed().hms());
+
+		phase_ = Phase::compute_combine;
+		return Control::proceed;
+	}
+
+	Control compute_combine() {
+		if (combine_needs_.size()) {
+			Stopwatch stopwatch = Stopwatch::process();
+			//TODO: do_combine_operation might write tasks and request suspend
+			DatabaseOperationStatistics stats = do_combine_operation(*workers_, combine_needs_, precision_);
+			fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+					stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+		}
+		phase_ = Phase::follow_combine;
+		return Control::proceed;
+	}
+
+	Control follow_combine() {
+		Stopwatch stopwatch = Stopwatch::process();
+		vector<uint64_t> combines = get_combines(*conn_, unary_needs_, combine_rights_, precision_);
+		fmt::print("Followed combine edges to {} gadgets in {}\n", combines.size(), stopwatch.elapsed().hms());
+		state_(std::move(combines));
+
+		unary_needs_.clear();
+		combine_needs_.clear();
+		phase_ = Phase::discover_needs_close;
+		return Control::proceed;
+	}
+
+	Control discover_needs_close() {
+		if (multiplayer_) {
+			phase_ = Phase::discover_needs_mirror;
+			return Control::proceed;
+		}
+		filter_unary(filter_ids_needing_close, state_.subgeneration_begin(), state_.subgeneration_end(), "close");
+		phase_ = Phase::compute_close;
+		return Control::proceed;
+	}
+
+	Control compute_close() {
+		assert(!multiplayer_);
+		if (unary_needs_.size())
+			//TODO: this might ask for suspend
+			operate_unary("close-db", "Close");
+		unary_needs_.clear();
+		phase_ = Phase::follow_close;
+		return Control::proceed;
+	}
+
+	Control follow_close() {
+		assert(!multiplayer_);
+		Stopwatch stopwatch = Stopwatch::process();
+		pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> close_edges = follow_close_edges(*conn_, state_.subgeneration_begin(), state_.subgeneration_end());
+		fmt::print("Followed close edges from {} gadgets to {} gadgets in {}\n",
+				close_edges.first.size(), close_edges.second.size(), stopwatch.elapsed().hms());
+		state_.erase_from_subgeneration(close_edges.first);
+		state_(close_edges.second);
+		phase_ = Phase::discover_needs_mirror;
+		return Control::proceed;
+	}
+
+	Control discover_needs_mirror() {
+		filter_unary(filter_ids_needing_mirror, state_.subgeneration_begin(), state_.subgeneration_end(), "mirror");
+		phase_ = Phase::compute_mirror;
+		return Control::proceed;
+	}
+
+	Control compute_mirror() {
+		if (unary_needs_.size())
+			//TODO: this might ask for suspend
+			operate_unary("mirror-db", "Mirror");
+		unary_needs_.clear();
+		phase_ = Phase::follow_mirror;
+		return Control::proceed;
+	}
+
+	Control follow_mirror() {
+		follow_unary_simple(get_mirrors, state_.subgeneration_begin(), state_.subgeneration_end(), "mirror");
+
+		std::string_view step_type = subgeneration_ == 0 ? "combine"sv : "connect"sv;
+		Stopwatch::Result elapsed = subgeneration_stopwatch_.elapsed();
+		//printing the subgen size is redundant for combine
+		fmt::print("Finished {} {}.{} in {}; subgen size {}, curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
+				step_type, generation_, subgeneration_, elapsed.hms(),
+				state_.subgeneration_size(), state_.generation_size(), state_.closed_size(),
+				elapsed.absolute().highwaterGibibytes(), elapsed.highwaterGibibytes());
+
+		phase_ = Phase::discover_needs_connect;
+		return Control::proceed;
+	}
+
+	Control discover_needs_connect() {
+		//We have some beginning-of-subgeneration work to do before the actual operation.
+		//I suppose we could wait until after any subgenerations (connects) to
+		//choose the set of combine rights, but this matches how the old
+		//generational search worked.
+		if (generation_ == 0 && subgeneration_ == 0) {
+			combine_rights_.assign(state_.subgeneration_begin(), state_.subgeneration_end());
+			std::sort(combine_rights_.begin(), combine_rights_.end());
+			fmt::print("Combine rights ({}):", combine_rights_.size());
+			for (uint64_t id : combine_rights_)
+				fmt::print(" {}", id);
+			fmt::print("\n");
+			prepare_combine_statements(*conn_, combine_rights_.size(), precision_);
+		}
+
+		state_.flip_subgeneration();
+		if (state_.prev_subgeneration_begin() == state_.prev_subgeneration_end()) {
+			Stopwatch::Result elapsed = generation_stopwatch_.elapsed();
+			fmt::print("Finished generation {} in {}; curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
+					generation_, elapsed.hms(), state_.generation_size(), state_.closed_size(),
+					elapsed.absolute().highwaterGibibytes(), elapsed.highwaterGibibytes());
+			phase_ = Phase::discover_needs_combine;
+			return Control::proceed;
+		}
+
+		++subgeneration_;
+		subgeneration_stopwatch_.reset();
+		filter_unary(filter_ids_needing_connect, state_.prev_subgeneration_begin(), state_.prev_subgeneration_end(), "connect");
+		phase_ = Phase::compute_connect;
+		return Control::proceed;
+	}
+
+	Control compute_connect() {
+		if (unary_needs_.size())
+			//TODO: this might ask for suspend
+			operate_unary("connect-db", "Connect");
+		unary_needs_.clear();
+		phase_ = Phase::follow_connect;
+		return Control::proceed;
+	}
+
+	Control follow_connect() {
+		follow_unary_simple(get_connects, state_.prev_subgeneration_begin(), state_.prev_subgeneration_end(), "connect");
+
+		phase_ = Phase::discover_needs_close;
+		return Control::proceed;
+	}
+
+	template<class FilterFunc, class Iter>
+	void filter_unary(FilterFunc filter_func, Iter first, Iter last, std::string_view log_name) {
+		Stopwatch stopwatch = Stopwatch::process();
+		if (!unary_needs_.empty())
+			throw std::logic_error(fmt::format("called filter_unary for {} but unary_needs_ not empty\n", log_name));
+		unary_needs_ = filter_func(*conn_, first, last);
+		fmt::print("Found {} of {} gadgets needing {} in {}\n",
+				unary_needs_.size(), std::distance(first, last), log_name, stopwatch.elapsed().hms());
+		//Sorting here means tasks will contain consecutive ids more often,
+		//reducing fragmentation in the completion tables.
+		std::sort(unary_needs_.begin(), unary_needs_.end());
+	}
+
+	Control operate_unary(std::string_view operation_name, std::string_view log_name) {
+		Stopwatch stopwatch = Stopwatch::process();
+		DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_name, unary_needs_);
+		fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+				log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+		return Control::proceed;
+	}
+
+	template<class FilterFunc, class Iter>
+	void follow_unary_simple(FilterFunc follow_func, Iter first, Iter last, std::string_view log_name) {
+		Stopwatch stopwatch = Stopwatch::process();
+		vector<uint64_t> ids = follow_func(*conn_, first, last);
+		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, ids.size(), stopwatch.elapsed().hms());
+		state_(std::move(ids));
+	}
+
+
+	SearchState state_;
+	vector<uint64_t> combine_rights_;
+	vector<uint64_t> unary_needs_; //also holds combine lefts during combine phases
+	combines_map combine_needs_; //TODO: fix find_required_combines to just return a vector of pairs
+	unsigned int generation_;
+	unsigned int subgeneration_;
+	Phase phase_;
+
+	//These are options that cannot be changed when loading from a checkpoint
+	//(as opposed to, e.g., worker addresses).
+	vector<std::string> cmdline_specs_;
+	GadgetSet source_specs_;
+	unsigned int precision_;
+	bool multiplayer_;
+
+	//These are provided at runtime and not stored with the checkpoint.  They
+	//could be passed around through all functions, but are instead here for
+	//convenience.
+	pqxx::connection* conn_;
+	WorkerManager* workers_; //may be nullptr if no worker args given (must write tasks)
+
+	//Timings from these aren't particularly useful when operating in batch mode.
+	Stopwatch generation_stopwatch_, subgeneration_stopwatch_;
+public:
+	struct Serialized {
+		SearchState::Serialized state;
+		vector<uint64_t> combine_rights;
+		vector<uint64_t> unary_needs;
+		//rights: lefts needing combine (yes, it's backwards)
+		vector<pair<vector<uint64_t>, vector<uint64_t>>> combine_needs;
+		unsigned int generation;
+		unsigned int subgeneration;
+		//MSGPACK_ADD_ENUM doesn't work for private enums
+		std::underlying_type_t<Phase> phase;
+		vector<std::string> cmdline_specs;
+		GadgetSet source_specs;
+		unsigned int precision;
+		bool multiplayer;
+		Serialized() = default; //for msgpack
+		Serialized(const Search& s) : state(s.state_.serialized()), combine_rights(s.combine_rights_),
+				unary_needs(s.unary_needs_), combine_needs(s.combine_needs_.begin(), s.combine_needs_.end()),
+				generation(s.generation_), subgeneration(s.subgeneration_),
+				phase(static_cast<std::underlying_type_t<Phase>>(s.phase_)),
+				cmdline_specs(s.cmdline_specs_), source_specs(s.source_specs_), precision(s.precision_),
+				multiplayer(s.multiplayer_) {
+			canonicalize();
+		}
+		Serialized(Search&& s) : state(std::move(s.state_).serialized()), combine_rights(std::move(s.combine_rights_)),
+				unary_needs(std::move(s.unary_needs_)), combine_needs(s.combine_needs_.begin(), s.combine_needs_.end()),
+				generation(s.generation_), subgeneration(s.subgeneration_),
+				phase(static_cast<std::underlying_type_t<Phase>>(s.phase_)),
+				cmdline_specs(std::move(s.cmdline_specs_)), source_specs(std::move(s.source_specs_)),
+				precision(s.precision_), multiplayer(s.multiplayer_) {
+			canonicalize();
+		}
+
+		//We're not really worried about format-ABI issues because the state can
+		//be regenerated from the database, so we can use msgpack's packing
+		//rather than writing our own versionable packing.
+		MSGPACK_DEFINE_ARRAY(state, combine_rights, unary_needs, combine_needs,
+				generation, subgeneration, phase, cmdline_specs, source_specs,
+				precision, multiplayer)
+	private:
+		void canonicalize() {
+			assert(std::is_sorted(combine_rights.begin(), combine_rights.end()));
+			if (!std::is_sorted(unary_needs.begin(), unary_needs.end()))
+				std::sort(unary_needs.begin(), unary_needs.end());
+			for (auto& p : combine_needs) {
+				std::sort(p.first.begin(), p.first.end());
+				std::sort(p.second.begin(), p.second.end());
+			}
+			std::sort(combine_needs.begin(), combine_needs.end());
+			//let cmdline_specs, source_specs keep their original order
+		}
+	};
+	Serialized serialize() const & {
+		return {*this};
+	}
+	Serialized serialize() && {
+		return {std::move(*this)};
+	}
 };
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
@@ -783,136 +1219,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	pqxx::connection conn(connect_str);
 	prepare_statements(conn);
 
-	SearchState state;
-
-	auto filter_unary = [&](auto filter_fxn, auto first, auto last, std::string_view log_name) {
-		Stopwatch stopwatch = Stopwatch::process();
-		vector<uint64_t> needs = filter_fxn(conn, first, last);
-		fmt::print("Found {} of {} gadgets needing {} in {}\n",
-				needs.size(), std::distance(first, last), log_name, stopwatch.elapsed().hms());
-		//Sorting here means tasks will contain consecutive ids more often,
-		//reducing fragmentation in the completion tables.
-		std::sort(needs.begin(), needs.end());
-		return needs;
-	};
-	auto operate_unary = [&](std::vector<uint64_t>&& ids, std::string_view operation_name, std::string_view log_name) {
-		Stopwatch stopwatch = Stopwatch::process();
-		DatabaseOperationStatistics stats = do_unary_operation(manager, operation_name, ids);
-		fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
-				log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
-	};
-	auto follow_unary_simple = [&](auto follow_fxn, auto first, auto last, std::string_view log_name) {
-		Stopwatch stopwatch = Stopwatch::process();
-		vector<uint64_t> ids = follow_fxn(conn, first, last);
-		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, ids.size(), stopwatch.elapsed().hms());
-		return ids;
-	};
-
-	auto close_and_mirror = [&]() {
-		if (!multiplayer) {
-			vector<uint64_t> needs_close = filter_unary(filter_ids_needing_close, state.subgeneration_begin(), state.subgeneration_end(), "close");
-			if (needs_close.size())
-				operate_unary(std::move(needs_close), "close-db", "Close");
-
-			Stopwatch stopwatch = Stopwatch::process();
-			pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> close_edges = follow_close_edges(conn, state.subgeneration_begin(), state.subgeneration_end());
-			fmt::print("Followed close edges from {} gadgets to {} gadgets in {}\n",
-					close_edges.first.size(), close_edges.second.size(), stopwatch.elapsed().hms());
-			state.erase_from_subgeneration(close_edges.first);
-			state(close_edges.second);
-		}
-
-		vector<uint64_t> needs_mirror = filter_unary(filter_ids_needing_mirror, state.subgeneration_begin(), state.subgeneration_end(), "mirror");
-		if (needs_mirror.size())
-			operate_unary(std::move(needs_mirror), "mirror-db", "Mirror");
-		state(follow_unary_simple(get_mirrors, state.subgeneration_begin(), state.subgeneration_end(), "mirror"));
-	};
-
-	vector<uint64_t> combine_rights;
-	for (std::size_t generation = 0; ; ++generation) {
-		Stopwatch generation_stopwatch = Stopwatch::process();
-		if (generation == 0) {
-			Stopwatch stopwatch = Stopwatch::process();
-			vector<uint64_t> initial = collect_initial_gadget_set(conn, spec);
-			fmt::print("Collected {} initial gadgets in {}ms\n", initial.size(), stopwatch.elapsed().millis());
-			state(initial);
-		} else {
-			vector<uint64_t> combine_lefts = state.flip_generation();
-			if (combine_lefts.empty()) {
-				fmt::print("previous generation was empty, exiting\n");
-				break;
-			}
-
-			Stopwatch stopwatch = Stopwatch::process();
-			combines_map needs_combine = find_required_combines(conn, combine_lefts, combine_rights, precision);
-			std::size_t needy_lefts = 0, needy_pairs = 0;
-			for (const pair<vector<uint64_t>, vector<uint64_t>>& p : needs_combine) {
-				needy_lefts += p.second.size();
-				needy_pairs += p.second.size() * p.first.size();
-			}
-			fmt::print("Found {} of {} lefts needing combine ({} total pairs) in {}\n",
-					needy_lefts, combine_lefts.size(), needy_pairs, stopwatch.elapsed().hms());
-
-			if (needs_combine.size()) {
-				//like operate_unary, but not quite
-				stopwatch.reset();
-				DatabaseOperationStatistics stats = do_combine_operation(manager, needs_combine, precision);
-				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
-						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
-			}
-
-			stopwatch.reset();
-			vector<uint64_t> combines = get_combines(conn, combine_lefts, combine_rights, precision);
-			fmt::print("Followed combine edges to {} gadgets in {}\n", combines.size(), stopwatch.elapsed().hms());
-			state(std::move(combines));
-		}
-
-		close_and_mirror();
-		//I suppose we could wait until after any subgenerations (connects) to
-		//choose the set of combine rights, but this matches how the old
-		//generational search worked.
-		if (generation == 0) {
-			combine_rights.assign(state.subgeneration_begin(), state.subgeneration_end());
-			std::sort(combine_rights.begin(), combine_rights.end());
-			fmt::print("Combine rights ({}):", combine_rights.size());
-			for (uint64_t id : combine_rights)
-				fmt::print(" {}", id);
-			fmt::print("\n");
-			prepare_combine_statements(conn, combine_rights.size(), precision);
-		}
-
-		Stopwatch::Result generation_elapsed = generation_stopwatch.elapsed();
-		fmt::print("Finished combine {}.{} in {}; curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
-				generation, 0, generation_elapsed.hms(), state.generation_size(), state.closed_size(),
-				generation_elapsed.absolute().highwaterGibibytes(), generation_elapsed.highwaterGibibytes());
-
-		for (std::size_t subgeneration = 1; ; ++subgeneration) {
-			Stopwatch subgeneration_stopwatch = Stopwatch::process();
-			auto prev_subgen = state.flip_subgeneration();
-			using std::begin; using std::end;
-			if (begin(prev_subgen) == end(prev_subgen))
-				break;
-
-			vector<uint64_t> needs_connect = filter_unary(filter_ids_needing_connect, begin(prev_subgen), end(prev_subgen), "connect");
-			if (needs_connect.size())
-				operate_unary(std::move(needs_connect), "connect-db", "Connect");
-
-			vector<uint64_t> connects = follow_unary_simple(get_connects, begin(prev_subgen), end(prev_subgen), "connect");
-			state(connects);
-			close_and_mirror();
-
-			Stopwatch::Result subgeneration_elapsed = subgeneration_stopwatch.elapsed();
-			fmt::print("Finished connect {}.{} in {}; subgen size {}, curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
-					generation, subgeneration, subgeneration_elapsed.hms(), state.subgeneration_size(),
-					state.generation_size(), state.closed_size(),
-					subgeneration_elapsed.absolute().highwaterGibibytes(), subgeneration_elapsed.highwaterGibibytes());
-		}
-
-		generation_elapsed = generation_stopwatch.elapsed();
-		fmt::print("Finished generation {} in {}; curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
-				generation, generation_elapsed.hms(), state.generation_size(), state.closed_size(),
-				generation_elapsed.absolute().highwaterGibibytes(), generation_elapsed.highwaterGibibytes());
-	}
+	Search search(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec), precision, multiplayer);
+	search.execute(conn, &manager);
 
 	return 0;
 }
