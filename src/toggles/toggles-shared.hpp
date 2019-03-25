@@ -67,5 +67,12 @@ struct SimpleProvenance {
 	MSGPACK_DEFINE_ARRAY(input1, output1, canonicalizePermutation)
 };
 
+
+
+std::string build_select_gadget_id_to_data_immediate(const std::vector<std::uint64_t>& gids);
+
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
+		pqxx::connection& conn, const std::vector<std::uint64_t>& gids);
+
 #endif /* TOGGLES_SHARED_HPP */
 

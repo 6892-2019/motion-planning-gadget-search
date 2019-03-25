@@ -154,3 +154,34 @@ vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const Gadget
 		return ids;
 	}, 10, "collect_initial_gadget_set");
 }
+
+
+
+std::string build_select_gadget_id_to_data_immediate(const std::vector<std::uint64_t>& gids) {
+	//TODO: stringutils.hpp:join overload?  (use std::to_chars)
+	vector<std::string> gids_as_strings;
+	for (std::uint64_t t : gids)
+		gids_as_strings.push_back(std::to_string(t));
+	std::string in_clause_list = join(gids_as_strings, ",");
+	return "select id, data from gadgets where id in ("+in_clause_list+")";
+}
+
+vector<pair<std::uint64_t, vector<std::byte>>> select_gadget_id_to_data(pqxx::connection& conn, const vector<std::uint64_t>& gids) {
+	pqxx::result input_data = retry_db_operation([&](){
+		ro_transaction trans(conn);
+		pqxx::result result = trans.exec_n(gids.size(), build_select_gadget_id_to_data_immediate(gids));
+		trans.commit();
+		return result;
+	}, 10, "select_gadget_id_to_data_immediate");
+
+	//Returned rows are text internally, so we may as well convert now.
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs;
+	for (const auto& row : input_data) {
+		std::uint64_t gid = row.at(0).as<std::uint64_t>();
+		pqxx::binarystring data(row.at(1));
+		vector<std::byte> bytes;
+		bytes.insert(bytes.begin(), reinterpret_cast<const std::byte*>(data.begin()), reinterpret_cast<const std::byte*>(data.end()));
+		inputs.emplace_back(gid, std::move(bytes));
+	}
+	return inputs;
+}
