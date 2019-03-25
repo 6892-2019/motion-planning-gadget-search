@@ -909,9 +909,9 @@ private:
 		subgeneration_stopwatch_.reset();
 
 		Stopwatch stopwatch = Stopwatch::process();
-		combines_map needs_combine = find_required_combines(*conn_, unary_needs_, combine_rights_, precision_);
+		combine_needs_ = find_required_combines(*conn_, unary_needs_, combine_rights_, precision_);
 		std::size_t needy_lefts = 0, needy_pairs = 0;
-		for (const pair<vector<uint64_t>, vector<uint64_t>>& p : needs_combine) {
+		for (const pair<vector<uint64_t>, vector<uint64_t>>& p : combine_needs_) {
 			needy_lefts += p.second.size();
 			needy_pairs += p.second.size() * p.first.size();
 		}
