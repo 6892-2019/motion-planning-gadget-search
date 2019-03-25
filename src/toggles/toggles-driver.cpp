@@ -574,22 +574,38 @@ void ping_all_workers(WorkerManager& manager) {
 	manager.run(&generator);
 }
 
-DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation, const vector<uint64_t>& operands) {
+struct UnaryBatcher {
+	vector<uint64_t>::const_iterator head, last;
+	std::size_t size_;
+	UnaryBatcher(const vector<uint64_t>& vec, std::size_t batch_size) : head(vec.begin()), last(vec.end()), size_(batch_size) {}
+	explicit operator bool() const {return head != last;}
+	pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator> operator()() {
+		std::size_t actual_size = std::min(size_, static_cast<std::size_t>(last-head));
+		pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator> ret(head, head+actual_size);
+		head += actual_size;
+		return ret;
+	}
+	/**
+	 * @return the number of batches remaining
+	 */
+	std::size_t size() const {
+		return (std::distance(head, last) + (size_-1))/ size_; //round up
+	}
+};
+
+DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation, UnaryBatcher operands) {
 	std::uint32_t seqno = 0;
-	std::size_t offset = 0;
-	const std::size_t batch_size = 5000; //TODO: should scale against number of workers, be customizable
 	//TODO: figure out how to pack a range without copying (probably a custom type with a pack method?)
 	vector<uint64_t> range;
 	DatabaseOperationStatistics overall_stats = {};
 	bool error_happened = false;
 	manager.run([&](simple_buffer& buffer) {
 		if (error_happened) return false; //stop generating work, but let existing issued work finish
-		if (!(offset < operands.size())) return false;
+		if (!operands) return false;
 		range.clear();
-		std::size_t end = std::min(offset + batch_size, operands.size());
-		range.insert(range.end(), operands.begin()+offset, operands.begin()+end);
+		auto iters = operands();
+		range.insert(range.end(), iters.first, iters.second);
 		pack_call(buffer, seqno++, operation, range);
-		offset = end;
 		return true;
 	}, [&](simple_buffer& buffer) {
 		Response resp = unpack_response(buffer);
@@ -793,6 +809,32 @@ private:
 	std::size_t prev_subgen_start_;
 };
 
+/**
+ * Various control options used by a search.  These options can be changed from
+ * run to run even when resuming from a checkpoint.
+ */
+struct RuntimeOptions {
+	/**
+	 * The number of left-right pairs in each combine task.
+	 */
+	std::size_t combine_pairs_per_task;
+	std::size_t connect_gadgets_per_task, close_gadgets_per_task, mirror_gadgets_per_task;
+	/**
+	 * When allowing batch operation, the number of tasks required to trigger
+	 * writing tasks and suspending.  Below this threshold the tasks will be run
+	 * on workers.  (The idea is that early generations are small and fast so
+	 * batching isn't useful.)
+	 *
+	 * When not in batch mode, this is max(), so batching will never be invoked.
+	 */
+	std::size_t combine_task_batch_threshold, connect_task_batch_threshold,
+			close_task_batch_threshold, mirror_task_batch_threshold;
+	/**
+	 * The directory to write batch tasks into.
+	 */
+	std::string batch_task_directory;
+};
+
 class Search {
 private:
 	/**
@@ -846,17 +888,17 @@ private:
 public:
 	class Serialized;
 	Search(vector<std::string>&& cmdline_specs, GadgetSet&& source_specs,
-			unsigned int precision, bool multiplayer) :
+			unsigned int precision, bool multiplayer, RuntimeOptions runtime_opts) :
 			generation_(0), subgeneration_(0), phase_(Phase::collect_initial),
 			cmdline_specs_(std::move(cmdline_specs)),
 			source_specs_(std::move(source_specs)), precision_(precision), multiplayer_(multiplayer),
-			conn_(nullptr), workers_(nullptr),
+			conn_(nullptr), workers_(nullptr), runtime_opts_(runtime_opts),
 			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
-	Search(Serialized&& s) : state_(std::move(s.state)), combine_rights_(std::move(s.combine_rights)),
+	Search(Serialized&& s, RuntimeOptions runtime_opts) : state_(std::move(s.state)), combine_rights_(std::move(s.combine_rights)),
 			unary_needs_(std::move(s.unary_needs)), combine_needs_(s.combine_needs.begin(), s.combine_needs.end()),
 			generation_(s.generation), subgeneration_(s.subgeneration), phase_{s.phase},
 			cmdline_specs_(std::move(s.cmdline_specs)), source_specs_(std::move(s.source_specs)),
-			precision_(s.precision), multiplayer_(s.multiplayer), conn_(nullptr), workers_(nullptr),
+			precision_(s.precision), multiplayer_(s.multiplayer), conn_(nullptr), workers_(nullptr), runtime_opts_(runtime_opts),
 			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
 
 	void execute(pqxx::connection& conn, WorkerManager* workers) {
@@ -960,7 +1002,7 @@ private:
 		assert(!multiplayer_);
 		if (unary_needs_.size())
 			//TODO: this might ask for suspend
-			operate_unary("close-db", "Close");
+			operate_unary("close-db", "Close", runtime_opts_.close_gadgets_per_task, runtime_opts_.close_task_batch_threshold);
 		unary_needs_.clear();
 		phase_ = Phase::follow_close;
 		return Control::proceed;
@@ -987,7 +1029,7 @@ private:
 	Control compute_mirror() {
 		if (unary_needs_.size())
 			//TODO: this might ask for suspend
-			operate_unary("mirror-db", "Mirror");
+			operate_unary("mirror-db", "Mirror", runtime_opts_.mirror_gadgets_per_task, runtime_opts_.close_task_batch_threshold);
 		unary_needs_.clear();
 		phase_ = Phase::follow_mirror;
 		return Control::proceed;
@@ -1043,7 +1085,7 @@ private:
 	Control compute_connect() {
 		if (unary_needs_.size())
 			//TODO: this might ask for suspend
-			operate_unary("connect-db", "Connect");
+			operate_unary("connect-db", "Connect", runtime_opts_.connect_gadgets_per_task, runtime_opts_.connect_task_batch_threshold);
 		unary_needs_.clear();
 		phase_ = Phase::follow_connect;
 		return Control::proceed;
@@ -1069,12 +1111,19 @@ private:
 		std::sort(unary_needs_.begin(), unary_needs_.end());
 	}
 
-	Control operate_unary(std::string_view operation_name, std::string_view log_name) {
+	Control operate_unary(std::string_view operation_name, std::string_view log_name,
+			std::size_t gadgets_per_task, std::size_t batch_threshold) {
 		Stopwatch stopwatch = Stopwatch::process();
-		DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_name, unary_needs_);
-		fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
-				log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
-		return Control::proceed;
+		UnaryBatcher batcher(unary_needs_, gadgets_per_task);
+		if (batcher.size() < batch_threshold) {
+			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_name, batcher);
+			fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+					log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			return Control::proceed;
+		} else {
+			throw std::logic_error("TODO batching!");
+			return Control::suspend_new_checkpoint;
+		}
 	}
 
 	template<class FilterFunc, class Iter>
@@ -1106,6 +1155,8 @@ private:
 	//convenience.
 	pqxx::connection* conn_;
 	WorkerManager* workers_; //may be nullptr if no worker args given (must write tasks)
+
+	RuntimeOptions runtime_opts_;
 
 	//Timings from these aren't particularly useful when operating in batch mode.
 	Stopwatch generation_stopwatch_, subgeneration_stopwatch_;
@@ -1177,6 +1228,13 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	bool multiplayer = false;
 	std::vector<std::string_view> gid_specs;
 	unsigned int precision = 8;
+	RuntimeOptions runtime_opts;
+	runtime_opts.combine_pairs_per_task = 5000;
+	runtime_opts.connect_gadgets_per_task = runtime_opts.close_gadgets_per_task
+			= runtime_opts.mirror_gadgets_per_task = 5000;
+	runtime_opts.combine_task_batch_threshold = runtime_opts.connect_task_batch_threshold
+			= runtime_opts.close_task_batch_threshold = runtime_opts.mirror_task_batch_threshold
+			= std::numeric_limits<std::size_t>::max();
 	for (int i = 1; i < argc; ++i) {
 		if (argv[i] == "--db-user"sv)
 			db_user = argv[++i];
@@ -1196,6 +1254,33 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			multiplayer = true;
 		else if (argv[i] == "--precision"sv)
 			precision = to_uint(argv[++i]);
+
+		else if (argv[i] == "--gadgets-per-task"sv)
+			runtime_opts.combine_pairs_per_task = runtime_opts.connect_gadgets_per_task
+					= runtime_opts.close_gadgets_per_task = runtime_opts.mirror_gadgets_per_task = to_uint64(argv[++i]);
+		else if (argv[i] == "--combine-gadgets-per-task"sv || argv[i] == "--combine-pairs-per-task"sv)
+			runtime_opts.combine_pairs_per_task = to_uint64(argv[++i]);
+		else if (argv[i] == "--connect-gadgets-per-task"sv)
+			runtime_opts.connect_gadgets_per_task = to_uint64(argv[++i]);
+		else if (argv[i] == "--close-gadgets-per-task"sv)
+			runtime_opts.close_gadgets_per_task = to_uint64(argv[++i]);
+		else if (argv[i] == "--mirror-gadgets-per-task"sv)
+			runtime_opts.mirror_gadgets_per_task = to_uint64(argv[++i]);
+
+		else if (argv[i] == "--batch-task-threshold"sv || argv[i] == "--task-batch-threshold"sv)
+			runtime_opts.combine_task_batch_threshold = runtime_opts.connect_task_batch_threshold
+					= runtime_opts.close_task_batch_threshold = runtime_opts.mirror_task_batch_threshold = to_uint64(argv[++i]);
+		else if (argv[i] == "--combine-batch-task-threshold"sv || argv[i] == "--combine-task-batch-threshold"sv)
+			runtime_opts.combine_task_batch_threshold = to_uint64(argv[++i]);
+		else if (argv[i] == "--connect-batch-task-threshold"sv || argv[i] == "--connect-task-batch-threshold"sv)
+			runtime_opts.connect_task_batch_threshold = to_uint64(argv[++i]);
+		else if (argv[i] == "--close-batch-task-threshold"sv || argv[i] == "--close-task-batch-threshold"sv)
+			runtime_opts.close_task_batch_threshold = to_uint64(argv[++i]);
+		else if (argv[i] == "--mirror-batch-task-threshold"sv || argv[i] == "--mirror-task-batch-threshold"sv)
+			runtime_opts.mirror_task_batch_threshold = to_uint64(argv[++i]);
+		else if (argv[i] == "--batch-task-directory"sv)
+			runtime_opts.batch_task_directory = argv[++i];
+
 		else
 			gid_specs.emplace_back(argv[i]);
 	}
@@ -1219,7 +1304,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	pqxx::connection conn(connect_str);
 	prepare_statements(conn);
 
-	Search search(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec), precision, multiplayer);
+	Search search(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
+			precision, multiplayer, runtime_opts);
 	search.execute(conn, &manager);
 
 	return 0;
