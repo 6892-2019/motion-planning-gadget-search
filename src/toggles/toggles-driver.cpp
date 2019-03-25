@@ -698,6 +698,34 @@ DatabaseOperationStatistics do_combine_operation(WorkerManager& manager, Combine
 	return overall_stats;
 }
 
+void write_combine_batch_tasks(pqxx::connection& conn, CombineBatcher batcher, unsigned int precision, const std::string& directory) {
+	vector<uint64_t> fetches;
+	simple_buffer buffer;
+	for (std::uint32_t seqno = 0; batcher; ++seqno) {
+		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> batch = batcher();
+		fetches.clear();
+		fetches.insert(fetches.end(), batch.first.first, batch.first.second);
+		fetches.insert(fetches.end(), batch.second->begin(), batch.second->end());
+		//sort-unique is optional here because the database will effectively do it for us.
+		std::sort(fetches.begin(), fetches.end());
+		fetches.erase(std::unique(fetches.begin(), fetches.end()), fetches.end());
+		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
+
+		fetches.assign(batch.first.first, batch.first.second); //packing iterator-range would save this copy
+		pack_call(buffer, seqno, "batch-combine", gadget_data, fetches, *batch.second, precision);
+
+		std::string filename = fmt::format("{}/{}.msg", directory, seqno);
+		FILE* file = std::fopen(filename.c_str(), "wb");
+		std::size_t bytes_written = std::fwrite(buffer.data(), sizeof(char), buffer.size(), file);
+		if (bytes_written != buffer.size() || std::fclose(file) != 0) {
+			auto savederrno = errno;
+			throw std::runtime_error(fmt::format("error writing seqno {}, size {}, wrote {}: {} ({})\n",
+					seqno, buffer.size(), bytes_written, strerror(savederrno), errno));
+		}
+		buffer.clear();
+	}
+}
+
 
 class SearchState {
 public:
@@ -882,6 +910,7 @@ private:
 	enum class Phase {
 		collect_initial,
 
+		begin_generation,
 		discover_needs_combine,
 		compute_combine,
 		follow_combine,
@@ -894,6 +923,7 @@ private:
 		compute_mirror,
 		follow_mirror,
 
+		begin_subgeneration,
 		discover_needs_connect,
 		compute_connect,
 		follow_connect,
@@ -944,6 +974,7 @@ public:
 		while (control == Control::proceed) {
 			switch (phase_) {
 				case Phase::collect_initial: control = collect_initial(); break;
+				case Phase::begin_generation: control = begin_generation(); break;
 				case Phase::discover_needs_combine: control = discover_needs_combine(); break;
 				case Phase::compute_combine: control = compute_combine(); break;
 				case Phase::follow_combine: control = follow_combine(); break;
@@ -953,6 +984,7 @@ public:
 				case Phase::discover_needs_mirror: control = discover_needs_mirror(); break;
 				case Phase::compute_mirror: control = compute_mirror(); break;
 				case Phase::follow_mirror: control = follow_mirror(); break;
+				case Phase::begin_subgeneration: control = begin_subgeneration(); break;
 				case Phase::discover_needs_connect: control = discover_needs_connect(); break;
 				case Phase::compute_connect: control = compute_connect(); break;
 				case Phase::follow_connect: control = follow_connect(); break;
@@ -974,7 +1006,7 @@ private:
 		return Control::proceed;
 	}
 
-	Control discover_needs_combine() {
+	Control begin_generation() {
 		unary_needs_ = state_.flip_generation();
 		if (unary_needs_.empty()) {
 			fmt::print("previous generation was empty, exiting\n");
@@ -984,7 +1016,11 @@ private:
 		subgeneration_ = 0;
 		generation_stopwatch_.reset();
 		subgeneration_stopwatch_.reset();
+		phase_ = Phase::discover_needs_combine;
+		return Control::proceed;
+	}
 
+	Control discover_needs_combine() {
 		Stopwatch stopwatch = Stopwatch::process();
 		combine_needs_ = find_required_combines(*conn_, unary_needs_, combine_rights_, precision_);
 		std::size_t needy_lefts = 0, needy_pairs = 0;
@@ -1008,7 +1044,11 @@ private:
 				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
-				throw std::logic_error("TODO combine batching");
+				write_combine_batch_tasks(*conn_, std::move(batcher), precision_,
+						runtime_opts_.batch_task_directory);
+				//We could try a special resume state that only rechecks combine_needs_.
+				combine_needs_.clear();
+				phase_ = Phase::discover_needs_combine;
 				return Control::suspend_new_checkpoint;
 			}
 		}
@@ -1086,12 +1126,11 @@ private:
 				state_.subgeneration_size(), state_.generation_size(), state_.closed_size(),
 				elapsed.absolute().highwaterGibibytes(), elapsed.highwaterGibibytes());
 
-		phase_ = Phase::discover_needs_connect;
+		phase_ = Phase::begin_subgeneration;
 		return Control::proceed;
 	}
 
-	Control discover_needs_connect() {
-		//We have some beginning-of-subgeneration work to do before the actual operation.
+	Control begin_subgeneration() {
 		//I suppose we could wait until after any subgenerations (connects) to
 		//choose the set of combine rights, but this matches how the old
 		//generational search worked.
@@ -1111,12 +1150,17 @@ private:
 			fmt::print("Finished generation {} in {}; curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
 					generation_, elapsed.hms(), state_.generation_size(), state_.closed_size(),
 					elapsed.absolute().highwaterGibibytes(), elapsed.highwaterGibibytes());
-			phase_ = Phase::discover_needs_combine;
+			phase_ = Phase::begin_generation;
 			return Control::proceed;
 		}
 
 		++subgeneration_;
 		subgeneration_stopwatch_.reset();
+		phase_ = Phase::discover_needs_connect;
+		return Control::proceed;
+	}
+
+	Control discover_needs_connect() {
 		filter_unary(filter_ids_needing_connect, state_.prev_subgeneration_begin(), state_.prev_subgeneration_end(), "connect");
 		phase_ = Phase::compute_connect;
 		return Control::proceed;
