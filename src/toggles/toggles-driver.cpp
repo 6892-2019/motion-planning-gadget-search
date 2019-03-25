@@ -329,15 +329,16 @@ struct vector_hash {
 	}
 };
 
-//Note the key is the list of right ids and the value is the list of left ids (they're swapped).
-using combines_map = tsl::hopscotch_map<vector<uint64_t>, vector<uint64_t>, vector_hash>;
 /**
  * Finds required combines.
  * @return a map of lists of right ids to the left ids that need to be combined against them
  */
-combines_map find_required_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
+vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
 		const std::vector<uint64_t>& right_ids, unsigned int precision) {
-	return retry_db_operation([&]() {
+	//TODO: fix the query so we don't need a map
+	//Note the key is the list of right ids and the value is the list of left ids (they're swapped).
+	using combines_map = tsl::hopscotch_map<vector<uint64_t>, vector<uint64_t>, vector_hash>;
+	combines_map map = retry_db_operation([&]() {
 		ro_transaction trans(conn);
 		combines_map result;
 		vector<uint64_t> temp_key;
@@ -378,6 +379,14 @@ combines_map find_required_combines(pqxx::connection& conn, const std::vector<ui
 		trans.commit();
 		return result;
 	});
+
+	vector<pair<vector<uint64_t>, vector<uint64_t>>> ret(map.begin(), map.end());
+	for (auto& p : ret) {
+		std::sort(p.first.begin(), p.first.end());
+		std::sort(p.second.begin(), p.second.end());
+	}
+	std::sort(ret.begin(), ret.end());
+	return ret;
 }
 
 vector<uint64_t> get_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
@@ -624,27 +633,53 @@ DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::stri
 	return overall_stats;
 }
 
-DatabaseOperationStatistics do_combine_operation(WorkerManager& manager, const combines_map& operands, unsigned int precision) {
-	const std::size_t batch_size = 5000; //TODO: should scale against number of workers, be customizable
+struct CombineBatcher {
+	//backwards input: rights first, lefts second
+	vector<pair<vector<uint64_t>, vector<uint64_t>>>::const_iterator head, last;
+	vector<uint64_t>::const_iterator subhead; //position in head->second
+	std::size_t size_;
+	CombineBatcher(const vector<pair<vector<uint64_t>, vector<uint64_t>>>& vec, std::size_t batch_size)
+			: head(vec.cbegin()), last(vec.cend()), subhead(), size_(batch_size) {
+		if (head != last) //can't initialize in mem-init-list due to this check
+			subhead = head->second.cbegin();
+	}
+	explicit operator bool() const {return head != last;}
+	//iterator range of lefts, pointer to vector of rights
+	pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*>
+	operator()() {
+		std::size_t lefts_size = std::max<std::size_t>(size_ / head->first.size(), 1);
+		lefts_size = std::min(lefts_size, static_cast<std::size_t>(head->second.cend() - subhead));
+		pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator> lefts(subhead, subhead + lefts_size);
+		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> ret(lefts, &head->first);
+		subhead += lefts_size;
+		if (subhead == head->second.cend()) {
+			++head;
+			if (head != last)
+				subhead = head->second.cbegin();
+		}
+		return ret;
+	}
+	std::size_t size() const {
+		//This is only approximate, but should be good enough for making batching decisions.
+		std::size_t s = 0;
+		for (auto i = head; i != last; ++i)
+			s += i->first.size() * i->second.size();
+		return (s + (size_-1)) / size_;
+	}
+};
+
+DatabaseOperationStatistics do_combine_operation(WorkerManager& manager, CombineBatcher operands, unsigned int precision) {
 	std::uint32_t seqno = 0;
-	combines_map::const_iterator cur = operands.begin();
-	std::size_t offset = 0;
-	vector<uint64_t> lefts; //rights is just cur->first
+	vector<uint64_t> lefts; //TODO: pack iter-range without copying it first
 	DatabaseOperationStatistics overall_stats = {};
 	bool error_happened = false;
 	manager.run([&](simple_buffer& buffer) {
 		if (error_happened) return false; //stop generating work, but let existing issued work finish
-		if (cur == operands.end()) return false;
+		if (!operands) return false;
 		lefts.clear();
-		std::size_t lefts_size = std::max<std::size_t>(batch_size / cur->first.size(), 1);
-		std::size_t end = std::min(offset + lefts_size, cur->second.size());
-		lefts.insert(lefts.end(), cur->second.begin()+offset, cur->second.begin()+end);
-		pack_call(buffer, seqno++, "combine-db", lefts, cur->first, precision);
-		offset = end;
-		if (offset == cur->second.size()) {
-			offset = 0;
-			++cur;
-		}
+		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> batch = operands();
+		lefts.insert(lefts.end(), batch.first.first, batch.first.second);
+		pack_call(buffer, seqno++, "combine-db", lefts, *batch.second, precision);
 		return true;
 	}, [&](simple_buffer& buffer) {
 		Response resp = unpack_response(buffer);
@@ -895,7 +930,7 @@ public:
 			conn_(nullptr), workers_(nullptr), runtime_opts_(runtime_opts),
 			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
 	Search(Serialized&& s, RuntimeOptions runtime_opts) : state_(std::move(s.state)), combine_rights_(std::move(s.combine_rights)),
-			unary_needs_(std::move(s.unary_needs)), combine_needs_(s.combine_needs.begin(), s.combine_needs.end()),
+			unary_needs_(std::move(s.unary_needs)), combine_needs_(std::move(s.combine_needs)),
 			generation_(s.generation), subgeneration_(s.subgeneration), phase_{s.phase},
 			cmdline_specs_(std::move(s.cmdline_specs)), source_specs_(std::move(s.source_specs)),
 			precision_(s.precision), multiplayer_(s.multiplayer), conn_(nullptr), workers_(nullptr), runtime_opts_(runtime_opts),
@@ -966,11 +1001,16 @@ private:
 
 	Control compute_combine() {
 		if (combine_needs_.size()) {
-			Stopwatch stopwatch = Stopwatch::process();
-			//TODO: do_combine_operation might write tasks and request suspend
-			DatabaseOperationStatistics stats = do_combine_operation(*workers_, combine_needs_, precision_);
-			fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
-					stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			CombineBatcher batcher(combine_needs_, runtime_opts_.combine_pairs_per_task);
+			if (batcher.size() < runtime_opts_.combine_task_batch_threshold) {
+				Stopwatch stopwatch = Stopwatch::process();
+				DatabaseOperationStatistics stats = do_combine_operation(*workers_, std::move(batcher), precision_);
+				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			} else {
+				throw std::logic_error("TODO combine batching");
+				return Control::suspend_new_checkpoint;
+			}
 		}
 		phase_ = Phase::follow_combine;
 		return Control::proceed;
@@ -1138,7 +1178,8 @@ private:
 	SearchState state_;
 	vector<uint64_t> combine_rights_;
 	vector<uint64_t> unary_needs_; //also holds combine lefts during combine phases
-	combines_map combine_needs_; //TODO: fix find_required_combines to just return a vector of pairs
+	//first element is a list of rights, second is a list of lefts (it's backwards)
+	vector<pair<vector<uint64_t>, vector<uint64_t>>> combine_needs_;
 	unsigned int generation_;
 	unsigned int subgeneration_;
 	Phase phase_;
@@ -1165,7 +1206,6 @@ public:
 		SearchState::Serialized state;
 		vector<uint64_t> combine_rights;
 		vector<uint64_t> unary_needs;
-		//rights: lefts needing combine (yes, it's backwards)
 		vector<pair<vector<uint64_t>, vector<uint64_t>>> combine_needs;
 		unsigned int generation;
 		unsigned int subgeneration;
@@ -1177,7 +1217,7 @@ public:
 		bool multiplayer;
 		Serialized() = default; //for msgpack
 		Serialized(const Search& s) : state(s.state_.serialized()), combine_rights(s.combine_rights_),
-				unary_needs(s.unary_needs_), combine_needs(s.combine_needs_.begin(), s.combine_needs_.end()),
+				unary_needs(s.unary_needs_), combine_needs(s.combine_needs_),
 				generation(s.generation_), subgeneration(s.subgeneration_),
 				phase(static_cast<std::underlying_type_t<Phase>>(s.phase_)),
 				cmdline_specs(s.cmdline_specs_), source_specs(s.source_specs_), precision(s.precision_),
@@ -1185,7 +1225,7 @@ public:
 			canonicalize();
 		}
 		Serialized(Search&& s) : state(std::move(s.state_).serialized()), combine_rights(std::move(s.combine_rights_)),
-				unary_needs(std::move(s.unary_needs_)), combine_needs(s.combine_needs_.begin(), s.combine_needs_.end()),
+				unary_needs(std::move(s.unary_needs_)), combine_needs(std::move(s.combine_needs_)),
 				generation(s.generation_), subgeneration(s.subgeneration_),
 				phase(static_cast<std::underlying_type_t<Phase>>(s.phase_)),
 				cmdline_specs(std::move(s.cmdline_specs_)), source_specs(std::move(s.source_specs_)),
@@ -1201,14 +1241,18 @@ public:
 				precision, multiplayer)
 	private:
 		void canonicalize() {
+			//TODO: I think these could all be asserts, but they're cheap enough
 			assert(std::is_sorted(combine_rights.begin(), combine_rights.end()));
 			if (!std::is_sorted(unary_needs.begin(), unary_needs.end()))
 				std::sort(unary_needs.begin(), unary_needs.end());
 			for (auto& p : combine_needs) {
-				std::sort(p.first.begin(), p.first.end());
-				std::sort(p.second.begin(), p.second.end());
+				if (!std::is_sorted(p.first.begin(), p.first.end()))
+					std::sort(p.first.begin(), p.first.end());
+				if (!std::is_sorted(p.second.begin(), p.second.end()))
+					std::sort(p.second.begin(), p.second.end());
 			}
-			std::sort(combine_needs.begin(), combine_needs.end());
+			if (!std::is_sorted(combine_needs.begin(), combine_needs.end()))
+				std::sort(combine_needs.begin(), combine_needs.end());
 			//let cmdline_specs, source_specs keep their original order
 		}
 	};
