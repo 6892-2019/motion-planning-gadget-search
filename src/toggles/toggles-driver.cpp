@@ -633,6 +633,19 @@ DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::stri
 	return overall_stats;
 }
 
+void write_unary_batch_tasks(pqxx::connection& conn, std::string_view operation, UnaryBatcher batcher, const std::string& directory) {
+	vector<uint64_t> fetches;
+	simple_buffer buffer;
+	for (std::uint32_t seqno = 0; batcher; ++seqno) {
+		auto batch = batcher();
+		fetches.assign(batch.first, batch.second);
+		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
+		pack_call(buffer, seqno, operation, gadget_data);
+		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
+		buffer.clear();
+	}
+}
+
 struct CombineBatcher {
 	//backwards input: rights first, lefts second
 	vector<pair<vector<uint64_t>, vector<uint64_t>>>::const_iterator head, last;
@@ -1071,12 +1084,14 @@ private:
 
 	Control compute_close() {
 		assert(!multiplayer_);
-		if (unary_needs_.size())
-			//TODO: this might ask for suspend
-			operate_unary("close-db", "Close", runtime_opts_.close_gadgets_per_task, runtime_opts_.close_task_batch_threshold);
+		Control control = Control::proceed;
+		if (!unary_needs_.size())
+			control = operate_unary("close", "Close", runtime_opts_.close_gadgets_per_task, runtime_opts_.close_task_batch_threshold);
+		//If we decide to use a separate resume phase to check fewer possible
+		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
-		phase_ = Phase::follow_close;
-		return Control::proceed;
+		phase_ = control == Control::proceed ? Phase::follow_close : Phase::discover_needs_close;
+		return control;
 	}
 
 	Control follow_close() {
@@ -1098,12 +1113,14 @@ private:
 	}
 
 	Control compute_mirror() {
-		if (unary_needs_.size())
-			//TODO: this might ask for suspend
-			operate_unary("mirror-db", "Mirror", runtime_opts_.mirror_gadgets_per_task, runtime_opts_.close_task_batch_threshold);
+		Control control = Control::proceed;
+		if (!unary_needs_.size())
+			control = operate_unary("mirror", "Mirror", runtime_opts_.mirror_gadgets_per_task, runtime_opts_.mirror_task_batch_threshold);
+		//If we decide to use a separate resume phase to check fewer possible
+		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
-		phase_ = Phase::follow_mirror;
-		return Control::proceed;
+		phase_ = control == Control::proceed ? Phase::follow_mirror : Phase::discover_needs_mirror;
+		return control;
 	}
 
 	Control follow_mirror() {
@@ -1158,12 +1175,14 @@ private:
 	}
 
 	Control compute_connect() {
-		if (unary_needs_.size())
-			//TODO: this might ask for suspend
-			operate_unary("connect-db", "Connect", runtime_opts_.connect_gadgets_per_task, runtime_opts_.connect_task_batch_threshold);
+		Control control = Control::proceed;
+		if (!unary_needs_.size())
+			control = operate_unary("connect", "Connect", runtime_opts_.connect_gadgets_per_task, runtime_opts_.connect_task_batch_threshold);
+		//If we decide to use a separate resume phase to check fewer possible
+		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
-		phase_ = Phase::follow_connect;
-		return Control::proceed;
+		phase_ = control == Control::proceed ? Phase::follow_connect : Phase::discover_needs_connect;
+		return control;
 	}
 
 	Control follow_connect() {
@@ -1191,12 +1210,14 @@ private:
 		Stopwatch stopwatch = Stopwatch::process();
 		UnaryBatcher batcher(unary_needs_, gadgets_per_task);
 		if (batcher.size() < batch_threshold) {
+			std::string operation_cmd = fmt::format("{}-db", operation_name);
 			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_name, batcher);
 			fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 					log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			return Control::proceed;
 		} else {
-			throw std::logic_error("TODO batching!");
+			std::string operation_cmd = fmt::format("batch-{}", operation_name);
+			write_unary_batch_tasks(*conn_, operation_cmd, batcher, runtime_opts_.batch_task_directory);
 			return Control::suspend;
 		}
 	}
