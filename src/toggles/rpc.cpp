@@ -1,5 +1,72 @@
 #include "precompiled.hpp"
 #include "rpc.hpp"
+#include <sys/stat.h>
+
+void write_buffer(const simple_buffer& buffer, const std::string& filename) {
+	FILE* file = std::fopen(filename.c_str(), "wb");
+	if (!file) {
+		auto savederrno = errno;
+		throw std::runtime_error(fmt::format("write_buffer: failed to open {}: {} ({})\n",
+				filename, strerror(savederrno), savederrno));
+	}
+	std::size_t bytes_written = std::fwrite(buffer.data(), sizeof(char), buffer.size(), file);
+	if (bytes_written != buffer.size()) {
+		auto savederrno = errno;
+		throw std::runtime_error(fmt::format("write_buffer: {}, size {}, wrote {}: {} ({})\n",
+				filename, buffer.size(), bytes_written, strerror(savederrno), savederrno));
+	}
+	if (std::fclose(file) != 0) {
+		auto savederrno = errno;
+		throw std::runtime_error(fmt::format("write_buffer: {}, size {}, after writing {}, while closing: {} ({})\n",
+				filename, buffer.size(), bytes_written, strerror(savederrno), savederrno));
+	}
+}
+void read_buffer(simple_buffer& buf, const std::string& filename) {
+	buf.clear();
+	struct stat s;
+	if (stat(filename.c_str(), &s)) {
+		auto savederrno = errno;
+		throw std::runtime_error(fmt::format("read_buffer: stat {}: {} ({})\n",
+				filename, strerror(savederrno), savederrno));
+	}
+	std::size_t file_size = s.st_size;
+	buf.grow(file_size); //TODO: actually want a function setting exact capacity, not rounding up
+
+	FILE* file = std::fopen(filename.c_str(), "rb");
+	if (!file) {
+		auto savederrno = errno;
+		throw std::runtime_error(fmt::format("read_buffer: failed to open {}: {} ({})\n",
+				filename, strerror(savederrno), savederrno));
+	}
+
+	std::size_t bytes_read = std::fread(buf.data(), sizeof(char), file_size, file);
+	if (bytes_read != file_size) {
+		if (std::feof(file))
+			throw std::runtime_error(fmt::format("read_buffer: premature eof from {}, length {} but only read {}",
+					filename, file_size, bytes_read));
+		else if (std::ferror(file)) {
+			auto savederrno = errno;
+			throw std::runtime_error(fmt::format("read_buffer: error reading from {}, length {}, read {}: {} ({})\n",
+					filename, file_size, bytes_read, strerror(savederrno), savederrno));
+		} else
+			throw std::runtime_error(fmt::format("read_buffer: unknown short read from {}, length {}, read {}",
+					filename, file_size, bytes_read));
+	}
+	buf.size(bytes_read);
+
+	if (std::fclose(file) != 0) {
+		auto savederrno = errno;
+		throw std::runtime_error(fmt::format("read_buffer: {}, size {}, after reading {}, while closing: {} ({})\n",
+				filename, file_size, bytes_read, strerror(savederrno), savederrno));
+	}
+}
+simple_buffer read_buffer(const std::string& filename) {
+	simple_buffer b;
+	read_buffer(b, filename);
+	return std::move(b);
+}
+
+
 
 simple_buffer pack_success(uint32_t seq_no, const msgpack::object result) {
 	simple_buffer buffer;

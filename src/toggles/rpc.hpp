@@ -85,6 +85,20 @@ private:
 	std::unique_ptr<void, free_deleter> data_;
 	std::size_t size_, capacity_;
 };
+/**
+ * Writes the contents of the buffer to a new file at the given filename, failing
+ * if that file already exists.
+ */
+void write_buffer(const simple_buffer& buf, const std::string& filename);
+/**
+ * Reads the contents of the specified file into the given buffer, overwriting
+ * any existing contents.
+ */
+void read_buffer(simple_buffer& buf, const std::string& filename);
+/**
+ * Load the contents of the specified file into a new buffer.
+ */
+simple_buffer read_buffer(const std::string& filename);
 
 
 

@@ -713,15 +713,7 @@ void write_combine_batch_tasks(pqxx::connection& conn, CombineBatcher batcher, u
 
 		fetches.assign(batch.first.first, batch.first.second); //packing iterator-range would save this copy
 		pack_call(buffer, seqno, "batch-combine", gadget_data, fetches, *batch.second, precision);
-
-		std::string filename = fmt::format("{}/{}.msg", directory, seqno);
-		FILE* file = std::fopen(filename.c_str(), "wb");
-		std::size_t bytes_written = std::fwrite(buffer.data(), sizeof(char), buffer.size(), file);
-		if (bytes_written != buffer.size() || std::fclose(file) != 0) {
-			auto savederrno = errno;
-			throw std::runtime_error(fmt::format("error writing seqno {}, size {}, wrote {}: {} ({})\n",
-					seqno, buffer.size(), bytes_written, strerror(savederrno), errno));
-		}
+		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
 		buffer.clear();
 	}
 }
@@ -733,15 +725,15 @@ public:
 	SearchState() : subgen_start_(0), prev_subgen_start_(0) {}
 	SearchState(const Serialized& s) : closed_(s.closed.begin(), s.closed.end()),
 			curgen_(s.curgen), subgen_start_(s.subgen_start), prev_subgen_start_(s.prev_subgen_start) {
-		if (subgen_start_ >= curgen_.size())
-			throw std::runtime_error(fmt::format("subgen_start_ {} curgen_.size() {} while restoring",
-					subgen_start_, curgen_.size()));
+		if (prev_subgen_start_ > subgen_start_ || subgen_start_ > curgen_.size())
+			throw std::runtime_error(fmt::format("prev_subgen_start_ {} subgen_start_ {} curgen_.size() {} while restoring",
+					prev_subgen_start_, subgen_start_, curgen_.size()));
 	}
 	SearchState(Serialized&& s) : closed_(s.closed.begin(), s.closed.end()),
 			curgen_(std::move(s.curgen)), subgen_start_(s.subgen_start), prev_subgen_start_(s.prev_subgen_start) {
-		if (subgen_start_ >= curgen_.size())
-			throw std::runtime_error(fmt::format("subgen_start_ {} curgen_.size() {} while restoring",
-					subgen_start_, curgen_.size()));
+		if (prev_subgen_start_ > subgen_start_ || subgen_start_ > curgen_.size())
+			throw std::runtime_error(fmt::format("prev_subgen_start_ {} subgen_start_ {} curgen_.size() {} while restoring",
+					prev_subgen_start_, subgen_start_, curgen_.size()));
 	}
 	bool operator()(uint64_t id) {
 		if (closed_.insert(id).second) {
@@ -832,7 +824,7 @@ public:
 			std::sort(curgen.begin()+prev_subgen_start, curgen.begin()+subgen_start);
 			std::sort(curgen.begin()+subgen_start, curgen.end());
 		}
-		MSGPACK_DEFINE_ARRAY(closed, curgen, subgen_start)
+		MSGPACK_DEFINE_ARRAY(closed, curgen, subgen_start, prev_subgen_start)
 	};
 	Serialized serialized() const & {
 		Serialized s;
@@ -937,12 +929,7 @@ private:
 		/**
 		 * Create a new checkpoint and exit.
 		 */
-		suspend_new_checkpoint,
-		/**
-		 * Exit, preserving the existing checkpoint because no state has changed.
-		 * (Presumably we queued tasks that will cause state changes in the future.)
-		 */
-		suspend_unmodified,
+		suspend,
 		/**
 		 * The search has completed; no more gadgets can be made.  (Storing the
 		 * closed set might be useful for future "can make X?" queries.)
@@ -966,7 +953,10 @@ public:
 			precision_(s.precision), multiplayer_(s.multiplayer), conn_(nullptr), workers_(nullptr), runtime_opts_(runtime_opts),
 			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
 
-	void execute(pqxx::connection& conn, WorkerManager* workers) {
+	/**
+	 * @return true if the search completed; false if we should write a checkpoint
+	 */
+	bool execute(pqxx::connection& conn, WorkerManager* workers) {
 		conn_ = &conn;
 		workers_ = workers;
 
@@ -993,6 +983,7 @@ public:
 
 		conn_ = nullptr;
 		workers_ = nullptr;
+		return control == Control::stop;
 	}
 
 private:
@@ -1049,7 +1040,7 @@ private:
 				//We could try a special resume state that only rechecks combine_needs_.
 				combine_needs_.clear();
 				phase_ = Phase::discover_needs_combine;
-				return Control::suspend_new_checkpoint;
+				return Control::suspend;
 			}
 		}
 		phase_ = Phase::follow_combine;
@@ -1206,7 +1197,7 @@ private:
 			return Control::proceed;
 		} else {
 			throw std::logic_error("TODO batching!");
-			return Control::suspend_new_checkpoint;
+			return Control::suspend;
 		}
 	}
 
@@ -1312,7 +1303,9 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
 	std::vector<std::string> worker_addrs; //or @foo for response files
-	std::string_view checkpoint_file = ""; //TODO: split into resume file and path to save new checkpoints
+	//TODO: we might want a directory for making per-generation checkpoints
+	//instead of just checkpointing on suspends
+	std::string_view resume_checkpoint, suspend_checkpoint = "";
 	bool multiplayer = false;
 	std::vector<std::string_view> gid_specs;
 	unsigned int precision = 8;
@@ -1336,8 +1329,10 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			db_name = argv[++i];
 		else if (argv[i] == "--worker"sv)
 			worker_addrs.emplace_back(argv[++i]);
-		else if (argv[i] == "--checkpoint"sv)
-			checkpoint_file = argv[++i];
+		else if (argv[i] == "--resume-checkpoint"sv)
+			resume_checkpoint = argv[++i];
+		else if (argv[i] == "--suspend-checkpoint"sv)
+			suspend_checkpoint = argv[++i];
 		else if (argv[i] == "--multiplayer"sv)
 			multiplayer = true;
 		else if (argv[i] == "--precision"sv)
@@ -1392,9 +1387,23 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	pqxx::connection conn(connect_str);
 	prepare_statements(conn);
 
-	Search search(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
+	std::optional<Search> search; //just for lazy init
+	if (!resume_checkpoint.empty()) {
+		simple_buffer buf = read_buffer(std::string(resume_checkpoint));
+		search.emplace(msgpack::unpack(static_cast<char*>(buf.data()), buf.size()).get().as<Search::Serialized>(), runtime_opts);
+	} else
+		search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
 			precision, multiplayer, runtime_opts);
-	search.execute(conn, &manager);
+
+	if (!search->execute(conn, &manager)) {
+		if (suspend_checkpoint.empty())
+			fmt::print(stderr, "ERROR: would suspend, but --suspend-checkpoint not passed\n");
+		else {
+			simple_buffer buf;
+			msgpack::pack(buf, std::move(*search).serialize());
+			write_buffer(buf, std::string(suspend_checkpoint));
+		}
+	}
 
 	return 0;
 }
