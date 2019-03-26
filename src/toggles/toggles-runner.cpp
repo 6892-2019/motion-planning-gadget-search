@@ -14,6 +14,7 @@
 #include <cstdio>
 
 using namespace automaton;
+using std::uint64_t;
 using std::size_t;
 using std::pair;
 using std::tuple;
@@ -23,6 +24,9 @@ using std::vector;
 using std::unique_ptr;
 using std::string_view;
 using namespace std::literals::string_view_literals;
+
+//forward declaration:
+void write_output(const void* data, size_t size);
 
 template<typename T>
 void debug_scream([[maybe_unused]] T& t) {
@@ -946,6 +950,29 @@ CombineCommandOutput do_combine_for_python(CombineCommandInput cmd) {
 }
 
 
+//return type is just to satisfy rpc machinery; we don't special-case for void
+//and msgpack can't handle nullptr_t
+[[noreturn]] int do_batch_combine(vector<pair<uint64_t, vector<std::byte>>> inputs,
+		vector<uint64_t> lefts, vector<uint64_t> rights, unsigned int precision) {
+	tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map;
+	for (auto& p : inputs)
+		map[p.first] = std::move(p.second);
+	inputs.clear();
+	inputs.shrink_to_fit();
+	Finisher<CombineProvenance> finisher = do_combine(std::move(map), std::move(lefts), std::move(rights), precision);
+	//TODO: We'd like to use the same sequence number here, but we don't have
+	//access.  Introduce a seqno_t "strong typedef" that handler_adapter
+	//recognizes and fills in (in addition to whatever other args are present).
+	simple_buffer buf = pack_call(0, "batch-combine-commit", finisher.rows_.values_container(), finisher.prov_);
+	//By printing to stdout and exiting, we emit an RPC call rather than a
+	//response.  If we threw an exception, though, the dispatcher will generate
+	//an error response as normal, so we'll detect the failure when trying to
+	//commit the results.
+	write_output(buf.data(), buf.size());
+	std::exit(0);
+}
+
+
 struct SimpleOutput {
 //	decltype(Finisher<SimpleProvenance>::rows_.values_container()) rows;
 	vector<OutputRow> rows;
@@ -1470,6 +1497,8 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"combine-db"sv, &handler_adapter<do_combine_db>},
 	{"close-db"sv, &handler_adapter<do_close_db>},
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
+
+	{"batch-combine"sv, &handler_adapter<do_batch_combine>},
 };
 
 
