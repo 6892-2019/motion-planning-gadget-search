@@ -963,7 +963,7 @@ CombineCommandOutput do_combine_for_python(CombineCommandInput cmd) {
 	//TODO: We'd like to use the same sequence number here, but we don't have
 	//access.  Introduce a seqno_t "strong typedef" that handler_adapter
 	//recognizes and fills in (in addition to whatever other args are present).
-	simple_buffer buf = pack_call(0, "batch-combine-commit", finisher.rows_.values_container(), finisher.prov_);
+	simple_buffer buf = pack_call(0, "batch-combine-commit", finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
 	//By printing to stdout and exiting, we emit an RPC call rather than a
 	//response.  If we threw an exception, though, the dispatcher will generate
 	//an error response as normal, so we'll detect the failure when trying to
@@ -1128,10 +1128,9 @@ struct SelsertGadgetByDataResult {
  * Returns the global gadget id of each of the given rows, inserting the row if
  * not already present.  The vector of ids matches the order of the rows.
  */
+template<class OutputRowsContainer>
 SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans,
-		//using a specific Finisher instantiation here because it's the same for all of them
-		decltype(Finisher<ConnectProvenance>::rows_)&& rows_from_finisher) {
-	auto& rows = rows_from_finisher.values_container();
+		OutputRowsContainer&& rows) {
 	//TODO: decide if we can persistently prepare when pgbouncer starts a new
 	//transaction (for this and other prepared statements)
 	if (rows.size() >= 100)
@@ -1275,7 +1274,7 @@ DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
 	std::size_t novel_gadgets_size = retry_db_operation([&](){
 		transaction trans(conn);
 
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_).values_container());
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 
 		std::size_t edge_index = 0;
@@ -1306,6 +1305,49 @@ DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
 	return {outputs.pruned_, survivor_size - novel_gadgets_size, novel_gadgets_size, outputs.prov_.size()};
 }
 
+template<class OutputRowContainer>
+DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, OutputRowContainer&& rows,
+		vector<CombineProvenance> prov, std::size_t pruned) {
+	const unsigned int batch_size = 200;
+	if (prov.size() >= batch_size)
+		conn.prepare("insert_combine_edge_batch", build_insert_combine_edges_query(200));
+	std::size_t survivor_size = rows.size();
+
+	std::size_t novel_gadgets_size = retry_db_operation([&](){
+		transaction trans(conn);
+
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(rows));
+		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+
+		std::size_t edge_index = 0;
+		while (prov.size() - edge_index >= batch_size) {
+			pqxx::prepare::invocation inv = trans.prepared("insert_combine_edge_batch");
+			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
+				const CombineProvenance& p = prov[edge_index];
+				inv(p.input1)(p.input2)(local_to_global[p.output1])
+						((unsigned short)p.splice)((unsigned short)p.rotation)
+						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+		if (edge_index < prov.size()) {
+			pqxx::internal::parameterized_invocation inv = trans.parameterized(
+					build_insert_combine_edges_query(prov.size() - edge_index));
+			for (; edge_index < prov.size(); ++edge_index) {
+				const CombineProvenance& p = prov[edge_index];
+				inv(p.input1)(p.input2)(local_to_global[p.output1])
+						((unsigned short)p.splice)((unsigned short)p.rotation)
+						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+			}
+			inv.exec();
+		}
+
+		trans.commit();
+		return selsert_result.novel_global_ids.size();
+	});
+	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, prov.size()};
+}
+
 DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
 	vector<std::uint64_t> input_gids;
 	input_gids.reserve(left_gids.size() + right_gids.size());
@@ -1322,45 +1364,7 @@ DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vecto
 	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
 		map.try_emplace(p.first, std::move(p.second));
 	Finisher outputs = do_combine(std::move(map), left_gids, right_gids, precision);
-	std::size_t survivor_size = outputs.rows_.size();
-
-	const unsigned int batch_size = 200;
-	if (outputs.prov_.size() >= batch_size)
-		conn.prepare("insert_combine_edge_batch", build_insert_combine_edges_query(200));
-
-	std::size_t novel_gadgets_size = retry_db_operation([&](){
-		transaction trans(conn);
-
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
-		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-
-		std::size_t edge_index = 0;
-		while (outputs.prov_.size() - edge_index >= batch_size) {
-			pqxx::prepare::invocation inv = trans.prepared("insert_combine_edge_batch");
-			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
-				const CombineProvenance& p = outputs.prov_[edge_index];
-				inv(p.input1)(p.input2)(local_to_global[p.output1])
-						((unsigned short)p.splice)((unsigned short)p.rotation)
-						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
-		if (edge_index < outputs.prov_.size()) {
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_combine_edges_query(outputs.prov_.size() - edge_index));
-			for (; edge_index < outputs.prov_.size(); ++edge_index) {
-				const CombineProvenance& p = outputs.prov_[edge_index];
-				inv(p.input1)(p.input2)(local_to_global[p.output1])
-						((unsigned short)p.splice)((unsigned short)p.rotation)
-						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
-
-		trans.commit();
-		return selsert_result.novel_global_ids.size();
-	});
-	return {outputs.pruned_, survivor_size - novel_gadgets_size, novel_gadgets_size, outputs.prov_.size()};
+	return commit_combine_result(conn, outputs.rows_.values_container(), std::move(outputs.prov_), outputs.pruned_);
 }
 
 DatabaseOperationStatistics do_close_db(vector<std::uint64_t> input_gids) {
@@ -1378,7 +1382,7 @@ DatabaseOperationStatistics do_close_db(vector<std::uint64_t> input_gids) {
 		transaction trans(conn);
 
 		//could be structured bindings
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_).values_container());
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
 
@@ -1429,7 +1433,7 @@ DatabaseOperationStatistics do_mirror_db(vector<std::uint64_t> input_gids) {
 		transaction trans(conn);
 
 		//could be structured bindings
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_));
+		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(outputs.rows_).values_container());
 		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
 
@@ -1470,6 +1474,13 @@ DatabaseOperationStatistics do_mirror_db(vector<std::uint64_t> input_gids) {
 
 
 
+DatabaseOperationStatistics do_batch_combine_commit(vector<OutputRow> rows, vector<CombineProvenance> prov, std::size_t pruned) {
+	pqxx::connection conn(g_database_connect_string);
+	return commit_combine_result(conn, std::move(rows), std::move(prov), pruned);
+}
+
+
+
 /**
  * @return a string containing various information about this worker
  */
@@ -1499,6 +1510,7 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
 
 	{"batch-combine"sv, &handler_adapter<do_batch_combine>},
+	{"batch-combine-commit"sv, &handler_adapter<do_batch_combine_commit>},
 };
 
 
