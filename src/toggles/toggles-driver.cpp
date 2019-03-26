@@ -1085,7 +1085,7 @@ private:
 	Control compute_close() {
 		assert(!multiplayer_);
 		Control control = Control::proceed;
-		if (!unary_needs_.size())
+		if (unary_needs_.size())
 			control = operate_unary("close", "Close", runtime_opts_.close_gadgets_per_task, runtime_opts_.close_task_batch_threshold);
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
@@ -1114,7 +1114,7 @@ private:
 
 	Control compute_mirror() {
 		Control control = Control::proceed;
-		if (!unary_needs_.size())
+		if (unary_needs_.size())
 			control = operate_unary("mirror", "Mirror", runtime_opts_.mirror_gadgets_per_task, runtime_opts_.mirror_task_batch_threshold);
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
@@ -1176,7 +1176,7 @@ private:
 
 	Control compute_connect() {
 		Control control = Control::proceed;
-		if (!unary_needs_.size())
+		if (unary_needs_.size())
 			control = operate_unary("connect", "Connect", runtime_opts_.connect_gadgets_per_task, runtime_opts_.connect_task_batch_threshold);
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
