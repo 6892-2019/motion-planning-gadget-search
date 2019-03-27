@@ -1169,90 +1169,61 @@ struct SelsertGadgetByDataResult {
  * Returns the global gadget id of each of the given rows, inserting the row if
  * not already present.  The vector of ids matches the order of the rows.
  */
-template<class OutputRowsContainer>
-SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans,
-		OutputRowsContainer&& rows) {
-	//TODO: decide if we can persistently prepare when pgbouncer starts a new
-	//transaction (for this and other prepared statements)
-	if (rows.size() >= 100)
-		conn.prepare("select_data_100", build_select_gadget_data_to_id(100));
+SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans, vector<OutputRow>&& rows) {
+	//We want multiple runners to select and insert gadgets in a consistent
+	//order to reduce serialization failures, but we also need local_to_global
+	//in the same order.  So we sort an array of indices, then use that order.
+	vector<unsigned int> indices;
+	std::iota(indices.begin(), indices.end(), rows.size());
+	std::sort(indices.begin(), indices.end(), [&rows](unsigned int a, unsigned int b) {
+		return rows[a] < rows[b];
+	});
 
+	//Previously we had a complex loop to use a small prepared statement
+	//repeatedly, but I don't think that's worth it.  We might eventually hit a
+	//limit on the number of parameters, I guess.
 	vector<std::uint64_t> local_to_global(rows.size(), std::numeric_limits<std::uint64_t>::max());
-	std::size_t row_index = 0, pending_insert_count = 0;
-	//Do batches of 100 with our prepared statement, then make one
-	//parameterized (non-prepared) query for the remainder.
-	while (rows.size() - row_index >= 100) {
-		pqxx::prepare::invocation inv = trans.prepared("select_data_100");
-		for (std::size_t max = row_index + 100; row_index < max; ++row_index) {
-			const OutputRow& r = rows[row_index];
-			inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-		}
+	std::size_t pending_insert_count = 0;
+	if (rows.size()) { //you wouldn't call with no rows, would you?
+		pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(rows.size()));
+		for (unsigned int i : indices)
+			inv(i)(pqxx::binarystring(rows[i].edges.data(), rows[i].edges.size()));
 		pqxx::result already_have = inv.exec();
-		for (pqxx::row r : already_have)
-			local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
-		pending_insert_count += 100 - already_have.size();
-	}
-	if (row_index < rows.size()) {
-		std::size_t epilogue_count = rows.size() - row_index;
-		pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(epilogue_count));
-		for (; row_index < rows.size(); ++row_index) {
-			const OutputRow& r = rows[row_index];
-			inv(row_index)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-		}
-		pqxx::result already_have = inv.exec();
-		for (pqxx::row r : already_have)
-			local_to_global[r[0].as<std::size_t>()] = r[1].as<std::size_t>();
-		pending_insert_count += epilogue_count - already_have.size();
+		for (const pqxx::row& r : already_have)
+			local_to_global[r[0].as<std::size_t>()] = r[1].as<std::uint64_t>();
+		pending_insert_count = rows.size() - already_have.size();
 	}
 
-	if (pending_insert_count >= 100)
-		conn.prepare("insert_gadgets_100", build_insert_gadgets_query(100));
-
-	//Scan over local_to_global building up a batch, then fill it in; also
-	//record the global ids of the inserted gadgets.
 	vector<std::uint64_t> novel_global_ids;
-	novel_global_ids.reserve(pending_insert_count);
-	row_index = 0;
-	while (pending_insert_count >= 100) {
-		pqxx::prepare::invocation inv = trans.prepared("insert_gadgets_100");
-		std::size_t batched = 0;
-		while (batched++ < 100) {
-			while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
-			const OutputRow& r = rows[row_index];
-			inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-			++row_index;
-		}
-		pqxx::result inserted = inv.exec();
-		for (pqxx::row r : inserted) {
-			auto gid = r[1].as<std::size_t>();
-			local_to_global[r[0].as<std::size_t>()] = gid;
-			novel_global_ids.push_back(gid);
-		}
-		pending_insert_count -= 100;
-	}
 	if (pending_insert_count) {
+		novel_global_ids.reserve(pending_insert_count);
 		pqxx::internal::parameterized_invocation inv = trans.parameterized(
 				build_insert_gadgets_query(pending_insert_count));
-		std::size_t batched = 0;
-		while (batched++ < pending_insert_count) {
-			while (local_to_global[row_index] != std::numeric_limits<std::uint64_t>::max()) ++row_index;
-			const OutputRow& r = rows[row_index];
-			inv(row_index)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-			++row_index;
-		}
+		for (unsigned int i : indices)
+			if (local_to_global[i] != std::numeric_limits<std::uint64_t>::max()) {
+				const OutputRow& r = rows[i];
+				inv(i)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+			}
 		pqxx::result inserted = inv.exec();
-		for (pqxx::row r : inserted) {
-			auto gid = r[1].as<std::size_t>();
+		for (const pqxx::row& r : inserted) {
+			std::uint64_t gid = r[1].as<std::uint64_t>();
 			local_to_global[r[0].as<std::size_t>()] = gid;
 			novel_global_ids.push_back(gid);
 		}
-		pending_insert_count -= batched;
 	}
-
 	//Should have filled in everything now.
 	assert(std::find(local_to_global.begin(), local_to_global.end(),
 			std::numeric_limits<std::uint64_t>::max()) == local_to_global.end());
 	return {std::move(local_to_global), std::move(novel_global_ids)};
+}
+//as above, but executes as its own transaction
+SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, vector<OutputRow>&& rows) {
+	return retry_db_operation([&]() {
+		transaction trans(conn);
+		SelsertGadgetByDataResult res = selsert_gadget_by_data(conn, trans, std::move(rows));
+		trans.commit();
+		return std::move(res);
+	}, 10, "selsert_gadget_by_data");
 }
 
 void insert_completed_ranges(pqxx::connection& conn, transaction& trans,
