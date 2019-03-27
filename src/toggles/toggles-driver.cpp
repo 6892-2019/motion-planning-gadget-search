@@ -1041,17 +1041,19 @@ private:
 
 	Control compute_combine() {
 		if (combine_needs_.size()) {
+			Stopwatch stopwatch = Stopwatch::process();
 			CombineBatcher batcher(combine_needs_, runtime_opts_.combine_pairs_per_task);
 			if (batcher.size() < runtime_opts_.combine_task_batch_threshold) {
-				Stopwatch stopwatch = Stopwatch::process();
 				DatabaseOperationStatistics stats = do_combine_operation(*workers_, std::move(batcher), precision_);
 				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
+				std::size_t task_count = batcher.size();
 				write_combine_batch_tasks(*conn_, std::move(batcher), precision_,
 						runtime_opts_.batch_task_directory);
 				//We could try a special resume state that only rechecks combine_needs_.
 				combine_needs_.clear();
+				fmt::print("wrote {} combine tasks in {}\n", task_count, stopwatch.elapsed().hms());
 				phase_ = Phase::discover_needs_combine;
 				return Control::suspend;
 			}
@@ -1216,8 +1218,10 @@ private:
 					log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			return Control::proceed;
 		} else {
+			std::size_t task_count = batcher.size();
 			std::string operation_cmd = fmt::format("batch-{}", operation_name);
 			write_unary_batch_tasks(*conn_, operation_cmd, batcher, runtime_opts_.batch_task_directory);
+			fmt::print("wrote {} {} tasks in {}\n", task_count, log_name, stopwatch.elapsed().hms());
 			return Control::suspend;
 		}
 	}
