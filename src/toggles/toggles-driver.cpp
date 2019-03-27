@@ -1213,7 +1213,7 @@ private:
 		UnaryBatcher batcher(unary_needs_, gadgets_per_task);
 		if (batcher.size() < batch_threshold) {
 			std::string operation_cmd = fmt::format("{}-db", operation_name);
-			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_name, batcher);
+			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_cmd, batcher);
 			fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 					log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			return Control::proceed;
