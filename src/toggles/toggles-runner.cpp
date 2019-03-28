@@ -1271,6 +1271,13 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint
 	return ranges;
 }
 
+template<typename T>
+struct fits_in {
+	bool operator()(T t) const noexcept {
+		return t <= std::numeric_limits<T>::max();
+	}
+};
+
 static std::string g_database_connect_string;
 
 DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
@@ -1284,8 +1291,7 @@ DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
 	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
 	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 
-	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
-			std::numeric_limits<decltype(ConnectProvenance::output1)>::max()) {
+	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(ConnectProvenance::output1)>())) {
 		for (ConnectProvenance& p : prov)
 			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
 		std::sort(prov.begin(), prov.end());
@@ -1335,8 +1341,7 @@ DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, vector
 
 	//We want to insert edges in sorted order to reduce serialization failures.
 	//We can use the Provenance if the new ids fit; otherwise we have to copy.
-	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
-			std::numeric_limits<decltype(CombineProvenance::output1)>::max()) {
+	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(CombineProvenance::output1)>())) {
 		for (CombineProvenance& p : prov)
 			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
 		std::sort(prov.begin(), prov.end());
@@ -1387,8 +1392,7 @@ DatabaseOperationStatistics commit_close_result(pqxx::connection& conn,
 	std::sort(input_gids.begin(), input_gids.end());
 	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
 
-	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
-			std::numeric_limits<decltype(SimpleProvenance::output1)>::max()) {
+	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(SimpleProvenance::output1)>())) {
 		for (SimpleProvenance& p : prov)
 			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
 		std::sort(prov.begin(), prov.end());
@@ -1446,10 +1450,10 @@ DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
 	//for reusing the provs is stricter.  We don't need to deduplicate due "on
 	//conflict do nothing", but it is probably faster to do so if it saves us a
 	//database round-trip.
-	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
-			std::numeric_limits<decltype(SimpleProvenance::output1)>::max() &&
+	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(SimpleProvenance::output1)>()) &&
+			//p.input1 also fits in output1 (no clean way without a lambda)
 			std::all_of(prov.begin(), prov.end(), [](const SimpleProvenance& p) {
-				return p.output1 <= std::numeric_limits<decltype(SimpleProvenance::output1)>::max();
+				return p.input1 <= std::numeric_limits<decltype(SimpleProvenance::output1)>::max();
 			})) {
 		for (SimpleProvenance& p : prov) {
 			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
