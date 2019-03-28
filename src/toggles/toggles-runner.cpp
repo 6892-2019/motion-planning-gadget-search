@@ -1159,6 +1159,15 @@ std::string build_insert_completion_query(std::size_t rows, std::string_view tab
 	return fmt::format("insert into {} (r) values\n", table_name) +
 			join(values, ",\n  ") + ";";
 }
+std::string build_insert_connect_completion_query(std::size_t rows) {
+	return build_insert_completion_query(rows, "completed_connects");
+}
+std::string build_insert_close_completion_query(std::size_t rows) {
+	return build_insert_completion_query(rows, "completed_closes");
+}
+std::string build_insert_mirror_completion_query(std::size_t rows) {
+	return build_insert_completion_query(rows, "completed_mirrors");
+}
 
 //This is basically a workaround for NetBeans' choking on structured bindings.
 //If I ever stop using it, this can just be a pair.
@@ -1226,32 +1235,6 @@ SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, vector<
 	}, 10, "selsert_gadget_by_data");
 }
 
-void insert_completed_ranges(pqxx::connection& conn, transaction& trans,
-		vector<pair<std::uint64_t, std::uint64_t>> ranges,
-		string_view table) {
-	//It's not clear to me that using prepared statements is actually faster here...
-	const unsigned int batch_size = 100;
-	std::optional<std::string> prepared_statement_name;
-	if (ranges.size() > batch_size) {
-		prepared_statement_name.emplace(fmt::format("insert_{}_{}", table, batch_size));
-		conn.prepare(*prepared_statement_name, build_insert_completion_query(batch_size, table));
-	}
-	std::size_t completed_index = 0;
-	while (ranges.size() - completed_index >= batch_size) {
-		pqxx::prepare::invocation inv = trans.prepared(*prepared_statement_name);
-		for (std::size_t max = completed_index + batch_size; completed_index < max; ++completed_index)
-			inv(ranges[completed_index].first)(ranges[completed_index].second);
-		inv.exec();
-	}
-	if (completed_index < ranges.size()) {
-		pqxx::internal::parameterized_invocation inv = trans.parameterized(
-				build_insert_completion_query(ranges.size() - completed_index, table));
-		for (; completed_index < ranges.size(); ++completed_index)
-			inv(ranges[completed_index].first)(ranges[completed_index].second);
-		inv.exec();
-	}
-}
-
 vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint64_t>& data) {
 	assert(std::is_sorted(data.begin(), data.end()));
 	vector<pair<std::uint64_t, std::uint64_t>> ranges;
@@ -1299,7 +1282,7 @@ DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
 		retry_db_operation([&]() {
 			transaction trans(conn);
 			batch_parameterized(conn, trans, build_insert_connect_edges_query, /* TODO */ 5000, std::move(prov));
-			insert_completed_ranges(conn, trans, completed_ranges, "completed_connects");
+			batch_parameterized(conn, trans, build_insert_connect_completion_query, 25000, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_connect_result inserting provs");
@@ -1313,7 +1296,7 @@ DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
 		retry_db_operation([&]() {
 			transaction trans(conn);
 			batch_parameterized(conn, trans, build_insert_connect_edges_query, /* TODO */ 5000, std::move(edges));
-			insert_completed_ranges(conn, trans, completed_ranges, "completed_connects");
+			batch_parameterized(conn, trans, build_insert_connect_completion_query, 25000, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_connect_result inserting edges");
@@ -1400,7 +1383,7 @@ DatabaseOperationStatistics commit_close_result(pqxx::connection& conn,
 		retry_db_operation([&]() {
 			transaction trans(conn);
 			batch_parameterized(conn, trans, build_insert_close_edges_query, /* TODO */ 5000, std::move(prov));
-			insert_completed_ranges(conn, trans, completed_ranges, "completed_closes");
+			batch_parameterized(conn, trans, build_insert_close_completion_query, 25000, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_close_result inserting provs");
@@ -1414,7 +1397,7 @@ DatabaseOperationStatistics commit_close_result(pqxx::connection& conn,
 		retry_db_operation([&]() {
 			transaction trans(conn);
 			batch_parameterized(conn, trans, build_insert_close_edges_query, /* TODO */ 5000, std::move(edges));
-			insert_completed_ranges(conn, trans, completed_ranges, "completed_closes");
+			batch_parameterized(conn, trans, build_insert_close_completion_query, 25000, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_close_result inserting edges");
@@ -1470,7 +1453,7 @@ DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
 		retry_db_operation([&]() {
 			transaction trans(conn);
 			batch_parameterized(conn, trans, build_insert_mirror_edges_query, /* TODO */ 5000, std::move(prov));
-			insert_completed_ranges(conn, trans, completed_ranges, "completed_mirrors");
+			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 25000, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_mirror_result inserting provs");
@@ -1487,7 +1470,7 @@ DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
 		retry_db_operation([&]() {
 			transaction trans(conn);
 			batch_parameterized(conn, trans, build_insert_mirror_edges_query, /* TODO */ 5000, std::move(edges));
-			insert_completed_ranges(conn, trans, completed_ranges, "completed_mirrors");
+			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 25000, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_mirror_result inserting edges");
