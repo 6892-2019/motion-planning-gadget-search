@@ -59,6 +59,10 @@ struct CombineProvenance {
 	std::uint8_t canonicalizePermutation;
 	MSGPACK_DEFINE_ARRAY(input1, input2, output1, splice, rotation, connectPoint, canonicalizePermutation)
 };
+inline bool operator<(const CombineProvenance& a, const CombineProvenance& b) {
+	return std::tie(a.input1, a.input2, a.output1, a.splice, a.rotation, a.connectPoint, a.canonicalizePermutation) <
+			std::tie(b.input1, b.input2, b.output1, b.splice, b.rotation, b.connectPoint, b.canonicalizePermutation);
+}
 
 struct SimpleProvenance {
 	std::uint64_t input1;

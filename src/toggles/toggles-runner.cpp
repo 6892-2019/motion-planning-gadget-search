@@ -1323,46 +1323,97 @@ DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
 			std::move(outputs.prov_), outputs.pruned_);
 }
 
+//works for any tuple, including std::pair and std::array
+//user types could opt in by becoming tuples, I guess
+//inv might be a prepared or parameterized invocation
+//no reason to perfect-forward inv, it'll always be a &
+template<class Callable, class Tuple, int = std::tuple_size<std::decay_t<Tuple>>::value>
+void database_invoke_apply(Callable& inv, Tuple&& t) {
+	std::apply([&inv](auto&&... args) {
+		(inv(std::forward<decltype(args)>(args)), ...);
+	}, std::forward<Tuple>(t));
+}
+
+template<class Callable>
+void database_invoke_apply(Callable&& inv, CombineProvenance& p) {
+	inv(p.input1)(p.input2)((uint64_t)p.output1)
+			((unsigned short)p.splice)((unsigned short)p.rotation)
+			((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+}
+
+template<class Record>
+void batch_parameterized(pqxx::connection& conn, transaction& trans, std::string(*query_ctor)(std::size_t),
+		std::size_t maximum_batch_size,	vector<Record>&& records) {
+	//Currently this function just uses repeated parameterized statements, but
+	//if we'll do multiple maximum batches we could prepare those.  We could also
+	//try to find an optimal batch size: if we end up with 4 full batches and a
+	//runt, and records.size() is divisible by 5, we can use smaller batches to
+	//reuse the prepared query an additional time without an additional round-trip.
+
+	//We don't need it now, but we could return a vector of the pqxx::result
+	//objects (it's safe if they outlive their transaction), or take a callable
+	//that processes them immediately (lengthening the transaction but reducing
+	//peak memory consumption).
+
+	std::size_t batch_base = 0;
+	while (batch_base < records.size()) {
+		std::size_t batch_size = std::min(maximum_batch_size, records.size() - batch_base);
+		//If formatting the query string turns out to be expensive we could try
+		//to cache the previous size.
+		pqxx::internal::parameterized_invocation inv = trans.parameterized(query_ctor(batch_size));
+		for (std::size_t i = 0; i < batch_size; ++i)
+			database_invoke_apply(inv, records[batch_base+i]);
+		inv.exec();
+		batch_base += batch_size;
+	}
+}
+
+/**
+ * Execute a batch parameterized query (using multiple batches if necessary).
+ * @param conn a connection
+ * @param query_ctor a function constructing queries for a given batch size
+ * @param maximum_batch_size the max batch size (for staying under parameter count limits)
+ * @param records a vector of records to be submitted using database_invoke_apply
+ * @param operation_name the name to pass to retry_db_operation
+ */
+template<class Record>
+void batch_parameterized(pqxx::connection& conn, std::string(*query_ctor)(std::size_t),
+		std::size_t maximum_batch_size,	vector<Record>&& records, std::string_view operation_name) {
+	retry_db_operation([&]() {
+		transaction trans(conn);
+		batch_parameterized(conn, trans, query_ctor, maximum_batch_size, std::move(records));
+		trans.commit();
+		return nullptr;
+	}, 10, operation_name);
+}
+
 DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, vector<OutputRow>&& rows,
 		vector<CombineProvenance>&& prov, std::size_t pruned) {
-	const unsigned int batch_size = 200;
-	if (prov.size() >= batch_size)
-		conn.prepare("insert_combine_edge_batch", build_insert_combine_edges_query(200));
-	std::size_t survivor_size = rows.size();
+	std::size_t survivor_size = rows.size(), edge_count = prov.size();
+	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
+	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+	//We only need the size here, so clean up.
+	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
+	selsert_result.novel_global_ids.clear();
+	selsert_result.novel_global_ids.shrink_to_fit();
 
-	std::size_t novel_gadgets_size = retry_db_operation([&](){
-		transaction trans(conn);
-
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(rows));
-		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-
-		std::size_t edge_index = 0;
-		while (prov.size() - edge_index >= batch_size) {
-			pqxx::prepare::invocation inv = trans.prepared("insert_combine_edge_batch");
-			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
-				const CombineProvenance& p = prov[edge_index];
-				inv(p.input1)(p.input2)(local_to_global[p.output1])
-						((unsigned short)p.splice)((unsigned short)p.rotation)
-						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
-		if (edge_index < prov.size()) {
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_combine_edges_query(prov.size() - edge_index));
-			for (; edge_index < prov.size(); ++edge_index) {
-				const CombineProvenance& p = prov[edge_index];
-				inv(p.input1)(p.input2)(local_to_global[p.output1])
-						((unsigned short)p.splice)((unsigned short)p.rotation)
-						((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
-
-		trans.commit();
-		return selsert_result.novel_global_ids.size();
-	});
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, prov.size()};
+	//We want to insert edges in sorted order to reduce serialization failures.
+	//We can use the Provenance if the new ids fit; otherwise we have to copy.
+	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
+			std::numeric_limits<decltype(CombineProvenance::output1)>::max()) {
+		for (CombineProvenance& p : prov)
+			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
+		std::sort(prov.begin(), prov.end());
+		batch_parameterized(conn, build_insert_combine_edges_query, /* TODO */ 5000, std::move(prov), "commit_combine_result inserting provs");
+	} else {
+		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
+		vector<std::tuple<uint64_t, uint64_t, uint64_t, std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t>> edges;
+		for (const CombineProvenance& p : prov)
+			edges.emplace_back(p.input1, p.input2, local_to_global[p.output1], p.splice, p.rotation, p.connectPoint, p.canonicalizePermutation);
+		std::sort(edges.begin(), edges.end());
+		batch_parameterized(conn, build_insert_combine_edges_query, /* TODO */ 5000, std::move(edges), "commit_combine_result inserting tuples");
+	}
+	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
 }
 
 DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
