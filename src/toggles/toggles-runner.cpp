@@ -1294,8 +1294,8 @@ DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
 
 		retry_db_operation([&]() {
 			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_connect_edges_query, /* TODO */ 5000, std::move(prov));
-			batch_parameterized(conn, trans, build_insert_connect_completion_query, 25000, std::move(completed_ranges));
+			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(prov));
+			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_connect_result inserting provs");
@@ -1308,8 +1308,8 @@ DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
 
 		retry_db_operation([&]() {
 			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_connect_edges_query, /* TODO */ 5000, std::move(edges));
-			batch_parameterized(conn, trans, build_insert_connect_completion_query, 25000, std::move(completed_ranges));
+			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(edges));
+			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_connect_result inserting edges");
@@ -1341,14 +1341,14 @@ DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, vector
 		for (CombineProvenance& p : prov)
 			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
 		std::sort(prov.begin(), prov.end());
-		batch_parameterized(conn, build_insert_combine_edges_query, /* TODO */ 5000, std::move(prov), "commit_combine_result inserting provs");
+		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(prov), "commit_combine_result inserting provs");
 	} else {
 		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
 		vector<std::tuple<uint64_t, uint64_t, uint64_t, std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t>> edges;
 		for (const CombineProvenance& p : prov)
 			edges.emplace_back(p.input1, p.input2, local_to_global[p.output1], p.splice, p.rotation, p.connectPoint, p.canonicalizePermutation);
 		std::sort(edges.begin(), edges.end());
-		batch_parameterized(conn, build_insert_combine_edges_query, /* TODO */ 5000, std::move(edges), "commit_combine_result inserting tuples");
+		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(edges), "commit_combine_result inserting tuples");
 	}
 	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
 }
@@ -1395,8 +1395,8 @@ DatabaseOperationStatistics commit_close_result(pqxx::connection& conn,
 
 		retry_db_operation([&]() {
 			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_close_edges_query, /* TODO */ 5000, std::move(prov));
-			batch_parameterized(conn, trans, build_insert_close_completion_query, 25000, std::move(completed_ranges));
+			batch_parameterized(conn, trans, build_insert_close_edges_query, 65535/3, std::move(prov));
+			batch_parameterized(conn, trans, build_insert_close_completion_query, 65535/2, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_close_result inserting provs");
@@ -1409,8 +1409,8 @@ DatabaseOperationStatistics commit_close_result(pqxx::connection& conn,
 
 		retry_db_operation([&]() {
 			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_close_edges_query, /* TODO */ 5000, std::move(edges));
-			batch_parameterized(conn, trans, build_insert_close_completion_query, 25000, std::move(completed_ranges));
+			batch_parameterized(conn, trans, build_insert_close_edges_query, 65535/3, std::move(edges));
+			batch_parameterized(conn, trans, build_insert_close_completion_query, 65535/2, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_close_result inserting edges");
@@ -1465,8 +1465,8 @@ DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
 
 		retry_db_operation([&]() {
 			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_mirror_edges_query, /* TODO */ 5000, std::move(prov));
-			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 25000, std::move(completed_ranges));
+			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(prov));
+			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_mirror_result inserting provs");
@@ -1482,8 +1482,8 @@ DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
 
 		retry_db_operation([&]() {
 			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_mirror_edges_query, /* TODO */ 5000, std::move(edges));
-			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 25000, std::move(completed_ranges));
+			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(edges));
+			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
 			trans.commit();
 			return nullptr;
 		}, 10, "commit_mirror_result inserting edges");
