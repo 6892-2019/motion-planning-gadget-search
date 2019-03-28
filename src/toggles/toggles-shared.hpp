@@ -63,6 +63,12 @@ inline bool operator<(const CombineProvenance& a, const CombineProvenance& b) {
 	return std::tie(a.input1, a.input2, a.output1, a.splice, a.rotation, a.connectPoint, a.canonicalizePermutation) <
 			std::tie(b.input1, b.input2, b.output1, b.splice, b.rotation, b.connectPoint, b.canonicalizePermutation);
 }
+template<class Callable>
+void database_invoke_apply(Callable&& inv, const CombineProvenance& p) {
+	inv(p.input1)(p.input2)((uint64_t)p.output1)
+			((unsigned short)p.splice)((unsigned short)p.rotation)
+			((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+}
 
 struct SimpleProvenance {
 	std::uint64_t input1;
