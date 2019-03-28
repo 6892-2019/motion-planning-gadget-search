@@ -1188,37 +1188,50 @@ SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transac
 		return rows[a] < rows[b];
 	});
 
-	//Previously we had a complex loop to use a small prepared statement
-	//repeatedly, but I don't think that's worth it.  We might eventually hit a
-	//limit on the number of parameters, I guess.
+	//This duplicates some logic from batch_parameterized.  This function is
+	//hard to fit into that format because we're using the indices array and
+	//because there are effectively two different implementations for
+	//database_invoke_apply for OutputRow (one for select, another for insert).
 	vector<std::uint64_t> local_to_global(rows.size(), std::numeric_limits<std::uint64_t>::max());
 	std::size_t pending_insert_count = 0;
-	if (rows.size()) { //you wouldn't call with no rows, would you?
-		pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(rows.size()));
-		for (unsigned int i : indices)
+	std::size_t batch_base = 0;
+	while (batch_base < indices.size()) {
+		std::size_t batch_size = std::min<std::size_t>(65535/2, indices.size() - batch_base);
+		pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(batch_size));
+		for (std::size_t offset = 0; offset < batch_size; ++offset) {
+			unsigned int i = indices[batch_base + offset];
 			inv(i)(pqxx::binarystring(rows[i].edges.data(), rows[i].edges.size()));
+		}
 		pqxx::result already_have = inv.exec();
 		for (const pqxx::row& r : already_have)
 			local_to_global[r[0].as<std::size_t>()] = r[1].as<std::uint64_t>();
-		pending_insert_count = rows.size() - already_have.size();
+		pending_insert_count += batch_size - already_have.size();
+		batch_base += batch_size;
 	}
 
 	vector<std::uint64_t> novel_global_ids;
-	if (pending_insert_count) {
-		novel_global_ids.reserve(pending_insert_count);
+	novel_global_ids.reserve(pending_insert_count);
+	batch_base = 0;
+	std::size_t index = 0;
+	while (batch_base < pending_insert_count) {
+		std::size_t batch_size = std::min<std::size_t>(65535/7, pending_insert_count - batch_base);
 		pqxx::internal::parameterized_invocation inv = trans.parameterized(
-				build_insert_gadgets_query(pending_insert_count));
-		for (unsigned int i : indices)
+				build_insert_gadgets_query(batch_size));
+		for (std::size_t batch_offset = 0; batch_offset < batch_size; ++index /* not batch_offset */) {
+			unsigned int i = indices[index];
 			if (local_to_global[i] == std::numeric_limits<std::uint64_t>::max()) {
 				const OutputRow& r = rows[i];
 				inv(i)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
+				++batch_offset; //made progress on this batch
 			}
+		}
 		pqxx::result inserted = inv.exec();
 		for (const pqxx::row& r : inserted) {
 			std::uint64_t gid = r[1].as<std::uint64_t>();
 			local_to_global[r[0].as<std::size_t>()] = gid;
 			novel_global_ids.push_back(gid);
 		}
+		batch_base += batch_size;
 	}
 	//Should have filled in everything now.
 	assert(std::find(local_to_global.begin(), local_to_global.end(),
