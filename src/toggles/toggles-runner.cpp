@@ -1182,8 +1182,8 @@ SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transac
 	//We want multiple runners to select and insert gadgets in a consistent
 	//order to reduce serialization failures, but we also need local_to_global
 	//in the same order.  So we sort an array of indices, then use that order.
-	vector<unsigned int> indices;
-	std::iota(indices.begin(), indices.end(), rows.size());
+	vector<unsigned int> indices(rows.size());
+	std::iota(indices.begin(), indices.end(), 0u);
 	std::sort(indices.begin(), indices.end(), [&rows](unsigned int a, unsigned int b) {
 		return rows[a] < rows[b];
 	});
@@ -1209,7 +1209,7 @@ SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transac
 		pqxx::internal::parameterized_invocation inv = trans.parameterized(
 				build_insert_gadgets_query(pending_insert_count));
 		for (unsigned int i : indices)
-			if (local_to_global[i] != std::numeric_limits<std::uint64_t>::max()) {
+			if (local_to_global[i] == std::numeric_limits<std::uint64_t>::max()) {
 				const OutputRow& r = rows[i];
 				inv(i)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
 			}
