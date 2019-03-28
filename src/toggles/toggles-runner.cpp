@@ -1267,6 +1267,7 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint
 		} else
 			++last;
 	}
+	assert(std::is_sorted(ranges.begin(), ranges.end()));
 	return ranges;
 }
 
@@ -1275,44 +1276,43 @@ static std::string g_database_connect_string;
 DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
 		vector<std::uint64_t>&& input_gids, //for completion data
 		vector<OutputRow>&& rows, vector<ConnectProvenance>&& prov, std::size_t pruned) {
+	std::sort(input_gids.begin(), input_gids.end());
+	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
 	std::size_t survivor_size = rows.size();
+	std::size_t edge_count = prov.size();
+	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
+	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
+	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
 
-	const unsigned int batch_size = 200;
-	if (prov.size() >= batch_size)
-		conn.prepare("insert_connect_edge_batch", build_insert_connect_edges_query(200));
+	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
+			std::numeric_limits<decltype(ConnectProvenance::output1)>::max()) {
+		for (ConnectProvenance& p : prov)
+			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
+		std::sort(prov.begin(), prov.end());
 
-	std::size_t novel_gadgets_size = retry_db_operation([&](){
-		transaction trans(conn);
+		retry_db_operation([&]() {
+			transaction trans(conn);
+			batch_parameterized(conn, trans, build_insert_connect_edges_query, /* TODO */ 5000, std::move(prov));
+			insert_completed_ranges(conn, trans, completed_ranges, "completed_connects");
+			trans.commit();
+			return nullptr;
+		}, 10, "commit_connect_result inserting provs");
+	} else {
+		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
+		vector<std::tuple<uint64_t, uint64_t, std::uint16_t, std::uint16_t>> edges;
+		for (const ConnectProvenance& p : prov)
+			edges.emplace_back(p.input1, local_to_global[p.output1], p.connectPoint, p.canonicalizePermutation);
+		std::sort(edges.begin(), edges.end());
 
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(rows));
-		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-
-		std::size_t edge_index = 0;
-		while (prov.size() - edge_index >= batch_size) {
-			pqxx::prepare::invocation inv = trans.prepared("insert_connect_edge_batch");
-			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
-				const ConnectProvenance& p = prov[edge_index];
-				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
-		if (edge_index < prov.size()) {
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_connect_edges_query(prov.size() - edge_index));
-			for (; edge_index < prov.size(); ++edge_index) {
-				const ConnectProvenance& p = prov[edge_index];
-				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
-
-		std::sort(input_gids.begin(), input_gids.end());
-		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_connects");
-
-		trans.commit();
-		return selsert_result.novel_global_ids.size();
-	});
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, prov.size()};
+		retry_db_operation([&]() {
+			transaction trans(conn);
+			batch_parameterized(conn, trans, build_insert_connect_edges_query, /* TODO */ 5000, std::move(edges));
+			insert_completed_ranges(conn, trans, completed_ranges, "completed_connects");
+			trans.commit();
+			return nullptr;
+		}, 10, "commit_connect_result inserting edges");
+	}
+	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
 }
 
 DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
@@ -1375,46 +1375,47 @@ DatabaseOperationStatistics commit_close_result(pqxx::connection& conn,
 		vector<std::uint64_t>&& input_gids, //for completion data
 		vector<OutputRow>&& rows, vector<SimpleProvenance>&& prov, std::size_t pruned) {
 	std::size_t survivor_size = rows.size();
+	std::size_t edge_count = prov.size();
 
-	if (prov.size() >= 200)
-		conn.prepare("insert_close_edge_200", build_insert_close_edges_query(200));
+	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
+	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
+	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+	const vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
 
-	std::size_t novel_gadgets_size = retry_db_operation([&](){
-		transaction trans(conn);
+	//Closure is idempotent, so we've also finished for any new gadgets.
+	input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
+	std::sort(input_gids.begin(), input_gids.end());
+	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
 
-		//could be structured bindings
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(rows));
-		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
+	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
+			std::numeric_limits<decltype(SimpleProvenance::output1)>::max()) {
+		for (SimpleProvenance& p : prov)
+			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
+		std::sort(prov.begin(), prov.end());
 
-		std::size_t edge_index = 0;
-		while (prov.size() - edge_index >= 200) {
-			pqxx::prepare::invocation inv = trans.prepared("insert_close_edge_200");
-			for (std::size_t max = edge_index + 200; edge_index < max; ++edge_index) {
-				const SimpleProvenance& p = prov[edge_index];
-				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
-		if (edge_index < prov.size()) {
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_close_edges_query(prov.size() - edge_index));
-			for (; edge_index < prov.size(); ++edge_index) {
-				const SimpleProvenance& p = prov[edge_index];
-				inv(p.input1)(local_to_global[p.output1])((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
-		}
+		retry_db_operation([&]() {
+			transaction trans(conn);
+			batch_parameterized(conn, trans, build_insert_close_edges_query, /* TODO */ 5000, std::move(prov));
+			insert_completed_ranges(conn, trans, completed_ranges, "completed_closes");
+			trans.commit();
+			return nullptr;
+		}, 10, "commit_close_result inserting provs");
+	} else {
+		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
+		vector<std::tuple<uint64_t, uint64_t, std::uint16_t>> edges;
+		for (const SimpleProvenance& p : prov)
+			edges.emplace_back(p.input1, local_to_global[p.output1], p.canonicalizePermutation);
+		std::sort(edges.begin(), edges.end());
 
-		//Closure is idempotent, so we've also finished for any new gadgets.
-		input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
-		std::sort(input_gids.begin(), input_gids.end());
-		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_closes");
-
-		trans.commit();
-		return novel_global_ids.size();
-	}, 10);
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, prov.size()};
+		retry_db_operation([&]() {
+			transaction trans(conn);
+			batch_parameterized(conn, trans, build_insert_close_edges_query, /* TODO */ 5000, std::move(edges));
+			insert_completed_ranges(conn, trans, completed_ranges, "completed_closes");
+			trans.commit();
+			return nullptr;
+		}, 10, "commit_close_result inserting edges");
+	}
+	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
 }
 
 DatabaseOperationStatistics do_close_db(vector<std::uint64_t> input_gids) {
@@ -1429,51 +1430,65 @@ DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
 		vector<std::uint64_t>&& input_gids, //for completion data
 		vector<OutputRow>&& rows, vector<SimpleProvenance>&& prov, std::size_t pruned) {
 	std::size_t survivor_size = rows.size();
+	std::size_t edge_count = prov.size();
 
-	const unsigned int batch_size = 200;
-	if (prov.size() >= batch_size)
-		conn.prepare("insert_mirror_edge_batch", build_insert_mirror_edges_query(batch_size));
+	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
+	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+	const vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
+	std::size_t novel_gadgets_size = novel_global_ids.size();
 
-	std::size_t novel_gadgets_size = retry_db_operation([&](){
-		transaction trans(conn);
+	//Mirror is undirected, so we've also finished for any new gadgets.
+	input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
+	std::sort(input_gids.begin(), input_gids.end());
+	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
 
-		//could be structured bindings
-		auto selsert_result = selsert_gadget_by_data(conn, trans, std::move(rows));
-		const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-		vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
-
-		//We have to sort the edge's vertices after remapping, but we don't need
-		//to deduplicate due "on conflict do nothing".
-		std::size_t edge_index = 0;
-		while (prov.size() - edge_index >= batch_size) {
-			pqxx::prepare::invocation inv = trans.prepared("insert_mirror_edge_batch");
-			for (std::size_t max = edge_index + batch_size; edge_index < max; ++edge_index) {
-				const SimpleProvenance& p = prov[edge_index];
-				std::uint64_t output = local_to_global[p.output1];
-				inv(std::min(p.input1, output))(std::max(p.input1, output))((unsigned short)p.canonicalizePermutation);
+	//We have to sort the edge's vertices after remapping.  That means our check
+	//for reusing the provs is stricter.  We don't need to deduplicate due "on
+	//conflict do nothing", but it is probably faster to do so if it saves us a
+	//database round-trip.
+	if (*std::max_element(local_to_global.begin(), local_to_global.end()) <=
+			std::numeric_limits<decltype(SimpleProvenance::output1)>::max() &&
+			std::all_of(prov.begin(), prov.end(), [](const SimpleProvenance& p) {
+				return p.output1 <= std::numeric_limits<decltype(SimpleProvenance::output1)>::max();
+			})) {
+		for (SimpleProvenance& p : prov) {
+			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
+			if (p.input1 > p.output1) {
+				//We can't just swap because they aren't the same size.
+				std::size_t x = p.input1;
+				p.input1 = p.output1;
+				p.output1 = static_cast<std::uint32_t>(x);
 			}
-			inv.exec();
 		}
-		if (edge_index < prov.size()) {
-			pqxx::internal::parameterized_invocation inv = trans.parameterized(
-					build_insert_mirror_edges_query(prov.size() - edge_index));
-			for (; edge_index < prov.size(); ++edge_index) {
-				const SimpleProvenance& p = prov[edge_index];
-				std::uint64_t output = local_to_global[p.output1];
-				inv(std::min(p.input1, output))(std::max(p.input1, output))((unsigned short)p.canonicalizePermutation);
-			}
-			inv.exec();
+		std::sort(prov.begin(), prov.end());
+		prov.erase(std::unique(prov.begin(), prov.end()), prov.end());
+
+		retry_db_operation([&]() {
+			transaction trans(conn);
+			batch_parameterized(conn, trans, build_insert_mirror_edges_query, /* TODO */ 5000, std::move(prov));
+			insert_completed_ranges(conn, trans, completed_ranges, "completed_mirrors");
+			trans.commit();
+			return nullptr;
+		}, 10, "commit_mirror_result inserting provs");
+	} else {
+		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
+		vector<std::tuple<uint64_t, uint64_t, std::uint16_t>> edges;
+		for (const SimpleProvenance& p : prov) {
+			uint64_t output = local_to_global[p.output1];
+			edges.emplace_back(std::min(p.input1, output), std::max(p.input1, output), p.canonicalizePermutation);
 		}
+		std::sort(edges.begin(), edges.end());
+		edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
 
-		//Mirror is undirected, so we've also finished for any new gadgets.
-		input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
-		std::sort(input_gids.begin(), input_gids.end());
-		insert_completed_ranges(conn, trans, maximal_ranges(input_gids), "completed_mirrors");
-
-		trans.commit();
-		return novel_global_ids.size();
-	}, 10);
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, prov.size()};
+		retry_db_operation([&]() {
+			transaction trans(conn);
+			batch_parameterized(conn, trans, build_insert_mirror_edges_query, /* TODO */ 5000, std::move(edges));
+			insert_completed_ranges(conn, trans, completed_ranges, "completed_mirrors");
+			trans.commit();
+			return nullptr;
+		}, 10, "commit_mirror_result inserting edges");
+	}
+	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
 }
 
 DatabaseOperationStatistics do_mirror_db(vector<std::uint64_t> input_gids) {

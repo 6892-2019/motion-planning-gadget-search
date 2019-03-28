@@ -47,6 +47,14 @@ struct ConnectProvenance {
 	std::uint8_t canonicalizePermutation;
 	MSGPACK_DEFINE_ARRAY(input1, output1, connectPoint, canonicalizePermutation)
 };
+inline bool operator<(const ConnectProvenance& a, const ConnectProvenance& b) {
+	return std::tie(a.input1, a.output1, a.connectPoint, a.canonicalizePermutation) <
+			std::tie(b.input1, b.output1, b.connectPoint, b.canonicalizePermutation);
+}
+template<class Callable>
+void database_invoke_apply(Callable&& inv, const ConnectProvenance& p) {
+	inv(p.input1)((uint64_t)p.output1)((unsigned short)p.connectPoint)((unsigned short)p.canonicalizePermutation);
+}
 
 /**
  * A row (minus the primary key) of an edge in the combine_provenance table.  We
@@ -76,6 +84,18 @@ struct SimpleProvenance {
 	std::uint8_t canonicalizePermutation;
 	MSGPACK_DEFINE_ARRAY(input1, output1, canonicalizePermutation)
 };
+inline bool operator==(const SimpleProvenance& a, const SimpleProvenance& b) {
+	return std::tie(a.input1, a.output1, a.canonicalizePermutation) ==
+			std::tie(b.input1, b.output1, b.canonicalizePermutation);
+}
+inline bool operator<(const SimpleProvenance& a, const SimpleProvenance& b) {
+	return std::tie(a.input1, a.output1, a.canonicalizePermutation) <
+			std::tie(b.input1, b.output1, b.canonicalizePermutation);
+}
+template<class Callable>
+void database_invoke_apply(Callable&& inv, const SimpleProvenance& p) {
+	inv(p.input1)((uint64_t)p.output1)((unsigned short)p.canonicalizePermutation);
+}
 
 
 
