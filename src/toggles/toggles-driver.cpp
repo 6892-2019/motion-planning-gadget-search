@@ -196,16 +196,20 @@ vector<std::pair<std::size_t, std::string>> get_combines_prepared;
 const unsigned int get_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
 
 void prepare_combine_statements(pqxx::connection& conn, std::size_t right_count, unsigned int precision) {
-	for (unsigned int left_count : required_combines_prepared_batch_sizes) {
-		std::string name = fmt::format("required_combines_{}", left_count);
-		conn.prepare(name, build_required_combines_query(left_count, right_count, precision));
-		required_combines_prepared.emplace_back(left_count, std::move(name));
+	if (required_combines_prepared.empty()) {
+		for (unsigned int left_count : required_combines_prepared_batch_sizes) {
+			std::string name = fmt::format("required_combines_{}", left_count);
+			conn.prepare(name, build_required_combines_query(left_count, right_count, precision));
+			required_combines_prepared.emplace_back(left_count, std::move(name));
+		}
 	}
-	for (unsigned int batch_size : get_combines_prepared_batch_sizes) {
-		std::size_t left_count = std::max<std::size_t>(batch_size / right_count, 1);
-		std::string name = fmt::format("get_combines_{}", left_count);
-		conn.prepare(name, build_get_combines_query(left_count, right_count));
-		get_combines_prepared.emplace_back(left_count, std::move(name));
+	if (get_combines_prepared.empty()) {
+		for (unsigned int batch_size : get_combines_prepared_batch_sizes) {
+			std::size_t left_count = std::max<std::size_t>(batch_size / right_count, 1);
+			std::string name = fmt::format("get_combines_{}", left_count);
+			conn.prepare(name, build_get_combines_query(left_count, right_count));
+			get_combines_prepared.emplace_back(left_count, std::move(name));
+		}
 	}
 }
 
@@ -1026,6 +1030,7 @@ private:
 
 	Control discover_needs_combine() {
 		Stopwatch stopwatch = Stopwatch::process();
+		prepare_combine_statements(*conn_, combine_rights_.size(), precision_);
 		combine_needs_ = find_required_combines(*conn_, unary_needs_, combine_rights_, precision_);
 		std::size_t needy_lefts = 0, needy_pairs = 0;
 		for (const pair<vector<uint64_t>, vector<uint64_t>>& p : combine_needs_) {
@@ -1064,6 +1069,7 @@ private:
 
 	Control follow_combine() {
 		Stopwatch stopwatch = Stopwatch::process();
+		prepare_combine_statements(*conn_, combine_rights_.size(), precision_);
 		vector<uint64_t> combines = get_combines(*conn_, unary_needs_, combine_rights_, precision_);
 		fmt::print("Followed combine edges to {} gadgets in {}\n", combines.size(), stopwatch.elapsed().hms());
 		state_(std::move(combines));
@@ -1151,7 +1157,6 @@ private:
 			for (uint64_t id : combine_rights_)
 				fmt::print(" {}", id);
 			fmt::print("\n");
-			prepare_combine_statements(*conn_, combine_rights_.size(), precision_);
 		}
 
 		state_.flip_subgeneration();
