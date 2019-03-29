@@ -3,7 +3,7 @@ import os
 import pwd
 from sqlalchemy import create_engine
 from . import models
-from . import sync_known_gadgets, unary, combine
+from . import sync_known_gadgets, unary, combine, compact_completion
 
 parser = argparse.ArgumentParser()
 subparsers = parser.add_subparsers()
@@ -17,7 +17,7 @@ dbopts.add_argument('--db-host', '--db-hostname', type=str, default='127.0.0.1')
 dbopts.add_argument('--db-port', type=int, default=5432)
 dbopts.add_argument('--db-name', type=str, default='togglesearch')
 
-for module in (sync_known_gadgets, unary, combine):
+for module in (sync_known_gadgets, unary, combine, compact_completion):
     module.register_subcommand(parser, subparsers)
 
 args = parser.parse_args()
