@@ -12,8 +12,7 @@ select p, q from (
   from {}
 ) as x where q is not null and (
   upper(a) = lower(b) or
-  not exists (select 1 from gadgets where id >= upper(a) and id < lower(b))
-  {}
+  not exists (select 1 from gadgets where id >= upper(a) and id < lower(b) {})
 ) order by lower(a)
 """
 
@@ -52,13 +51,14 @@ def build_insert_rows_query(replacements, table):
     return insert_query.format(table, ', '.join(things))
 
 
-def compact_completion(args):
+def compact_table(table):
+    bonus_constraint = 'and locations >= 4' if table == 'completed_connects' else ''
     with session_scope() as conn:
         pairs = []
-        for r in conn.execute(text(find_mergeable_query.format('completed_mirrors', ''))):
+        for r in conn.execute(text(find_mergeable_query.format(table, bonus_constraint))):
             pairs.append((int(r[0]), int(r[1])))
         if not pairs:
-            print('{}: nothing to compact'.format('completed_mirrors'))
+            print('{}: nothing to compact'.format(table))
             return
 
         # If the p[0] is the last element of some group, make p[1] the new last
@@ -76,15 +76,20 @@ def compact_completion(args):
         # could try to replace just after deleting a group, I guess.  (It's all
         # in a transaction, so doesn't actually matter.)
         replacements = {}
-        for r in conn.execute(text(build_extreme_values_query(groups, 'completed_mirrors'))):
+        for r in conn.execute(text(build_extreme_values_query(groups, table))):
             replacements[int(r[0])] = (int(r[1]), int(r[2]))
 
-        conn.execute(text(build_delete_rows_query(groups, 'completed_mirrors')))
-        conn.execute(text(build_insert_rows_query(replacements, 'completed_mirrors')))
+        conn.execute(text(build_delete_rows_query(groups, table)))
+        conn.execute(text(build_insert_rows_query(replacements, table)))
 
     deleted = sum([len(g) for g in groups.values()])
-    print('{}: deleted {} rows in {} groups, inserted {}, net {}',
-        'completed_mirrors', deleted, len(groups), len(replacements), len(replacements) - deleted)
+    print('{}: deleted {}, inserted {}, net {}'.format(
+        table, deleted, len(replacements), len(replacements) - deleted))
+
+
+def compact_completion(args):
+    for table in ('completed_mirrors', 'completed_closes', 'completed_connects'):
+        compact_table(table)
 
 
 def register_subcommand(parser: argparse.ArgumentParser, subparser_holder: argparse._SubParsersAction):
