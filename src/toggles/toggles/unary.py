@@ -64,6 +64,7 @@ def unary(args, command_str, edge_cls, completed_cls):
                 pending.append((index, g))
         session.flush()
         local_to_global.update({index: g.id for index, g in pending})
+        novel_gadget_ids = [p[1].id for p in pending]
 
         completed_ids = map(itemgetter(0), connect_data)
         if not edge_cls.directed:
@@ -97,6 +98,12 @@ def unary(args, command_str, edge_cls, completed_cls):
             group = tuple(group)  # force
             session.add(completed_cls.range(group[0], group[-1]+1))
 
+    if args.print_novel:
+        if novel_gadget_ids:
+            print(len(novel_gadget_ids), 'novel gadgets:', ' '.join(map(str, novel_gadget_ids)))
+        else:
+            print('No novel gadgets discovered.')
+
 
 def connect(args):
     return unary(args, 'connect', ConnectEdge, CompletedConnect)
@@ -113,12 +120,15 @@ def mirror(args):
 def register_subcommand(parser: argparse.ArgumentParser, subparser_holder: argparse._SubParsersAction):
     connect_parser = subparser_holder.add_parser('connect')
     connect_parser.add_argument('inputs', type=str, nargs='+')
+    connect_parser.add_argument('--print-novel', action='store_true')
     connect_parser.set_defaults(command_func=connect)
 
     close_parser = subparser_holder.add_parser('close')
     close_parser.add_argument('inputs', type=str, nargs='+')
+    close_parser.add_argument('--print-novel', action='store_true')
     close_parser.set_defaults(command_func=close)
 
     mirror_parser = subparser_holder.add_parser('mirror')
     mirror_parser.add_argument('inputs', type=str, nargs='+')
+    mirror_parser.add_argument('--print-novel', action='store_true')
     mirror_parser.set_defaults(command_func=mirror)

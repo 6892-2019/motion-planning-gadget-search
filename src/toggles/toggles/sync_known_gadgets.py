@@ -91,6 +91,7 @@ def sync_known_gadgets(args):
 
     with session_scope() as session:
         gadget_id_map = {}
+        new_gadget_ids = []
         for index, gadget in enumerate(canonicals):
             g = session.query(Gadget.id).filter_by(data=gadget[-1]).one_or_none()
             if g:
@@ -100,11 +101,7 @@ def sync_known_gadgets(args):
                 session.add(g)
                 session.flush()  # we need the id
                 gadget_id_map[index] = g.id
-
-        # While we got mirrors, we didn't record their canonicalize permutation,
-        # so we can't add edges and completion logging.  It's not worth worrying
-        # about because we'll only run this initialization once; we'll fill in
-        # like normal mirroring.
+                new_gadget_ids.append(g.id)
 
         # It's much easier to just wipe this table and start over.
         session.query(Name).delete(synchronize_session='fetch')
@@ -115,6 +112,13 @@ def sync_known_gadgets(args):
             for target in targets:
                 session.add(Name(gadget_id=target, name=name))
 
+    # While we got mirrors, we didn't record their canonicalize permutation,
+    # so we can't add edges and completion logging.  We probably also want
+    # to close the gadget to have a useful target for reporting purposes.
+    # Ideally we'd do this automatically, but we can at least nag the human:
+    if new_gadget_ids:
+        print('Suggest closing, then mirroring new gadgets:', ' '.join(map(str, new_gadget_ids)))
+        print('Also remember to mirror anything new from closing (--print-novel)!')
 
 
 
