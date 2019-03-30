@@ -107,6 +107,7 @@ std::string build_get_combines_query(std::size_t left_count, std::size_t right_c
 	things.clear();
 	for (std::size_t i = left_count + 1; i <= left_count + right_count; ++i)
 		things.push_back(fmt::format("(${}::int8)", i));
+	//Joining against the values lists is slower here.
 	return "select output1 from combine_edges where input1 in (\n" +
 			left_params +
 			"\n) and input2 in (\n" +
