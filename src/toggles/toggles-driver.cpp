@@ -78,24 +78,33 @@ std::string build_required_combines_query(std::size_t left_count, std::size_t ri
 	things.clear();
 	for (std::size_t i = left_count + 1; i <= left_count + right_count; ++i)
 		things.push_back(fmt::format("(${}::int8)", i));
-	//TODO: we actually only care to get back rows with nonempty array, but I
-	//can't see how to filter them out.
-	//TODO: this sends the array of rights multiple times, only for us to group
-	//by that array manually.  We'd prefer to get all lefts having the same
-	//array of rights together as one row.
 	return "with lefts (lid) as (values\n" +
 			left_params +
 			"\n), rights (rid) as (values\n" +
 			join(things, ", ") +
 			"\n)\n" +
-			"select lefts.lid, array(select rid from rights where\n" +
-			"  not exists (select 1 from combine_edges where\n" +
-			"    input1 = lid and input2 = rid limit 1)\n" +
-			"  and\n" +
+			"select array_agg(lid), right_ids from (\n"+
+			"  select lefts.lid, array(select rid from rights where\n" +
+			"    not exists (select 1 from combine_edges where\n" +
+			"      input1 = lid and input2 = rid limit 1)\n" +
+			"    and\n" +
 			//can't select a sum because we might combine a gadget against itself
-			"  (select locations from gadgets where id = lid) + (select locations from gadgets where id = rid)\n" +
+			"    (select locations from gadgets where id = lid) + (select locations from gadgets where id = rid)\n" +
 			fmt::format("    <= {}\n", precision) +
-			") from lefts";
+			"  order by rid\n"
+			") from lefts) as parent(lid, right_ids) where cardinality(right_ids) > 0 group by right_ids";
+	//The aggregation below is "nicer" but slightly slower than the above query.
+	//(This query doesn't have the empty array check.)
+//	return "select array_agg(lid), rights from\n"
+//			"(select lefts.lid, array_agg(rights.rid order by rights.rid) from\n"
+//			"(values " + left_params + ") as lefts(lid) join\n"
+//			"(values " + join(things, ", ") + ") as rights(rid)\n"
+//			"on\n"
+//			"not exists (\n"
+//			"select 1 from combine_edges where input1 = lid and input2 = rid limit 1\n"
+//		    ") and (select locations from gadgets where id = lid limit 1) + (select locations from gadgets where id = rid limit 1) <= " +
+//			std::to_string(precision) +
+//			" group by lefts.lid) as parent(lid, rights) group by rights";
 }
 
 std::string build_get_combines_query(std::size_t left_count, std::size_t right_count) {
@@ -344,18 +353,29 @@ vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines(pqxx::co
 		std::pair<pqxx::array_parser::juncture, std::string> array_element;
 		auto process_rows = [&](const pqxx::result& rows) {
 			for (const auto& r : rows) {
-				pqxx::array_parser parser = r[1].as_array();
-				temp_key.clear();
+//				pqxx::array_parser parser = r[1].as_array();
+//				temp_key.clear();
+//				while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
+//					if (array_element.first == pqxx::array_parser::string_value)
+//						temp_key.push_back(to_uint64(array_element.second));
+//				if (!temp_key.empty()) {
+//					std::sort(temp_key.begin(), temp_key.end());
+//					auto it = result.find(temp_key);
+//					if (it == result.end())
+//						it = result.try_emplace(std::move(temp_key)).first;
+//					it.value().push_back(r[0].as<uint64_t>());
+//				}
+				vector<uint64_t> lefts, rights;
+				pqxx::array_parser parser = r[0].as_array();
 				while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
 					if (array_element.first == pqxx::array_parser::string_value)
-						temp_key.push_back(to_uint64(array_element.second));
-				if (!temp_key.empty()) {
-					std::sort(temp_key.begin(), temp_key.end());
-					auto it = result.find(temp_key);
-					if (it == result.end())
-						it = result.try_emplace(std::move(temp_key)).first;
-					it.value().push_back(r[0].as<uint64_t>());
-				}
+						lefts.push_back(to_uint64(array_element.second));
+				parser = r[1].as_array();
+				while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
+					if (array_element.first == pqxx::array_parser::string_value)
+						rights.push_back(to_uint64(array_element.second));
+				if (!rights.empty())
+					result.try_emplace(std::move(rights), std::move(lefts));
 			}
 		};
 
