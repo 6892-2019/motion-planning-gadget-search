@@ -1618,19 +1618,26 @@ void write_output(const void* data, size_t size) {
 }
 
 int main(int argc, char* argv[]) { //genbuild entrypoint
-//	MessageFormat input_format = MessageFormat::json, output_format = MessageFormat::json;
-//	for (int a = 1; a < argc; ++a) {
-//		if (argv[a] == "--input-format=json"sv)
-//			input_format = MessageFormat::json;
-//		else if (argv[a] == "--input-format=msgpack"sv)
-//			input_format = MessageFormat::msgpack;
-//		else if (argv[a] == "--output-format=json"sv)
-//			output_format = MessageFormat::json;
-//		else if (argv[a] == "--output-format=msgpack"sv)
-//			output_format = MessageFormat::msgpack;
-//	}
+	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
+			db_port = "5432", db_name = "togglesearch";
+	for (int i = 1; i < argc; ++i) {
+		if (argv[i] == "--db-user"sv)
+			db_user = argv[++i];
+		else if (argv[i] == "--db-pass"sv)
+			db_pass = argv[++i];
+		else if (argv[i] == "--db-host"sv)
+			db_host = argv[++i];
+		else if (argv[i] == "--db-port"sv)
+			db_port = argv[++i];
+		else if (argv[i] == "--db-name"sv)
+			db_name = argv[++i];
+		else {
+			fmt::print(stderr, "ERROR: unknown option {}\n", argv[i]);
+			std::exit(2);
+		}
+	}
 
-	g_database_connect_string = format_connect_string("jbosboom", "", "127.0.0.1", "5432", "togglesearch");
+	g_database_connect_string = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
 
 	simple_buffer response = dispatch(read_input(), std::begin(handlers), std::end(handlers));
 	write_output(response.data(), response.size());
