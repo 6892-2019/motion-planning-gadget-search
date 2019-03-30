@@ -20,26 +20,14 @@ using namespace std::literals::string_view_literals;
 namespace asio = boost::asio;
 using asio::ip::tcp;
 
-std::string build_filter_ids_range_table(std::size_t count, std::string_view table) {
+std::string build_filter_connectable_ids_query(std::size_t count) {
 	vector<std::string> things;
 	things.reserve(count);
 	for (std::size_t i = 1; i <= count; ++i)
 		things.push_back(fmt::format("(${}::int8)", i));
 	return "select * from (values " +
 			join(things, ", ") +
-			fmt::format(") as maybe(id) where not exists (select 1 from {} where maybe.id <@ {}.r)", table, table);
-}
-
-std::string build_filter_ids_needing_mirror(std::size_t count) {
-	return build_filter_ids_range_table(count, "completed_mirrors");
-}
-std::string build_filter_ids_needing_close(std::size_t count) {
-	return build_filter_ids_range_table(count, "completed_closes");
-}
-std::string build_filter_ids_needing_connect(std::size_t count) {
-	//Also filter out any gadgets too small to connect.
-	return build_filter_ids_range_table(count, "completed_connects") +
-			"and (select locations from gadgets where gadgets.id = maybe.id) >= 4";
+			") as maybe(id) join gadgets using (id) where locations >= 4";
 }
 
 std::string build_get_mirrors_query(std::size_t count) {
@@ -126,14 +114,6 @@ std::string build_get_combines_query(std::size_t left_count, std::size_t right_c
 			"\n) group by output1"; //group by is apparently faster than select distinct
 }
 
-const std::pair<std::size_t, std::string_view> filter_close_prepared[] = {
-	{50000, "filter_close_50000"sv},
-	{25000, "filter_close_25000"sv},
-	{10000, "filter_close_10000"sv},
-	{5000, "filter_close_5000"sv},
-	{1000, "filter_close_1000"sv},
-	{500, "filter_close_500"sv},
-};
 const std::pair<std::size_t, std::string_view> follow_close_edges_prepared[] = {
 	{50000, "follow_close_50000"sv},
 	{25000, "follow_close_25000"sv},
@@ -141,14 +121,6 @@ const std::pair<std::size_t, std::string_view> follow_close_edges_prepared[] = {
 	{5000, "follow_close_5000"sv},
 	{1000, "follow_close_1000"sv},
 	{500, "follow_close_500"sv},
-};
-const std::pair<std::size_t, std::string_view> filter_mirrors_prepared[] = {
-	{50000, "filter_mirrors_50000"sv},
-	{25000, "filter_mirrors_25000"sv},
-	{10000, "filter_mirrors_10000"sv},
-	{5000, "filter_mirrors_5000"sv},
-	{1000, "filter_mirrors_1000"sv},
-	{500, "filter_mirrors_500"sv},
 };
 const std::pair<std::size_t, std::string_view> get_mirrors_prepared[] = {
 	{50000, "get_mirrors_50000"sv},
@@ -176,16 +148,12 @@ const std::pair<std::size_t, std::string_view> get_connects_prepared[] = {
 };
 
 void prepare_statements(pqxx::connection& conn) {
-	for (const auto& p : filter_close_prepared)
-		conn.prepare(std::string(p.second), build_filter_ids_needing_close(p.first));
 	for (const auto& p : follow_close_edges_prepared)
 		conn.prepare(std::string(p.second), build_follow_close_edges_query(p.first));
-	for (const auto& p : filter_mirrors_prepared)
-		conn.prepare(std::string(p.second), build_filter_ids_needing_mirror(p.first));
 	for (const auto& p : get_mirrors_prepared)
 		conn.prepare(std::string(p.second), build_get_mirrors_query(p.first));
 	for (const auto& p : filter_connect_prepared)
-		conn.prepare(std::string(p.second), build_filter_ids_needing_connect(p.first));
+		conn.prepare(std::string(p.second), build_filter_connectable_ids_query(p.first));
 	for (const auto& p : get_connects_prepared)
 		conn.prepare(std::string(p.second), build_get_connects_query(p.first));
 }
@@ -249,13 +217,31 @@ vector<uint64_t> id_to_id_db_op(pqxx::connection& conn,
 //	return id_to_id_db_op(conn, ids.cbegin(), ids.cend(), prepared_begin, prepared_end, query_func);
 //}
 
-vector<uint64_t> filter_ids_needing_close(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
-		const vector<uint64_t>::const_iterator ids_end) {
+vector<pair<uint64_t, uint64_t>> get_all_completion_ranges(pqxx::connection& conn, std::string_view tablename) {
+	std::string query = fmt::format("select lower(r), upper(r) from {}", tablename);
+	std::string reporting_name = fmt::format("get_all_completion_ranges {}", tablename);
 	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids_begin, ids_end,
-				std::begin(filter_close_prepared), std::end(filter_close_prepared),
-				&build_filter_ids_needing_close);
-	}, 10, "filter_ids_needing_close");
+		vector<pair<uint64_t, uint64_t>> ranges;
+		ro_transaction trans(conn);
+		pqxx::result res = trans.exec(query);
+		for (const pqxx::row& r : res)
+			ranges.emplace_back(r[0].as<uint64_t>(), r[1].as<uint64_t>());
+		trans.commit();
+
+		std::sort(ranges.begin(), ranges.end());
+		return std::move(ranges);
+	}, 10, reporting_name);
+}
+
+vector<uint64_t> filter_ids_needing_close(pqxx::connection& conn,
+		const vector<uint64_t>::iterator ids_begin,
+		const vector<uint64_t>::iterator ids_end) {
+	std::sort(ids_begin, ids_end);
+	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(conn, "completed_closes");
+	//The result is the range [ids_begin, needy_end).  It would be nice to find
+	//a way to use it without copying, but we'll need unary_needs_ for other
+	//purposes anyway, so...
+	return {ids_begin, partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend())};
 }
 
 pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::connection& conn,
@@ -291,13 +277,15 @@ pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::co
 	}, 10, "follow_close_edges");
 }
 
-vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
-		const vector<uint64_t>::const_iterator ids_end) {
-	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids_begin, ids_end,
-				std::begin(filter_mirrors_prepared), std::end(filter_mirrors_prepared),
-				&build_filter_ids_needing_mirror);
-	}, 10, "filter_ids_needing_mirror");
+vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn,
+		const vector<uint64_t>::iterator ids_begin,
+		const vector<uint64_t>::iterator ids_end) {
+	std::sort(ids_begin, ids_end);
+	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(conn, "completed_mirrors");
+	//The result is the range [ids_begin, needy_end).  It would be nice to find
+	//a way to use it without copying, but we'll need unary_needs_ for other
+	//purposes anyway, so...
+	return {ids_begin, partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend())};
 }
 
 vector<uint64_t> get_mirrors(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
@@ -309,13 +297,19 @@ vector<uint64_t> get_mirrors(pqxx::connection& conn, const vector<uint64_t>::con
 	}, 10, "get_mirrors");
 }
 
-vector<uint64_t> filter_ids_needing_connect(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
-		const vector<uint64_t>::const_iterator ids_end) {
+vector<uint64_t> filter_ids_needing_connect(pqxx::connection& conn,
+		const vector<uint64_t>::iterator ids_begin,
+		const vector<uint64_t>::iterator ids_end) {
+	std::sort(ids_begin, ids_end);
+	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(conn, "completed_connects");
+	vector<uint64_t>::iterator new_end = partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend());
+
+	//Also filter out any gadgets too small to connect.
 	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids_begin, ids_end,
+		return id_to_id_db_op(conn, ids_begin, new_end,
 				std::begin(filter_connect_prepared), std::end(filter_connect_prepared),
-				&build_filter_ids_needing_connect);
-	}, 10, "filter_ids_needing_connect");
+				&build_filter_connectable_ids_query);
+	}, 10, "filter_ids_needing_connect, filtering connectable ids");
 }
 
 vector<uint64_t> get_connects(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
@@ -782,11 +776,23 @@ public:
 	auto subgeneration_view() const {
 		return make_range_for_pair(subgeneration_begin(), subgeneration_end());
 	}
+	vector<uint64_t>::iterator subgeneration_begin() {
+		return curgen_.begin() + subgen_start_;
+	}
+	vector<uint64_t>::iterator subgeneration_end() {
+		return curgen_.end();
+	}
 	vector<uint64_t>::const_iterator subgeneration_begin() const {
 		return curgen_.cbegin() + subgen_start_;
 	}
 	vector<uint64_t>::const_iterator subgeneration_end() const {
 		return curgen_.cend();
+	}
+	vector<uint64_t>::iterator prev_subgeneration_begin() {
+		return curgen_.begin() + prev_subgen_start_;
+	}
+	vector<uint64_t>::iterator prev_subgeneration_end() {
+		return subgeneration_begin();
 	}
 	vector<uint64_t>::const_iterator prev_subgeneration_begin() const {
 		return curgen_.cbegin() + prev_subgen_start_;

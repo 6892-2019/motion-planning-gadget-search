@@ -216,5 +216,28 @@ auto overload(Ts&&... xs) {
     return overloader<std::decay_t<Ts>...>{std::forward<Ts>(xs)...};
 }
 
+
+/**
+ * Partitions [ids_first, ids_last) by exclusion from the union of the ranges in
+ * [ranges_first, ranges_last).  That is, [ids_first, the-return-value) contains
+ * those elements not contained in any range.  The ranges are inclusive on their
+ * first element and exclusive on their second.  Both ranges must be sorted.
+ */
+template<typename TIter, typename PairIter>
+TIter partition_on_range_exclusion(TIter ids_first, TIter ids_last, PairIter ranges_first, PairIter ranges_last) {
+	TIter id_idx = ids_first, needy_end = ids_first;
+	PairIter r_idx = ranges_first;
+	while (id_idx != ids_last && r_idx != ranges_last) {
+		while (id_idx != ids_last && *id_idx < r_idx->first)
+			std::iter_swap(id_idx++, needy_end++);
+		while (id_idx != ids_last && *id_idx < r_idx->second)
+			++id_idx;
+		++r_idx;
+	}
+	while (id_idx != ids_last)
+		std::iter_swap(id_idx++, needy_end++);
+	return needy_end;
+}
+
 #endif /* ALGOUTILS_HPP */
 
