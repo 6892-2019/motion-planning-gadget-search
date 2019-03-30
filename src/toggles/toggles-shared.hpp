@@ -11,6 +11,14 @@
 #include "database.hpp"
 #include <msgpack.hpp>
 
+//std::hash<uint64_t> is the identity, and hopscotch doesn't like that.
+struct farmhash_hash {
+	uint64_t operator()(uint64_t x) const noexcept {
+		return farmhash::Fingerprint(x);
+	}
+};
+
+
 struct DatabaseOperationStatistics {
 	std::size_t pruned_locally, pruned_database, novel_gadgets, edges;
 	DatabaseOperationStatistics& operator+=(const DatabaseOperationStatistics& o) {

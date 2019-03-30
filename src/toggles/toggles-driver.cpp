@@ -868,7 +868,7 @@ private:
 	 * The set of all gadget ids encountered so far, including those in the
 	 * current generation.
 	 */
-	tsl::hopscotch_set<uint64_t> closed_;
+	tsl::hopscotch_set<uint64_t, farmhash_hash> closed_;
 	/**
 	 * The current generation: gadgets discovered since the previous combine.
 	 */
