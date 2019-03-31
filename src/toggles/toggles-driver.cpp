@@ -867,6 +867,14 @@ public:
 			modified |= (*this)(x);
 		return modified;
 	}
+	bool operator()(vector<uint64_t>&& ids_rref) {
+		//Enforce it actually moves so it gets deallocated promptly.
+		vector<uint64_t> ids(std::move(ids_rref));
+		bool modified = false;
+		for (uint64_t x : ids)
+			modified |= (*this)(x);
+		return modified;
+	}
 	std::size_t subgeneration_size() const {
 		return curgen_.size() - subgen_start_;
 	}
@@ -1190,7 +1198,7 @@ private:
 		std::size_t total_size = 0;
 		for (const vector<uint64_t>& x : combines)
 			total_size += x.size();
-		fmt::print("Followed combine edges to {} gadgets in {}\n", combines.size(), stopwatch.elapsed().hms());
+		fmt::print("Followed combine edges to {} gadgets in {}\n", total_size, stopwatch.elapsed().hms());
 		for (vector<uint64_t>& x : combines)
 			state_(std::move(x));
 
