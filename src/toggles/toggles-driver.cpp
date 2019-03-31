@@ -1275,7 +1275,9 @@ private:
 			state_(std::move(x));
 
 		unary_needs_.clear();
+		unary_needs_.shrink_to_fit();
 		combine_needs_.clear();
+		combine_needs_.shrink_to_fit();
 		phase_ = Phase::discover_needs_close;
 		return Control::proceed;
 	}
@@ -1298,6 +1300,7 @@ private:
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
+		unary_needs_.shrink_to_fit();
 		phase_ = control == Control::proceed ? Phase::follow_close : Phase::discover_needs_close;
 		return control;
 	}
@@ -1339,6 +1342,7 @@ private:
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
+		unary_needs_.shrink_to_fit();
 		phase_ = control == Control::proceed ? Phase::follow_mirror : Phase::discover_needs_mirror;
 		return control;
 	}
@@ -1400,6 +1404,7 @@ private:
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
+		unary_needs_.shrink_to_fit();
 		phase_ = control == Control::proceed ? Phase::follow_connect : Phase::discover_needs_connect;
 		return control;
 	}
