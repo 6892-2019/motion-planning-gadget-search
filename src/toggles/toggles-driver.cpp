@@ -464,32 +464,69 @@ vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines(Connecti
 	return std::move(result);
 }
 
-vector<uint64_t> get_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
+vector<uint64_t> get_combines0(pqxx::connection& conn,
+		std::vector<uint64_t>::const_iterator left_ids_first, std::vector<uint64_t>::const_iterator left_ids_last,
 		const std::vector<uint64_t>& right_ids, unsigned int precision) {
 	return retry_db_operation([&]() {
 		ro_transaction trans(conn);
 		vector<uint64_t> result;
-		std::size_t cur = 0;
+		vector<uint64_t>::const_iterator cur = left_ids_first;
 		for (const auto& p : get_combines_prepared) {
-			while (left_ids.size() - cur >= p.first) {
+			while (numeric_cast<std::size_t>(std::distance(cur, left_ids_last)) >= p.first) {
 				pqxx::result rows = trans.exec_prepared(std::string(p.second),
-						pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.begin()+cur+p.first),
+						pqxx::prepare::make_dynamic_params(cur, cur+p.first),
 						pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
 				for (const auto& r : rows)
 					result.push_back(r[0].as<uint64_t>());
 				cur += p.first;
 			}
 		}
-		if (left_ids.size() - cur > 0) {
-			pqxx::result rows = trans.exec_params(build_get_combines_query(left_ids.size() - cur, right_ids.size()),
-					pqxx::prepare::make_dynamic_params(left_ids.begin()+cur, left_ids.end()),
+		std::size_t epilogue_size = numeric_cast<std::size_t>(std::distance(cur, left_ids_last));
+		if (epilogue_size) {
+			pqxx::result rows = trans.exec_params(build_get_combines_query(epilogue_size, right_ids.size()),
+					pqxx::prepare::make_dynamic_params(cur, left_ids_last),
 					pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
 			for (const auto& r : rows)
 				result.push_back(r[0].as<uint64_t>());
 		}
 		trans.commit();
 		return result;
-	});
+	}, 10, "get_combines0");
+}
+
+vector<uint64_t> get_combines(ConnectionPool& pool, const std::vector<uint64_t>& left_ids,
+		const std::vector<uint64_t>& right_ids, const unsigned int precision) {
+	std::size_t max_threads = left_ids.size() /
+			//insure against changing the batch sizes somehow
+			*std::max_element(std::begin(get_combines_prepared_batch_sizes), std::end(get_combines_prepared_batch_sizes));
+	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
+	if (max_threads <= 1) {
+		ConnectionLease lease = pool.checkout();
+		return get_combines0(*lease, left_ids.cbegin(), left_ids.cend(), right_ids, precision);
+	}
+
+	std::size_t batch_size = (left_ids.size() + (max_threads - 1)) / max_threads;
+	vector<std::future<vector<uint64_t>>> futures;
+	for (std::size_t i = 0; i < left_ids.size(); i += batch_size) {
+		auto first = left_ids.cbegin()+i, last = left_ids.cbegin() + std::min(i+batch_size, left_ids.size());
+		futures.push_back(std::async(std::launch::async, [&pool, first, last, &right_ids, precision]() {
+			ConnectionLease lease = pool.checkout();
+			return get_combines0(*lease, first, last, right_ids, precision);
+		}));
+	}
+
+	vector<vector<uint64_t>> results;
+	std::size_t total_size = 0;
+	for (std::size_t i = 0; i < futures.size(); ++i) {
+		results.push_back(futures[i].get());
+		total_size += results.back().size();
+	}
+	//This gives a result of exactly the right capacity, but at the cost of
+	//allocating it while holding the other results...
+	results[0].reserve(total_size);
+	for (std::size_t i = 1; i < results.size(); ++i)
+		results[0].insert(results[0].end(), std::move_iterator(results[i].begin()), std::move_iterator(results[i].end()));
+	return std::move(results[0]);
 }
 
 struct WorkGenerator {
@@ -1155,8 +1192,7 @@ private:
 	Control follow_combine() {
 		prepare_combine_statements(conn_pool_, combine_rights_.size(), precision_);
 		Stopwatch stopwatch = Stopwatch::process();
-		ConnectionLease conn = conn_pool_->checkout();
-		vector<uint64_t> combines = get_combines(*conn, unary_needs_, combine_rights_, precision_);
+		vector<uint64_t> combines = get_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
 		fmt::print("Followed combine edges to {} gadgets in {}\n", combines.size(), stopwatch.elapsed().hms());
 		state_(std::move(combines));
 
