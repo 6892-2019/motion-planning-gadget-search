@@ -494,7 +494,7 @@ vector<uint64_t> get_combines0(pqxx::connection& conn,
 	}, 10, "get_combines0");
 }
 
-vector<uint64_t> get_combines(ConnectionPool& pool, const std::vector<uint64_t>& left_ids,
+vector<vector<uint64_t>> get_combines(ConnectionPool& pool, const std::vector<uint64_t>& left_ids,
 		const std::vector<uint64_t>& right_ids, const unsigned int precision) {
 	std::size_t max_threads = left_ids.size() /
 			//insure against changing the batch sizes somehow
@@ -502,7 +502,9 @@ vector<uint64_t> get_combines(ConnectionPool& pool, const std::vector<uint64_t>&
 	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
 	if (max_threads <= 1) {
 		ConnectionLease lease = pool.checkout();
-		return get_combines0(*lease, left_ids.cbegin(), left_ids.cend(), right_ids, precision);
+		vector<vector<uint64_t>> results;
+		results.push_back(get_combines0(*lease, left_ids.cbegin(), left_ids.cend(), right_ids, precision));
+		return std::move(results);
 	}
 
 	std::size_t batch_size = (left_ids.size() + (max_threads - 1)) / max_threads;
@@ -516,17 +518,9 @@ vector<uint64_t> get_combines(ConnectionPool& pool, const std::vector<uint64_t>&
 	}
 
 	vector<vector<uint64_t>> results;
-	std::size_t total_size = 0;
-	for (std::size_t i = 0; i < futures.size(); ++i) {
+	for (std::size_t i = 0; i < futures.size(); ++i)
 		results.push_back(futures[i].get());
-		total_size += results.back().size();
-	}
-	//This gives a result of exactly the right capacity, but at the cost of
-	//allocating it while holding the other results...
-	results[0].reserve(total_size);
-	for (std::size_t i = 1; i < results.size(); ++i)
-		results[0].insert(results[0].end(), std::move_iterator(results[i].begin()), std::move_iterator(results[i].end()));
-	return std::move(results[0]);
+	return std::move(results);
 }
 
 struct WorkGenerator {
@@ -1192,9 +1186,13 @@ private:
 	Control follow_combine() {
 		prepare_combine_statements(conn_pool_, combine_rights_.size(), precision_);
 		Stopwatch stopwatch = Stopwatch::process();
-		vector<uint64_t> combines = get_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
+		vector<vector<uint64_t>> combines = get_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
+		std::size_t total_size = 0;
+		for (const vector<uint64_t>& x : combines)
+			total_size += x.size();
 		fmt::print("Followed combine edges to {} gadgets in {}\n", combines.size(), stopwatch.elapsed().hms());
-		state_(std::move(combines));
+		for (vector<uint64_t>& x : combines)
+			state_(std::move(x));
 
 		unary_needs_.clear();
 		combine_needs_.clear();
