@@ -438,8 +438,8 @@ void sort_and_deduplicate(vector<pair<vector<uint64_t>, vector<uint64_t>>>& reco
 					head->second.begin(), head->second.end());
 			//These'll be deallocated later, of course, but as we're growing the
 			//survivors we should free these eagerly.
-			last_committed->second.clear();
-			last_committed->second.shrink_to_fit();
+			head->second.clear();
+			head->second.shrink_to_fit();
 		} else if (++last_committed != head) //commit, and avoid moving last_committed onto itself
 			*last_committed = std::move(*head);
 	++last_committed;
