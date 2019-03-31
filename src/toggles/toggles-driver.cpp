@@ -295,12 +295,12 @@ vector<uint64_t> filter_ids_needing_close(ConnectionPool& pool,
 	return {ids_begin, partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend())};
 }
 
-pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::connection& conn,
+pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> follow_close_edges(pqxx::connection& conn,
 		const vector<uint64_t>::const_iterator ids_begin, const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
 		ro_transaction trans(conn);
 		//inputs aren't duplicated, but quickly removing them from the SearchState requires having them in a set
-		tsl::hopscotch_set<uint64_t> inputs;
+		tsl::hopscotch_set<uint64_t, farmhash_hash> inputs;
 		//outputs might be duplicated, but we'll dedup when adding them to the SearchState.
 		vector<uint64_t> outputs;
 		vector<uint64_t>::const_iterator cur = ids_begin;
@@ -960,7 +960,7 @@ public:
 	 * Erases the ids in the given set from the current subgeneration.  They're
 	 * still in the closed set.
 	 */
-	void erase_from_subgeneration(tsl::hopscotch_set<uint64_t>& to_be_erased) {
+	void erase_from_subgeneration(tsl::hopscotch_set<uint64_t, farmhash_hash>& to_be_erased) {
 		curgen_.erase(std::remove_if(curgen_.begin()+subgen_start_, curgen_.end(),
 				[&](uint64_t i){return to_be_erased.count(i);}), curgen_.end());
 	}
@@ -1274,7 +1274,7 @@ private:
 		assert(!multiplayer_);
 		Stopwatch stopwatch = Stopwatch::process();
 		ConnectionLease conn = conn_pool_->checkout();
-		pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> close_edges = follow_close_edges(*conn, state_.subgeneration_begin(), state_.subgeneration_end());
+		pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> close_edges = follow_close_edges(*conn, state_.subgeneration_begin(), state_.subgeneration_end());
 		fmt::print("Followed close edges from {} gadgets to {} gadgets in {}\n",
 				close_edges.first.size(), close_edges.second.size(), stopwatch.elapsed().hms());
 		state_.erase_from_subgeneration(close_edges.first);
