@@ -295,7 +295,7 @@ vector<uint64_t> filter_ids_needing_close(ConnectionPool& pool,
 	return {ids_begin, partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend())};
 }
 
-pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> follow_close_edges(pqxx::connection& conn,
+pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> follow_close_edges0(pqxx::connection& conn,
 		const vector<uint64_t>::const_iterator ids_begin, const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
 		ro_transaction trans(conn);
@@ -326,6 +326,38 @@ pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> follow_close
 		trans.commit();
 		return std::make_pair(std::move(inputs), std::move(outputs));
 	}, 10, "follow_close_edges");
+}
+
+vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> follow_close_edges(ConnectionPool& pool,
+		const vector<uint64_t>::const_iterator ids_begin, const vector<uint64_t>::const_iterator ids_end) {
+	std::size_t total_size = numeric_cast<std::size_t>(std::distance(ids_begin, ids_end));
+	std::size_t max_threads = total_size /
+			std::max_element(std::begin(follow_close_edges_prepared), std::end(follow_close_edges_prepared),
+			[](const auto& a, const auto& b) {
+				return std::get<0>(a) < std::get<0>(b);
+			})->first;
+	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
+	if (max_threads <= 1) {
+		ConnectionLease lease = pool.checkout();
+		vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> results;
+		results.push_back(follow_close_edges0(*lease, ids_begin, ids_end));
+		return std::move(results);
+	}
+
+	std::size_t batch_size = (total_size + (max_threads - 1)) / max_threads;
+	vector<std::future<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>>> futures;
+	for (std::size_t i = 0; i < total_size; i += batch_size) {
+		auto first = ids_begin + i, last = ids_begin + std::min(i+batch_size, total_size);
+		futures.push_back(std::async(std::launch::async, [&pool, first, last]() {
+			ConnectionLease lease = pool.checkout();
+			return follow_close_edges0(*lease, first, last);
+		}));
+	}
+
+	vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> results;
+	for (std::size_t i = 0; i < futures.size(); ++i)
+		results.push_back(futures[i].get());
+	return std::move(results);
 }
 
 vector<uint64_t> filter_ids_needing_mirror(ConnectionPool& pool,
@@ -1273,12 +1305,23 @@ private:
 	Control follow_close() {
 		assert(!multiplayer_);
 		Stopwatch stopwatch = Stopwatch::process();
-		ConnectionLease conn = conn_pool_->checkout();
-		pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> close_edges = follow_close_edges(*conn, state_.subgeneration_begin(), state_.subgeneration_end());
+		vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> close_edges
+				= follow_close_edges(*conn_pool_, state_.subgeneration_begin(), state_.subgeneration_end());
+		std::size_t source_size = 0, target_size = 0;
+		for (const auto& p : close_edges) {
+			source_size += p.first.size();
+			target_size += p.second.size();
+		}
 		fmt::print("Followed close edges from {} gadgets to {} gadgets in {}\n",
-				close_edges.first.size(), close_edges.second.size(), stopwatch.elapsed().hms());
-		state_.erase_from_subgeneration(close_edges.first);
-		state_(close_edges.second);
+				source_size, target_size, stopwatch.elapsed().hms());
+
+		//erase_from_subgeneration scans the subgeneration, so we want to merge the sets.
+		tsl::hopscotch_set<uint64_t, farmhash_hash> source_set = std::move(close_edges[0].first);
+		for (std::size_t i = 1; i < close_edges.size(); ++i)
+			source_set.insert(close_edges[i].first.begin(), close_edges[i].first.end());
+		state_.erase_from_subgeneration(source_set);
+		for (auto& p : close_edges)
+			state_(std::move(p.second));
 		phase_ = Phase::discover_needs_mirror;
 		return Control::proceed;
 	}
