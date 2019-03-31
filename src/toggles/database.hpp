@@ -9,12 +9,81 @@
 #define DATABASE_HPP
 
 #include <pqxx/pqxx>
+#include <mutex>
 
 using transaction = pqxx::transaction<pqxx::serializable>;
 using ro_transaction = pqxx::transaction<pqxx::serializable, pqxx::read_only>;
 
 std::string format_connect_string(std::string_view user, std::string_view pass,
 		std::string_view address, std::string_view port, std::string_view database);
+
+
+
+class ConnectionPool;
+class ConnectionLease {
+public:
+	pqxx::connection& operator*() const {
+		return *conn_;
+	}
+	pqxx::connection* operator->() const {
+		return conn_.operator->();
+	}
+	explicit operator bool() const {
+		return static_cast<bool>(conn_);
+	}
+	ConnectionLease(const ConnectionLease&) = delete;
+	ConnectionLease(ConnectionLease&&) = default;
+	ConnectionLease& operator=(const ConnectionLease&) = delete;
+	ConnectionLease& operator=(ConnectionLease&&) = default;
+	~ConnectionLease();
+private:
+	ConnectionLease(std::unique_ptr<pqxx::connection>&& conn, ConnectionPool* pool)
+			: conn_(std::move(conn)), pool_(pool) {}
+	std::unique_ptr<pqxx::connection> conn_;
+	ConnectionPool* pool_; //in the shared_ptr pool design, this is a weak_ptr
+	friend class ConnectionPool;
+};
+
+//We could use enable_shared_from_this for flexible lifetime, but in all our
+//usages we'll set up the pool in main() and it will live for the life of the program.
+class ConnectionPool {
+public:
+	ConnectionPool(std::string queryString, unsigned int maxConnections);
+
+	ConnectionLease checkout();
+	void checkin(ConnectionLease&& lease);
+
+	/**
+	 * Close the connections currently held by the pool.  Returns the number of
+	 * outstanding connections (immediately stale).
+	 */
+	unsigned int quiesce();
+
+	/**
+	 * Registers a function to be called on all new connections.  If a function
+	 * has already been registered under the given key, nothing happens.
+	 * Otherwise the function is immediately called on all connections already
+	 * held by the pool.
+	 *
+	 * Registering a setup function from within a call to a setup function will
+	 * probably end badly.
+	 */
+	void register_setup(const std::string& key, std::function<void(pqxx::connection&)> func);
+
+	/**
+	 * @return the number of connections available (immediately stale!)
+	 */
+	unsigned int size() const;
+	unsigned int capacity() const;
+private:
+	std::string query_string_;
+	std::vector<std::pair<std::string, std::function<void(pqxx::connection&)>>> conn_setup_funcs_;
+	std::vector<std::unique_ptr<pqxx::connection>> conns_;
+	int outstanding_, max_;
+	mutable std::mutex mutex_;
+};
+
+
 
 struct retry_failed_exception : public std::exception {
 	retry_failed_exception(std::string&& msg, std::vector<std::exception_ptr>&& v) :
