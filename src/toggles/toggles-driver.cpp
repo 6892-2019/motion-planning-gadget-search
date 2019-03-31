@@ -12,6 +12,7 @@
 #include <boost/asio/write.hpp>
 #include <boost/asio/read.hpp>
 #include <system_error>
+#include <future>
 
 using std::vector;
 using std::pair;
@@ -429,11 +430,38 @@ vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines0(pqxx::c
 	return std::move(result);
 }
 
-vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines(pqxx::connection& conn,
+vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines(ConnectionPool& pool,
 		const std::vector<uint64_t>& left_ids,
-		const std::vector<uint64_t>& right_ids, unsigned int precision) {
-	//TODO: take the connection pool as an argument and spread this range over the available connections
-	return find_required_combines0(conn, left_ids.cbegin(), left_ids.cend(), right_ids, precision);
+		const std::vector<uint64_t>& right_ids, const unsigned int precision) {
+	std::size_t max_threads = left_ids.size() /
+			//insure against changing the batch sizes somehow
+			*std::max_element(std::begin(required_combines_prepared_batch_sizes), std::end(required_combines_prepared_batch_sizes));
+	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
+	if (max_threads <= 1) {
+		ConnectionLease lease = pool.checkout();
+		return find_required_combines0(*lease, left_ids.cbegin(), left_ids.cend(), right_ids, precision);
+	}
+
+	//We give a near-equal division, so each thread will have "straggling" queries.
+	//We could try to give most threads more full batches and leave one thread
+	//with less, but irregularly-shaped, work.
+	std::size_t batch_size = (left_ids.size() + (max_threads - 1)) / max_threads;
+	vector<std::future<vector<pair<vector<uint64_t>, vector<uint64_t>>>>> futures;
+	for (std::size_t i = 0; i < left_ids.size(); i += batch_size) {
+		auto first = left_ids.cbegin()+i, last = left_ids.cbegin() + std::min(i+batch_size, left_ids.size());
+		futures.push_back(std::async(std::launch::async, [&pool, first, last, &right_ids, precision]() {
+			ConnectionLease lease = pool.checkout();
+			return find_required_combines0(*lease, first, last, right_ids, precision);
+		}));
+	}
+
+	vector<pair<vector<uint64_t>, vector<uint64_t>>> result = futures.front().get();
+	for (std::size_t i = 1; i < futures.size(); ++i) {
+		vector<pair<vector<uint64_t>, vector<uint64_t>>> more = futures[i].get();
+		result.insert(result.end(), std::move_iterator(more.begin()), std::move_iterator(more.end()));
+	}
+	sort_and_deduplicate(result);
+	return std::move(result);
 }
 
 vector<uint64_t> get_combines(pqxx::connection& conn, const std::vector<uint64_t>& left_ids,
@@ -1087,8 +1115,7 @@ private:
 	Control discover_needs_combine() {
 		prepare_combine_statements(conn_pool_, combine_rights_.size(), precision_);
 		Stopwatch stopwatch = Stopwatch::process();
-		ConnectionLease conn = conn_pool_->checkout();
-		combine_needs_ = find_required_combines(*conn, unary_needs_, combine_rights_, precision_);
+		combine_needs_ = find_required_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
 		std::size_t needy_lefts = 0, needy_pairs = 0;
 		for (const pair<vector<uint64_t>, vector<uint64_t>>& p : combine_needs_) {
 			needy_lefts += p.second.size();
