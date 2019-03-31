@@ -204,7 +204,7 @@ void prepare_combine_statements(ConnectionPool* pool, std::size_t right_count, u
 }
 
 
-vector<uint64_t> id_to_id_db_op(pqxx::connection& conn,
+vector<uint64_t> id_to_id_db_op0(pqxx::connection& conn,
 		const vector<uint64_t>::const_iterator ids_begin,
 		const vector<uint64_t>::const_iterator ids_end,
 		const std::pair<std::size_t, std::string_view>* prepared_begin,
@@ -232,12 +232,40 @@ vector<uint64_t> id_to_id_db_op(pqxx::connection& conn,
 	return result;
 }
 
-//vector<uint64_t> id_to_id_db_op(pqxx::connection& conn, const std::vector<uint64_t>& ids,
-//		const std::pair<std::size_t, std::string_view>* prepared_begin,
-//		const std::pair<std::size_t, std::string_view>* prepared_end,
-//		std::string(*query_func)(std::size_t)) {
-//	return id_to_id_db_op(conn, ids.cbegin(), ids.cend(), prepared_begin, prepared_end, query_func);
-//}
+vector<vector<uint64_t>> id_to_id_db_op(ConnectionPool& pool,
+		const vector<uint64_t>::const_iterator ids_begin,
+		const vector<uint64_t>::const_iterator ids_end,
+		const std::pair<std::size_t, std::string_view>* prepared_begin,
+		const std::pair<std::size_t, std::string_view>* prepared_end,
+		std::string(*query_func)(std::size_t)) {
+	std::size_t total_size = numeric_cast<std::size_t>(std::distance(ids_begin, ids_end));
+	std::size_t max_threads = total_size /
+			std::max_element(prepared_begin, prepared_end, [](const auto& a, const auto& b) {
+				return std::get<0>(a) < std::get<0>(b);
+			})->first;
+	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
+	if (max_threads <= 1) {
+		ConnectionLease lease = pool.checkout();
+		vector<vector<uint64_t>> results;
+		results.push_back(id_to_id_db_op0(*lease, ids_begin, ids_end, prepared_begin, prepared_end, query_func));
+		return std::move(results);
+	}
+
+	std::size_t batch_size = (total_size + (max_threads - 1)) / max_threads;
+	vector<std::future<vector<uint64_t>>> futures;
+	for (std::size_t i = 0; i < total_size; i += batch_size) {
+		auto first = ids_begin + i, last = ids_begin + std::min(i+batch_size, total_size);
+		futures.push_back(std::async(std::launch::async, [&pool, first, last, prepared_begin, prepared_end, query_func]() {
+			ConnectionLease lease = pool.checkout();
+			return id_to_id_db_op0(*lease, first, last, prepared_begin, prepared_end, query_func);
+		}));
+	}
+
+	vector<vector<uint64_t>> results;
+	for (std::size_t i = 0; i < futures.size(); ++i)
+		results.push_back(futures[i].get());
+	return std::move(results);
+}
 
 vector<pair<uint64_t, uint64_t>> get_all_completion_ranges(pqxx::connection& conn, std::string_view tablename) {
 	std::string query = fmt::format("select lower(r), upper(r) from {}", tablename);
@@ -255,11 +283,12 @@ vector<pair<uint64_t, uint64_t>> get_all_completion_ranges(pqxx::connection& con
 	}, 10, reporting_name);
 }
 
-vector<uint64_t> filter_ids_needing_close(pqxx::connection& conn,
+vector<uint64_t> filter_ids_needing_close(ConnectionPool& pool,
 		const vector<uint64_t>::iterator ids_begin,
 		const vector<uint64_t>::iterator ids_end) {
 	std::sort(ids_begin, ids_end);
-	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(conn, "completed_closes");
+	ConnectionLease conn = pool.checkout();
+	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(*conn, "completed_closes");
 	//The result is the range [ids_begin, needy_end).  It would be nice to find
 	//a way to use it without copying, but we'll need unary_needs_ for other
 	//purposes anyway, so...
@@ -299,45 +328,56 @@ pair<tsl::hopscotch_set<uint64_t>, vector<uint64_t>> follow_close_edges(pqxx::co
 	}, 10, "follow_close_edges");
 }
 
-vector<uint64_t> filter_ids_needing_mirror(pqxx::connection& conn,
+vector<uint64_t> filter_ids_needing_mirror(ConnectionPool& pool,
 		const vector<uint64_t>::iterator ids_begin,
 		const vector<uint64_t>::iterator ids_end) {
 	std::sort(ids_begin, ids_end);
-	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(conn, "completed_mirrors");
+	ConnectionLease conn = pool.checkout();
+	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(*conn, "completed_mirrors");
 	//The result is the range [ids_begin, needy_end).  It would be nice to find
 	//a way to use it without copying, but we'll need unary_needs_ for other
 	//purposes anyway, so...
 	return {ids_begin, partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend())};
 }
 
-vector<uint64_t> get_mirrors(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
+vector<vector<uint64_t>> get_mirrors(ConnectionPool& pool, const vector<uint64_t>::const_iterator ids_begin,
 		const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids_begin, ids_end,
+		return id_to_id_db_op(pool, ids_begin, ids_end,
 				std::begin(get_mirrors_prepared), std::end(get_mirrors_prepared),
 				&build_get_mirrors_query);
 	}, 10, "get_mirrors");
 }
 
-vector<uint64_t> filter_ids_needing_connect(pqxx::connection& conn,
+vector<uint64_t> filter_ids_needing_connect(ConnectionPool& pool,
 		const vector<uint64_t>::iterator ids_begin,
 		const vector<uint64_t>::iterator ids_end) {
 	std::sort(ids_begin, ids_end);
-	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(conn, "completed_connects");
+	ConnectionLease lease = pool.checkout();
+	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(*lease, "completed_connects");
+	pool.checkin(std::move(lease));
 	vector<uint64_t>::iterator new_end = partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend());
 
 	//Also filter out any gadgets too small to connect.
-	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids_begin, new_end,
+	vector<vector<uint64_t>> results = retry_db_operation([&]() {
+		return id_to_id_db_op(pool, ids_begin, new_end,
 				std::begin(filter_connect_prepared), std::end(filter_connect_prepared),
 				&build_filter_connectable_ids_query);
 	}, 10, "filter_ids_needing_connect, filtering connectable ids");
+
+	std::size_t total_size = 0;
+	for (const vector<uint64_t>& r : results)
+		total_size += r.size();
+	results[0].reserve(total_size);
+	for (std::size_t i = 1; i < results.size(); ++i)
+		results[0].insert(results[0].end(), results[i].begin(), results[i].end());
+	return std::move(results[0]);
 }
 
-vector<uint64_t> get_connects(pqxx::connection& conn, const vector<uint64_t>::const_iterator ids_begin,
+vector<vector<uint64_t>> get_connects(ConnectionPool& pool, const vector<uint64_t>::const_iterator ids_begin,
 		const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
-		return id_to_id_db_op(conn, ids_begin, ids_end,
+		return id_to_id_db_op(pool, ids_begin, ids_end,
 				std::begin(get_connects_prepared), std::end(get_connects_prepared),
 				&build_get_connects_query);
 	}, 10, "get_connects");
@@ -1333,8 +1373,7 @@ private:
 		Stopwatch stopwatch = Stopwatch::process();
 		if (!unary_needs_.empty())
 			throw std::logic_error(fmt::format("called filter_unary for {} but unary_needs_ not empty\n", log_name));
-		ConnectionLease conn = conn_pool_->checkout();
-		unary_needs_ = filter_func(*conn, first, last);
+		unary_needs_ = filter_func(*conn_pool_, first, last);
 		fmt::print("Found {} of {} gadgets needing {} in {}\n",
 				unary_needs_.size(), std::distance(first, last), log_name, stopwatch.elapsed().hms());
 		//Sorting here means tasks will contain consecutive ids more often,
@@ -1365,10 +1404,13 @@ private:
 	template<class FilterFunc, class Iter>
 	void follow_unary_simple(FilterFunc follow_func, Iter first, Iter last, std::string_view log_name) {
 		Stopwatch stopwatch = Stopwatch::process();
-		ConnectionLease conn = conn_pool_->checkout();
-		vector<uint64_t> ids = follow_func(*conn, first, last);
-		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, ids.size(), stopwatch.elapsed().hms());
-		state_(std::move(ids));
+		vector<vector<uint64_t>> ids = follow_func(*conn_pool_, first, last);
+		std::size_t total_size = 0;
+		for (const vector<uint64_t>& x : ids)
+			total_size += x.size();
+		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, total_size, stopwatch.elapsed().hms());
+		for (vector<uint64_t>& x : ids)
+			state_(std::move(x));
 	}
 
 
