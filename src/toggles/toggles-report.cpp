@@ -268,7 +268,7 @@ std::size_t do_stuff(pqxx::connection& conn, tsl::hopscotch_map<uint64_t, AnyPro
 		std::string query, AnyProv(*ctor)(const pqxx::row&), std::string_view op_name,
 		unsigned int generation, unsigned int subgeneration) {
 	Stopwatch stopwatch = Stopwatch::process();
-	transaction trans(conn);
+	ro_transaction trans(conn); //writing temp tables is fine
 	pqxx::result res = trans.exec(query);
 	std::size_t size = res.size();
 	for (const pqxx::row& r : res) {
