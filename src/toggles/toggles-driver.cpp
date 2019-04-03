@@ -461,14 +461,18 @@ vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines0(pqxx::c
 		auto process_rows = [&](const pqxx::result& rows) {
 			for (const auto& r : rows) {
 				vector<uint64_t> lefts, rights;
-				pqxx::array_parser parser = r[0].as_array();
-				while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
-					if (array_element.first == pqxx::array_parser::string_value)
-						lefts.push_back(to_uint64(array_element.second));
-				parser = r[1].as_array();
-				while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
-					if (array_element.first == pqxx::array_parser::string_value)
-						rights.push_back(to_uint64(array_element.second));
+				{
+					pqxx::array_parser parser = r[0].as_array();
+					while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
+						if (array_element.first == pqxx::array_parser::string_value)
+							lefts.push_back(to_uint64(array_element.second));
+				}
+				{
+					pqxx::array_parser parser = r[1].as_array();
+					while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
+						if (array_element.first == pqxx::array_parser::string_value)
+							rights.push_back(to_uint64(array_element.second));
+				}
 				assert(!lefts.empty());
 				assert(!rights.empty());
 				assert(std::is_sorted(rights.begin(), rights.end()));
