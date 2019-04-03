@@ -157,9 +157,9 @@ struct fmt::formatter<AnyProv> {
 	}
 };
 
-vector<AnyProv> toposort_provs(const tsl::hopscotch_map<uint64_t, AnyProv>& prov, uint64_t root) {
-	tsl::hopscotch_map<uint64_t, uint64_t> needs;
-	tsl::hopscotch_map<uint64_t, vector<uint64_t>> releases;
+vector<AnyProv> toposort_provs(const tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& prov, uint64_t root) {
+	tsl::hopscotch_map<uint64_t, uint64_t, farmhash_hash> needs;
+	tsl::hopscotch_map<uint64_t, vector<uint64_t>, farmhash_hash> releases;
 	vector<uint64_t> stack;
 	stack.push_back(root);
 	while (!stack.empty()) {
@@ -264,7 +264,7 @@ std::string build_follow_mirror_query(unsigned int subgeneration_start) {
 			subgeneration_start);
 }
 
-std::size_t do_stuff(pqxx::connection& conn, tsl::hopscotch_map<uint64_t, AnyProv>& prov,
+std::size_t do_stuff(pqxx::connection& conn, tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& prov,
 		std::string query, AnyProv(*ctor)(const pqxx::row&), std::string_view op_name,
 		unsigned int generation, unsigned int subgeneration) {
 	Stopwatch stopwatch = Stopwatch::process();
@@ -321,11 +321,11 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
 	pqxx::connection conn(connect_str);
 
-	tsl::hopscotch_map<uint64_t, AnyProv> prov, target_prov;
+	tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash> prov, target_prov;
 	vector<uint64_t> source_ids, target_ids;
 	unsigned int generation_start = 0, subgeneration_start = 0;
 
-	auto close_and_mirror = [&conn, multiplayer](tsl::hopscotch_map<uint64_t, AnyProv>& prov,
+	auto close_and_mirror = [&conn, multiplayer](tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& prov,
 			unsigned int subgeneration_start, unsigned int generation, unsigned int subgeneration) {
 		if (!multiplayer)
 			do_stuff(conn, prov, build_follow_close_query(subgeneration_start),
@@ -405,7 +405,7 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 			return join(names, ", ");
 		};
 
-		using prov_iterator = tsl::hopscotch_map<uint64_t, AnyProv>::iterator;
+		using prov_iterator = tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>::iterator;
 		for (prov_iterator target = target_prov.begin(); target != target_prov.end();) {
 			prov_iterator leaf = prov.find(target->first);
 			if (leaf != prov.end()) {
