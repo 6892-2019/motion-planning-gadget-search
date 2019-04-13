@@ -10,6 +10,7 @@
 #include "hopscotch/hopscotch_map.h"
 #include "tsl/ordered_set.h"
 #include "msgpack.hpp"
+#include "farmhash/farmhash.h"
 #include <pqxx/pqxx>
 #include <cstdio>
 
@@ -97,12 +98,12 @@ namespace std {
 template<>
 struct hash<GadgetEdge> {
 	size_t operator()(const GadgetEdge& e) const {
-		//TODO: this is a bad hash function
-		size_t x = e.start;
-		x = 31*x + e.from;
-		x = 31*x + e.to;
-		x = 31*x + e.end;
-		return x;
+		std::array<char, 4 * sizeof(unsigned int)> a;
+		std::memcpy(&a[0], &e.start, sizeof(e.start));
+		std::memcpy(&a[4], &e.from, sizeof(e.from));
+		std::memcpy(&a[8], &e.to, sizeof(e.to));
+		std::memcpy(&a[12], &e.end, sizeof(e.end));
+		return farmhash::Hash(a.cbegin(), a.size());
 	}
 };
 }
@@ -168,7 +169,7 @@ auto reachable_accept_components(const AutomatonBase& a, const SCCs& sccs) {
 			state_to_comp[s] = c;
 
 	std::vector<unsigned int> ret;
-	tsl::hopscotch_set<unsigned int> closed;
+	tsl::hopscotch_set<unsigned int, farmhash_hash> closed;
 	circular_deque<unsigned int, 32> worklist;
 	closed.insert(0);
 	worklist.push_back(0);
@@ -230,7 +231,7 @@ SLLS deflate_slls(const AutomatonBase& a) {
 	auto activealpha = a.activeAlphabet();
 
 	unsigned int gadgetStates = 0;
-	tsl::hopscotch_map<AutomatonBase::state_type, unsigned int> autoToGadget; //maps automaton states to gadget states
+	tsl::hopscotch_map<AutomatonBase::state_type, unsigned int, farmhash_hash> autoToGadget; //maps automaton states to gadget states
 	tsl::hopscotch_set<GadgetEdge> edges;
 	for (AutomatonBase::state_type start = 0; start < state_size; ++start) {
 		if (!a.accept(start)) continue;
@@ -854,7 +855,7 @@ void combine(const Automaton<Precision>& la, AutomatonBase::state_type leftLocat
 }
 
 template<unsigned int Precision>
-Finisher<CombineProvenance> do_combine0(const tsl::hopscotch_map<std::uint64_t, vector<std::byte>>& map,
+Finisher<CombineProvenance> do_combine0(const tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash>& map,
 		const vector<std::uint64_t>& left_gids, const vector<std::uint64_t>& right_gids) {
 	vector<unique_ptr<Automaton<Precision>>> right_autos;
 	vector<unsigned int> right_locations;
@@ -890,7 +891,7 @@ Finisher<CombineProvenance> do_combine0(const tsl::hopscotch_map<std::uint64_t, 
 	return finisher;
 }
 
-Finisher<CombineProvenance> do_combine(tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map,
+Finisher<CombineProvenance> do_combine(tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map,
 		const vector<std::uint64_t>& left_gids, const vector<std::uint64_t>& right_gids, unsigned int precision) {
 	switch (precision) {
 #define TOGGLESRUNNER_DO_COMBINE_CASE(N) case N: return do_combine0<N>(map, left_gids, right_gids);
@@ -938,7 +939,7 @@ struct CombineCommandOutput {
 	MSGPACK_DEFINE_ARRAY(rows, prov, toughies)
 };
 CombineCommandOutput do_combine_for_python(CombineCommandInput cmd) {
-	tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map;
+	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
 	for (auto& p : cmd.inputs)
 		map[p.first] = std::move(p.second);
 	cmd.inputs.clear();
@@ -1018,7 +1019,7 @@ SimpleOutput do_mirror_for_python(vector<pair<std::uint64_t, vector<std::byte>>>
 //and msgpack can't handle nullptr_t
 [[noreturn]] int do_batch_combine(vector<pair<uint64_t, vector<std::byte>>> inputs,
 		vector<uint64_t> lefts, vector<uint64_t> rights, unsigned int precision) {
-	tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map;
+	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
 	for (auto& p : inputs)
 		map[p.first] = std::move(p.second);
 	inputs.clear();
@@ -1365,7 +1366,7 @@ DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vecto
 
 	//TODO: select_gadget_id_to_data should be templated on the result container so we can directly build this map
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-	tsl::hopscotch_map<std::uint64_t, vector<std::byte>> map;
+	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
 	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
 		map.try_emplace(p.first, std::move(p.second));
 	Finisher outputs = do_combine(std::move(map), left_gids, right_gids, precision);
