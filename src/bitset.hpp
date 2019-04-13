@@ -11,6 +11,7 @@
 #include <iostream>
 #include <cassert>
 #include <boost/integer.hpp>
+#include <farmhash/farmhash.h>
 
 namespace automaton {
 namespace impl {
@@ -411,7 +412,7 @@ namespace std {
 template<unsigned int N>
 struct hash<automaton::bitset<N>> {
 	size_t operator()(const automaton::bitset<N>& b) const {
-		return b.bits_;
+		return farmhash::Fingerprint(b.bits_);
 	}
 };
 }
