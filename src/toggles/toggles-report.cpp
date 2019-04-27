@@ -225,7 +225,6 @@ vector<AnyProv> toposort_provs(const tsl::hopscotch_map<uint64_t, AnyProv, farmh
 	while (!stack.empty()) {
 		uint64_t cur = stack.back();
 		stack.pop_back();
-		fmt::print("toposort wants {} in first loop\n", cur);
 		const AnyProv& p = prov.at(cur);
 		needs[cur] = 0;
 		for (uint64_t i : p.inputs()) {
@@ -246,7 +245,6 @@ vector<AnyProv> toposort_provs(const tsl::hopscotch_map<uint64_t, AnyProv, farmh
 	while (!stack.empty()) {
 		uint64_t cur = stack.back();
 		stack.pop_back();
-		fmt::print("toposort wants {} in second loop\n", cur);
 		ret.push_back(prov.at(cur));
 		released_now.clear();
 		for (uint64_t r : releases[cur]) {
@@ -490,7 +488,6 @@ void fill_cache(pqxx::connection& conn,
 		tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& edge_cache,
 		const vector<uint64_t>& roots, const vector<vector<SkinnyProv>>& prov) {
 	vector<uint64_t> frontier(roots.begin(), roots.end());
-	fmt::print("initial frontier {}\n", frontier);
 	vector<uint64_t> combine_batch, connect_batch, close_batch;
 	vector<SkinnyProv> mirror_batch;
 	while (!frontier.empty()) {
@@ -500,12 +497,9 @@ void fill_cache(pqxx::connection& conn,
 		mirror_batch.clear();
 
 		for (std::size_t i = 0; i < frontier.size(); ++i) {
-			if (edge_cache.count(frontier[i])) {
-				fmt::print("skipping {} because already in edge cache\n", frontier[i]);
+			if (edge_cache.count(frontier[i]))
 				continue;
-			}
 			SkinnyProv p = find_sp(prov, frontier[i]);
-			fmt::print("{} {} {}\n", p.output(), p.key(), p.kind());
 			switch (p.kind()) {
 				case EdgeKind::combine: combine_batch.push_back(p.key()); break;
 				case EdgeKind::connect: connect_batch.push_back(p.key()); break;
@@ -557,7 +551,6 @@ void fill_cache(pqxx::connection& conn,
 				if (!pair.second)
 					throw std::runtime_error(fmt::format("conflict for {}: {} {}",
 							p.output(), *pair.first, p));
-//				fmt::print("putting {} into frontier\n", p.output());
 				const vector<uint64_t>& inputs = p.inputs();
 				for (uint64_t i : inputs)
 					frontier.push_back(i);
@@ -635,10 +628,8 @@ int main(int argc, char* argv[]) { //genbuild entrypoint
 		if (generation == 0) {
 			source_ids = collect_initial_gadget_set(conn, source_set);
 			std::sort(source_ids.begin(), source_ids.end());
-			for (uint64_t i : source_ids) {
-				fmt::print("putting source {} into edge cache\n", i);
+			for (uint64_t i : source_ids)
 				edge_cache.try_emplace(i, AnyProv::source(i));
-			}
 			vector<uint64_t> target_ids = collect_initial_gadget_set(conn, target_set);
 			//What we really want is a std::set_difference that works like std::unique
 			//(moving the subtracted elements to the end of the vector), but in lieu of
