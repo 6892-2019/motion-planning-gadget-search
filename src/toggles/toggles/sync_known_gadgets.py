@@ -27,7 +27,10 @@ from .runner import local_toggles_runner
 
 
 def sync_known_gadgets(args):
-    input_data = yaml.load(args.input)
+    input_data = {}
+    for f in args.input:
+        for k, v in yaml.load(f).items():
+            input_data.setdefault(k, {}).update(v)
 
     enantio_prefix = ('r', 's')
     canonicals = []
@@ -124,5 +127,5 @@ def sync_known_gadgets(args):
 
 def register_subcommand(parser: argparse.ArgumentParser, subparser_holder: argparse._SubParsersAction):
     skg_parser = subparser_holder.add_parser('sync-known-gadgets')
-    skg_parser.add_argument('input', type=argparse.FileType(), help='YAML file of gadget and alias definitions')
+    skg_parser.add_argument('input', type=argparse.FileType('r'), nargs='+', help='YAML file of gadget and alias definitions')
     skg_parser.set_defaults(command_func=sync_known_gadgets)
