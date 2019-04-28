@@ -1555,7 +1555,7 @@ public:
 	}
 };
 
-int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -l:libboost_system.a'}
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
 	unsigned int num_connections = 1;
