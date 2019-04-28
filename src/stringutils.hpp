@@ -42,6 +42,8 @@ void split_view(std::vector<std::string_view>& out, const std::string&& temp, ch
 using Parts = std::tuple<std::string, std::string, std::string>;
 Parts partition(std::string_view haystack, char delimiter);
 Parts partition(std::string_view haystack, std::string_view delimiter);
+Parts rpartition(std::string_view haystack, char delimiter);
+Parts rpartition(std::string_view haystack, std::string_view delimiter);
 
 std::string join(const std::vector<std::string_view>& inputs, std::string_view delimiter);
 std::string join(const std::vector<std::string>& inputs, std::string_view delimiter);
@@ -50,8 +52,10 @@ std::string join(const std::vector<std::string>& inputs, std::string_view delimi
 template<typename T>
 T from_string(std::string_view view);
 #define FROM_STRING_CASE(TYPE,SHORTHAND) extern template TYPE from_string(std::string_view view); TYPE SHORTHAND(std::string_view view);
+		FROM_STRING_CASE(unsigned short,to_ushort)
 		FROM_STRING_CASE(int,to_int)
 		FROM_STRING_CASE(unsigned int,to_uint)
+		FROM_STRING_CASE(std::uint64_t, to_uint64)
 #undef FROM_STRING_CASE
 
 

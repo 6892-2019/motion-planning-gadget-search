@@ -45,3 +45,44 @@ TEST_CASE("AlgoutilsTest_UnorderedEqual") {
 	REQUIRE_UNARY_FALSE(unordered_equal({0}, {1}));
 	REQUIRE_UNARY_FALSE(unordered_equal({0, 0}, {0}));
 }
+
+TEST_CASE("AlgoutilsTest_PartitionOnRangeExclusion00") {
+	dynarray<int> foo(7);
+	std::iota(foo.begin(), foo.end(), 0);
+	std::vector<std::pair<int, int>> v;
+	v.emplace_back(2, 5);
+
+	int* x = partition_on_range_exclusion(foo.begin(), foo.end(), v.cbegin(), v.cend());
+	CHECK_EQ(x, foo.begin()+4);
+	CHECK_EQ(foo[0], 0);
+	CHECK_EQ(foo[1], 1);
+	CHECK_EQ(foo[2], 5);
+	CHECK_EQ(foo[3], 6);
+}
+
+TEST_CASE("AlgoutilsTest_PartitionOnRangeExclusion01") {
+	dynarray<int> foo(7);
+	std::iota(foo.begin(), foo.end(), 0);
+	std::vector<std::pair<int, int>> v;
+	v.emplace_back(0, 2);
+	v.emplace_back(5, 1000);
+
+	int* x = partition_on_range_exclusion(foo.begin(), foo.end(), v.cbegin(), v.cend());
+	CHECK_EQ(x, foo.begin()+3);
+	CHECK_EQ(foo[0], 2);
+	CHECK_EQ(foo[1], 3);
+	CHECK_EQ(foo[2], 4);
+}
+
+TEST_CASE("AlgoutilsTest_PartitionOnRangeExclusion02") {
+	dynarray<int> foo(7);
+	std::iota(foo.begin(), foo.end(), 0);
+	std::vector<std::pair<int, int>> v;
+	v.emplace_back(1, 5);
+	v.emplace_back(5, 6);
+
+	int* x = partition_on_range_exclusion(foo.begin(), foo.end(), v.cbegin(), v.cend());
+	CHECK_EQ(x, foo.begin()+2);
+	CHECK_EQ(foo[0], 0);
+	CHECK_EQ(foo[1], 6);
+}

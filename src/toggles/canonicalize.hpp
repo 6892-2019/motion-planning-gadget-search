@@ -15,39 +15,49 @@ std::pair<const unsigned int* const*, const unsigned int* const*>
 getPerms(unsigned int alphabetSize, unsigned int locations, bool normal, bool mirrored);
 
 template<unsigned int N>
-void canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool allowMirroring = true) {
+unsigned int canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool allowMirroring = true) {
 	if (locations == 1) {
 		//We can't renumber the symbols/locations because there's only one, but
 		//we still have to renumber the states.
 		a.canonicalize();
-		return;
+		return 0;
 	}
 	auto perms = getPerms(a.alphabet_size(), locations, true, allowMirroring);
-	a.canonicalizeRenumber(perms.first, perms.second);
+	auto used = a.canonicalizeRenumber(perms.first, perms.second);
+	auto iter_index = std::find(perms.first, perms.second, used);
+	assert(iter_index != perms.second);
+	return numeric_cast<unsigned int>(iter_index - perms.first);
 }
+unsigned int canonicalize(automaton::WorkingAutomaton& a, const unsigned int locations, bool allowMirroring = true);
 
-template<class AutomatonType>
-AutomatonType mirror(const AutomatonType& a, unsigned int locations) {
-	AutomatonType b = a;
+template<unsigned int N>
+[[nodiscard]] std::pair<automaton::Automaton<N>, unsigned int> mirror(const automaton::Automaton<N>& a, unsigned int locations) {
+	automaton::Automaton<N> b = a;
 	if (locations == 1) {
 		//We can't renumber the symbols/locations because there's only one, but
 		//we still have to renumber the states.
 		b.canonicalize();
-		return b;
+		return {b, 0};
 	} else if (locations == 2) {
 		//In this special case, the mirrored and mirrored perms are the same.
 		//It's just a regular canonicalize.
-		canonicalize(b, locations);
-		return b;
+		unsigned int index = canonicalize(b, locations);
+		return {b, index};
 	}
 	auto perms = getPerms(b.alphabet_size(), locations, false, true); //mirrored perms only
-	b.canonicalizeRenumber(perms.first, perms.second);
-	return b;
+	auto used = b.canonicalizeRenumber(perms.first, perms.second);
+	auto iter_index = std::find(perms.first, perms.second, used);
+	assert(iter_index != perms.second);
+	//We add locations to the index because the mirrored permutations come after
+	//the regular permutations.  This lets us map an index to a permutation
+	//without worrying about the context.
+	return {b, numeric_cast<unsigned int>(iter_index - perms.first) + locations};
 }
-template<class AutomatonType>
-AutomatonType mirror(const AutomatonType& a) {
+template<unsigned int N>
+[[nodiscard]] std::pair<automaton::Automaton<N>, unsigned int> mirror(const automaton::Automaton<N>& a) {
 	return mirror(a, a.active_alphabet_size());
 }
+[[nodiscard]] std::pair<std::unique_ptr<automaton::WorkingAutomaton>, unsigned int> mirror(const automaton::WorkingAutomaton& a);
 
 #endif /* CANONICALIZE_HPP */
 

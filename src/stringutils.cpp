@@ -75,6 +75,18 @@ Parts partition(std::string_view haystack, std::string_view delimiter) {
 		return Parts{haystack, "", ""};
 	return Parts{haystack.substr(0, index), haystack.substr(index, index+1), haystack.substr(index+1)};
 }
+Parts rpartition(std::string_view haystack, char delimiter) {
+	auto index = haystack.rfind(delimiter);
+	if (index == std::string_view::npos)
+		return Parts{"", "", haystack};
+	return Parts{haystack.substr(0, index), haystack.substr(index, index+1), haystack.substr(index+1)};
+}
+Parts rpartition(std::string_view haystack, std::string_view delimiter) {
+	auto index = haystack.find(delimiter);
+	if (index == std::string_view::npos)
+		return Parts{"", "", haystack};
+	return Parts{haystack.substr(0, index), haystack.substr(index, index+1), haystack.substr(index+1)};
+}
 
 
 std::string join(const std::vector<std::string_view>& inputs, std::string_view delimiter) {
@@ -117,8 +129,10 @@ T from_string(std::string_view view) {
 	TYPE SHORTHAND(std::string_view view) { \
 	return from_string<TYPE>(view); \
 	}
+		FROM_STRING_CASE(unsigned short,to_ushort)
 		FROM_STRING_CASE(int,to_int)
 		FROM_STRING_CASE(unsigned int,to_uint)
+		FROM_STRING_CASE(std::uint64_t, to_uint64)
 #undef FROM_STRING_CASE
 
 StringBuilder& operator<<(StringBuilder& out, std::string_view view) {

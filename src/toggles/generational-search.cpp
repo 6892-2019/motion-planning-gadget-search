@@ -494,7 +494,7 @@ auto find_useful_rotations(const automaton_type& a) {
 		std::iota(rotation.begin(), rotation.begin()+locations, 0);
 		std::rotate(rotation.begin(), rotation.begin()+rl, rotation.begin()+locations);
 		automaton_type rm = a;
-		rm.permuteAlphabet(rotation);
+		rm.permuteAlphabet(rotation.data());
 		rm.canonicalize(); //The normal, non-alphabet-adjusting canonicalize.
 		auto p = pack(rm, cur, pages.current_end());
 		if (!p) {

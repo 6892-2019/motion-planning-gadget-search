@@ -30,6 +30,7 @@ void writeAllLines(std::string filename, const std::vector<std::string>& lines);
  * done to check if the rest of the arguments actually denote files.
  */
 std::vector<std::string> processFilenameArgs(const char** first, const char** last);
+std::vector<std::string> processFilenameArgs(std::vector<std::string> args); //passing by value to merge const&/&& overloads
 
 #endif /* IOUTILS_HPP */
 
