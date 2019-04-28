@@ -566,7 +566,7 @@ void fill_cache(pqxx::connection& conn,
 	fill_cache(conn, edge_cache, roots, nested_prov);
 }
 
-int main(int argc, char* argv[]) { //genbuild entrypoint
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
 	bool multiplayer = false;

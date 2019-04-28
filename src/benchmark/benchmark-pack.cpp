@@ -9,7 +9,7 @@ using namespace automaton;
 //'clock' in the global namespace is already defined, sigh
 using myclock = std::chrono::high_resolution_clock;
 
-int main(int argc, const char* argv[]) { //genbuild entrypoint
+int main(int argc, const char* argv[]) { //genbuild {'entrypoint': True}
 	std::vector<std::string> filenames = processFilenameArgs(argv+1, argv+argc);
 	std::vector<std::unique_ptr<WorkingAutomaton>> automata;
 	for (auto& filename : filenames) {

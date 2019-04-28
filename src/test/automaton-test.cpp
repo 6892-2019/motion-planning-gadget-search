@@ -1,5 +1,5 @@
 #include "precompiled.hpp"
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN //genbuild entrypoint
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN //genbuild {'entrypoint': True}
 #include <doctest.h>
 #include "automaton.hpp"
 #include "util.hpp"

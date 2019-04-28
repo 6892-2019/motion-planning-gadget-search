@@ -140,7 +140,7 @@ R subset(R regex, unsigned int required, unsigned int total, unsigned int stride
 	return R::conj({R::cat(constraint), R::repeat(R::any(), total * stride)});
 }
 
-int main(int argc, char* argv[]) { //genbuild entrypoint
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 	Puzzle p = Puzzle::parse(argv[1]);
 	unsigned int width = static_cast<unsigned int>(p.cols.size()), height = static_cast<unsigned int>(p.rows.size());
 

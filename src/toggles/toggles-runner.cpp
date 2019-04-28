@@ -1618,7 +1618,7 @@ void write_output(const void* data, size_t size) {
 	std::fflush(stdout);
 }
 
-int main(int argc, char* argv[]) { //genbuild entrypoint
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
 			db_port = "5432", db_name = "togglesearch";
 	for (int i = 1; i < argc; ++i) {

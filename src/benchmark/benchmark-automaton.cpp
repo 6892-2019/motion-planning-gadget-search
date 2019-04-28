@@ -48,7 +48,7 @@ loop_ptr find_operation(string_view name) {
 	std::exit(1);
 }
 
-int main(int argc, const char* argv[]) { //genbuild entrypoint
+int main(int argc, const char* argv[]) { //genbuild {'entrypoint': True}
 	loop_ptr operation = find_operation(argv[1]);
 
 	vector<unique_ptr<WorkingAutomaton>> automata;

@@ -2,6 +2,11 @@
 
 from collections import OrderedDict, defaultdict, namedtuple
 import os
+import itertools
+import ast
+from typing import Optional
+from types import SimpleNamespace
+from operator import attrgetter
 
 # the vendor/ subdirectories we want
 # TODO: currently we make all headers available; this only controls objects
@@ -72,44 +77,65 @@ pools = {
 }
 
 
-Thing = namedtuple('Thing', ['source', 'object', 'is_entrypoint'])
-thing_groups = defaultdict(list)
+object_things = []
+object_groups = defaultdict(list)
+executable_things = []
 
-for subdir, dirs, files in os.walk('src/'):
-  group_name = os.path.relpath(subdir, 'src/')
-  for f in files:
-    if f.endswith('.cpp'):
-      source_path = os.path.join(subdir, f)
-      object_path = "${config}_builddir/" + source_path[:-4] + ".o"
-      is_entrypoint = 'genbuild entrypoint' in open(source_path).read()
-      thing_groups[group_name].append(Thing(source_path, object_path, is_entrypoint))
+def extract_genbuild_data(path) -> Optional[SimpleNamespace]:
+  for line in open(path).readlines():
+    idx = line.find('genbuild ')
+    if idx != -1:
+      idx += len('genbuild ')
+      data = line[idx:].strip()
+      try:
+        return ast.literal_eval(data)
+      except ValueError as e:
+        raise ValueError(path) from e
+  return None
 
-for dependency in import_vendored:
-  for subdir, dirs, files in os.walk('vendor/'+dependency+'/'):
-    group_name = os.path.relpath('src/', 'src/')
+def discover_targets(src_root):
+  group_stack = []
+  for subdir, dirs, files in os.walk(src_root):
+    # os.walk flattens the recusion, but we actually want to track it.
+    while group_stack and not subdir.startswith(group_stack[-1]):
+      group_stack.pop()
+    group_stack.append(subdir)
+
     for f in files:
-      if f.endswith(('.cpp', '.cc')):
-        source_path = os.path.join(subdir, f)
-        object_path = "${config}_builddir/" + source_path[:-4] + ".o"
-        #is_entrypoint = 'genbuild entrypoint' in open(source_path).read()
-        thing_groups[group_name].append(Thing(source_path, object_path, False))
+      # If we want non-C objects (i.e., not ending in .o), make this a map from
+      # input suffix to output suffix.
+      for suffix in ('.cpp', '.cc'):
+        if f.endswith(suffix):
+          object_thing = SimpleNamespace()
+          object_thing.source = os.path.join(subdir, f)
+          object_thing.object = "${config}_builddir/" + object_thing.source[:-len(suffix)] + ".o"
+          data = extract_genbuild_data(object_thing.source)
+          object_thing.data = data
+          object_things.append(object_thing)
+          if data and data.get('entrypoint', False):
+            exe_name = os.path.basename(object_thing.object)[:-2] + ".exe"
+            exe_thing = SimpleNamespace()
+            exe_thing.target = '${config}_builddir/bin/' + exe_name
+            exe_thing.object = object_thing.object
+            exe_thing.link_groups = list(group_stack)
+            if 'link_groups' in data:
+              exe_thing.link_groups.extend(data['link_groups'])
+            exe_thing.data = data
+            executable_things.append(exe_thing)
+          else:
+            object_groups[subdir].append(object_thing.object)
 
-# map each thing_group key to non-entrypoint objects (plus parents)
-object_groups = OrderedDict()
-for k, v in thing_groups.items():
-  object_groups[k] = [t.object for t in v if not t.is_entrypoint]
-for k, v in object_groups.items():
-  if k != '.': # TODO: we're assuming the top-level dir is only parent group
-    v.extend(object_groups['.'])
+discover_targets('src')
+for dependency in import_vendored:
+  discover_targets('vendor/'+dependency)
 
-link_groups = OrderedDict()
-for k, v in thing_groups.items():
-  for t in v:
-    if t.is_entrypoint:
-      objects = [t.object]
-      objects.extend(object_groups[k])
-      executable_name = os.path.basename(t.object)[:-2] + ".exe"
-      link_groups['${config}_builddir/bin/' + executable_name] = objects
+vendor_object_groups = [g for g in object_groups.keys() if g.startswith('vendor/')]
+for et in executable_things:
+  et.link_groups.extend(vendor_object_groups)
+  et.objects = [et.object] + sorted(itertools.chain.from_iterable([object_groups[g] for g in et.link_groups]))
+
+object_things.sort(key=attrgetter('source'))
+executable_things.sort(key=attrgetter('target'))
 
 
 
@@ -137,16 +163,18 @@ with open('build.ninja', 'w') as buildfile:
     buildfile.write('\n')
     
     buildfile.write('build ${config}_pchtarget: {config}_cxx src/precompiled.hpp\n'.format(**config))
-    for ts in thing_groups.values():
-      for t in ts:
-        buildfile.write(('build {}: {} {}'.format(t.object, '{config}_cxx', t.source) + ' | ${config}_pchtarget\n').format(**config))
+    for t in object_things:
+      buildfile.write(('build {}: {} {}'.format(t.object, '{config}_cxx', t.source) + ' | ${config}_pchtarget\n').format(**config))
     buildfile.write('\n')
     
-    #TODO: we could avoid repetition by introducing variables for any object
-    #group (i.e., excluding the entrypoint object) used more than once
-    for exe, objs in link_groups.items():
-      buildfile.write('build {}: {} {}\n'.format(exe, '{config}_ld', ' '.join(objs)).format(**config))
+    # Unfortunately, we can't optimize by introducing variables for repeated
+    # input object lists, because ninja splits the list before expanding
+    # variables.
+    for t in executable_things:
+      buildfile.write('build {}: {} {}\n'.format(t.target, '{config}_ld', ' '.join(t.objects)).format(**config))
+      if 'ldflags' in t.data:
+        buildfile.write('  addl_ldflags = {}\n'.format(t.data['ldflags']))
     
-    buildfile.write('build {}: phony {}\n'.format('{config}', ' '.join(iter(link_groups.keys()))).format(**config))
+    buildfile.write('build {}: phony {}\n'.format('{config}', ' '.join([t.target for t in executable_things])).format(**config))
   
   buildfile.write('\ndefault {}\n'.format(' '.join(default_targets)))
