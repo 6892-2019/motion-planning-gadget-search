@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 from collections import OrderedDict, defaultdict, namedtuple
 import os
@@ -96,14 +96,14 @@ for dependency in import_vendored:
 
 # map each thing_group key to non-entrypoint objects (plus parents)
 object_groups = OrderedDict()
-for k, v in thing_groups.iteritems():
+for k, v in thing_groups.items():
   object_groups[k] = [t.object for t in v if not t.is_entrypoint]
-for k, v in object_groups.iteritems():
+for k, v in object_groups.items():
   if k != '.': # TODO: we're assuming the top-level dir is only parent group
     v.extend(object_groups['.'])
 
 link_groups = OrderedDict()
-for k, v in thing_groups.iteritems():
+for k, v in thing_groups.items():
   for t in v:
     if t.is_entrypoint:
       objects = [t.object]
@@ -113,22 +113,22 @@ for k, v in thing_groups.iteritems():
 
 
 
-with open('build.ninja', 'wb') as buildfile:
-  for k, v in global_flags.iteritems():
+with open('build.ninja', 'w') as buildfile:
+  for k, v in global_flags.items():
     buildfile.write('{} = {}\n'.format(k, v))
   buildfile.write('\n')
   
-  for name, depth in pools.iteritems():
+  for name, depth in pools.items():
     buildfile.write('pool {}\n  depth = {}\n'.format(name, depth))
   buildfile.write('\n')
   
   for config in configs:
     buildfile.write('\n\n\n')
-    for k, v in config_flags.iteritems():
+    for k, v in config_flags.items():
       buildfile.write('{} = {}\n'.format(k.format(**config), v.format(**config)))
     buildfile.write('\n')
     
-    for k, v in rules.iteritems():
+    for k, v in rules.items():
       buildfile.write('rule {}_{}\n'.format(config['config'], k))
       for q in v:
         buildfile.write('  {}\n'.format(q.format(**config)))
@@ -137,16 +137,16 @@ with open('build.ninja', 'wb') as buildfile:
     buildfile.write('\n')
     
     buildfile.write('build ${config}_pchtarget: {config}_cxx src/precompiled.hpp\n'.format(**config))
-    for ts in thing_groups.itervalues():
+    for ts in thing_groups.values():
       for t in ts:
         buildfile.write(('build {}: {} {}'.format(t.object, '{config}_cxx', t.source) + ' | ${config}_pchtarget\n').format(**config))
     buildfile.write('\n')
     
     #TODO: we could avoid repetition by introducing variables for any object
     #group (i.e., excluding the entrypoint object) used more than once
-    for exe, objs in link_groups.iteritems():
+    for exe, objs in link_groups.items():
       buildfile.write('build {}: {} {}\n'.format(exe, '{config}_ld', ' '.join(objs)).format(**config))
     
-    buildfile.write('build {}: phony {}\n'.format('{config}', ' '.join(link_groups.iterkeys())).format(**config))
+    buildfile.write('build {}: phony {}\n'.format('{config}', ' '.join(iter(link_groups.keys()))).format(**config))
   
   buildfile.write('\ndefault {}\n'.format(' '.join(default_targets)))
