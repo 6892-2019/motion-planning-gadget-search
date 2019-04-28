@@ -31,23 +31,21 @@
         <in>util.cpp</in>
       </df>
       <df name="toggles">
+        <df name="driver">
+          <in>precompiled-asio.cpp</in>
+          <in>toggles-driver.cpp</in>
+        </df>
+        <df name="runner">
+          <in>canonicalize.cpp</in>
+          <in>ops.cpp</in>
+          <in>toggles-runner.cpp</in>
+        </df>
         <in>canonicalize.cpp</in>
-        <in>create_db.sql</in>
         <in>database.cpp</in>
         <in>database.hpp</in>
-        <in>dump-known-gadgets.cpp</in>
-        <in>gadgetdefs.cpp</in>
-        <in>gadgetdefs.hpp</in>
         <in>gadgets.yaml</in>
-        <in>generational-search.cpp</in>
-        <in>ops.cpp</in>
-        <in>provenance.cpp</in>
-        <in>provenance.hpp</in>
         <in>rpc.cpp</in>
-        <in>test-gadgetdefs.cpp</in>
-        <in>toggles-driver.cpp</in>
         <in>toggles-report.cpp</in>
-        <in>toggles-runner.cpp</in>
         <in>toggles-shared.cpp</in>
         <in>toggles-shared.hpp</in>
       </df>
@@ -64,6 +62,7 @@
       <in>hopcroft.cpp</in>
       <in>hopcroft.hpp</in>
       <in>ioutils.cpp</in>
+      <in>maybe_owning_ptr.hpp</in>
       <in>natural_map.hpp</in>
       <in>natural_set.cpp</in>
       <in>nfa-optimize.cpp</in>
@@ -188,8 +187,6 @@
           </incDir>
         </ccTool>
       </item>
-      <item path="src/fmtutils.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/fuzz/fuzz-state-renumbering.cpp"
             ex="false"
             tool="1"
@@ -206,6 +203,8 @@
             <pElem>.</pElem>
           </incDir>
         </ccTool>
+      </item>
+      <item path="src/maybe_owning_ptr.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/natural_map.hpp" ex="false" tool="3" flavor2="0">
       </item>
@@ -279,40 +278,37 @@
       </item>
       <item path="src/toggles/canonicalize.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/create_db.sql" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/toggles/database.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/database.hpp" ex="false" tool="3" flavor2="0">
       </item>
-      <item path="src/toggles/dump-known-gadgets.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/gadgetdefs.hpp" ex="false" tool="3" flavor2="0">
-      </item>
-      <item path="src/toggles/gadgets.yaml" ex="false" tool="3" flavor2="0">
-      </item>
-      <item path="src/toggles/generational-search.cpp"
+      <item path="src/toggles/driver/precompiled-asio.cpp"
             ex="false"
             tool="1"
             flavor2="0">
       </item>
-      <item path="src/toggles/ops.cpp" ex="false" tool="1" flavor2="0">
+      <item path="src/toggles/driver/toggles-driver.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
       </item>
-      <item path="src/toggles/provenance.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/provenance.hpp" ex="false" tool="3" flavor2="0">
+      <item path="src/toggles/gadgets.yaml" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/test-gadgetdefs.cpp" ex="false" tool="1" flavor2="0">
+      <item path="src/toggles/runner/canonicalize.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
       </item>
-      <item path="src/toggles/toggles-driver.cpp" ex="false" tool="1" flavor2="0">
+      <item path="src/toggles/runner/ops.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/runner/toggles-runner.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
       </item>
       <item path="src/toggles/toggles-report.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/toggles-runner.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/toggles-shared.cpp" ex="false" tool="1" flavor2="0">
       </item>
