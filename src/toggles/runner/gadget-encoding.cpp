@@ -370,10 +370,16 @@ std::vector<std::byte> encode(const automaton::WorkingAutomaton& a) {
 	return data;
 }
 
-std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gadget, std::size_t length) {
+std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gadget, std::size_t length,
+		unsigned int alphabet_size) {
 	auto&& [stats, edgelist_begin] = detail::stats(encoded_gadget);
+	//TODO: unlikely
+	if (alphabet_size && stats.locations > alphabet_size)
+		throw std::logic_error(fmt::format("decode: specified size too small: {} {}", alphabet_size, stats));
+
+	GadgetBuilder builder(alphabet_size ? alphabet_size : stats.locations);
+	//The coder always uses the actual locations because that's what we encoded with.
 	detail::edge_coder coder(stats.locations, stats.states);
-	GadgetBuilder builder(stats.locations);
 	//This length calculation (and the function's length parameter) is just for
 	//error checking.  We know how many edges to read, just not how many bytes
 	//they were encoded with.

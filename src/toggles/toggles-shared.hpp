@@ -11,10 +11,13 @@
 #include "database.hpp"
 #include <msgpack.hpp>
 
-//std::hash<uint64_t> is the identity, and hopscotch doesn't like that.
 struct farmhash_hash {
+	//std::hash<uint64_t> is the identity, and hopscotch doesn't like that.
 	uint64_t operator()(uint64_t x) const noexcept {
 		return farmhash::Fingerprint(x);
+	}
+	uint64_t operator()(const std::vector<std::byte>& x) const noexcept {
+		return farmhash::Hash(reinterpret_cast<const char*>(x.data()), x.size());
 	}
 };
 

@@ -48,13 +48,24 @@ struct Stats {
 unsigned int locations(const std::byte* encoded_gadget);
 Stats stats(const std::byte* encoded_gadget);
 
-std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gadget, std::size_t length);
+std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gadget, std::size_t length,
+		unsigned int alphabet_size = 0);
+template<unsigned int N>
+std::unique_ptr<automaton::Automaton<N>> decode(const std::byte* encoded_gadget, std::size_t length) {
+	return unique_cast<automaton::Automaton<N>>(decode(encoded_gadget, length, N));
+}
+
+//convenience functions
+inline std::unique_ptr<automaton::WorkingAutomaton> decode(const std::vector<std::byte>& encoded_gadget,
+		unsigned int alphabet_size = 0) {
+	return decode(encoded_gadget.data(), encoded_gadget.size(), alphabet_size);
+}
+template<unsigned int N>
+std::unique_ptr<automaton::Automaton<N>> decode(const std::vector<std::byte>& encoded_gadget) {
+	return unique_cast<automaton::Automaton<N>>(decode(encoded_gadget, N));
+}
 
 std::vector<std::byte> encode(const automaton::WorkingAutomaton& a);
-
-//We didn't use this in the old system.
-//template<unsigned int N>
-//automaton::Automaton<N> decode(const std::byte* encoded_gadget);
 
 //If we bring back PageHolder etc., we'd use this to encode into a page.
 //bool encode(const automaton::WorkingAutomaton& a, std::byte* first, std::byte* last);
