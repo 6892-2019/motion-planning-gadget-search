@@ -37,6 +37,7 @@
         </df>
         <df name="runner">
           <in>canonicalize.cpp</in>
+          <in>gadget-encoding.cpp</in>
           <in>ops.cpp</in>
           <in>toggles-runner.cpp</in>
         </df>
@@ -297,6 +298,11 @@
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/runner/canonicalize.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/gadget-encoding.cpp"
             ex="false"
             tool="1"
             flavor2="0">
