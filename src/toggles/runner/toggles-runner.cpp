@@ -32,65 +32,164 @@ using namespace std::literals::string_view_literals;
 void write_output(const void* data, size_t size);
 
 ////TODO: make this SCCs::find
-//unsigned int component_for_state(SCCs sccs, AutomatonBase::state_type state) {
-//	for (unsigned int c : xrange(sccs.size()))
-//		for (unsigned int s : make_range_for_pair(sccs.begin(c), sccs.end(c))) //TODO: add SCCs::range (name TBD)
-//			if (s == state)
-//				return c;
-//	//TODO: add an SCCs method giving the number of states, so we can report here
-//	throw std::logic_error(fmt::format("component_for_state failed: {} {}", state, sccs.size()));
-//}
+unsigned int component_for_state(SCCs sccs, AutomatonBase::state_type state) {
+	for (unsigned int c : xrange(sccs.size()))
+		for (unsigned int s : make_range_for_pair(sccs.begin(c), sccs.end(c))) //TODO: add SCCs::range (name TBD)
+			if (s == state)
+				return c;
+	//TODO: add an SCCs method giving the number of states, so we can report here
+	throw std::logic_error(fmt::format("component_for_state failed: {} {}", state, sccs.size()));
+}
 
-///**
-// * Canonicalizes a gadget in SLLS format, returning in database row format.
-// * Intended for use when loading human-readable gadget definitions into the
-// * database.
-// */
-//vector<pair<OutputRow, optional<OutputRow>>> canonicalize_from_slls(SLLS gadget) {
-//	unique_ptr<WorkingAutomaton> a = inflate_slls(gadget);
-//	OutputRow row = deflate_outputrow(*a);
-//	SCCs sccs = automaton::find_components(*a); //just computed this in deflate_outputrow, could try to save it
-//	auto activealpha = a->active_alphabet_size();
-//
-//	vector<pair<unique_ptr<WorkingAutomaton>, OutputRow>> normals;
-//	normals.emplace_back(std::move(a), std::move(row));
-//	//When initializing the database with named gadgets, we want to try all
-//	//initial states in the initial connected component.
-//	unsigned int initial_component = component_for_state(sccs, 0);
-//	for (auto state : make_range_for_pair(sccs.begin(initial_component), sccs.end(initial_component))) //TODO: SCCs::range
-//		if (normals.front().first->accept(state)) {
-//			unique_ptr<WorkingAutomaton> p = normals.front().first->clone();
-//			p->swapStateNumbers(0, state);
-//			canonicalize(*p, activealpha, false); //no mirroring
-//			row = deflate_outputrow(*p);
-//			normals.emplace_back(std::move(p), std::move(row));
-//		}
-//	std::sort(normals.begin(), normals.end(), [](const auto& l, const auto& r) {return l.second < r.second;});
-//	normals.erase(std::unique(normals.begin(), normals.end(),
-//			[](const auto& l, const auto& r) {return l.second == r.second;}), normals.end());
-//
-//	//It's plausible that only a subset of the states are chiral.
-//	vector<pair<unique_ptr<WorkingAutomaton>, OutputRow>> mirrors;
-//	for (const auto& n : normals) {
-//		//We don't return the rotation, but we won't add a mirror provenance edge
-//		//either, so the usual mirror machinery will fill it in later.  We just
-//		//need the gadget up front so we can give it an appropriate name.
-//		unique_ptr<WorkingAutomaton> p = mirror(*n.first).first;
-//		row = deflate_outputrow(*p);
-//		mirrors.emplace_back(std::move(p), std::move(row));
-//	}
-//
-//	//Mirror order is the same as the normal order (mirrors aren't sorted).
-//	//We're also just taking the first enantiomorph as 'normal', rather than
-//	//the lexicographically lesser one.
-//	vector<pair<OutputRow, optional<OutputRow>>> retval;
-//	for (auto i : xrange(normals.size()))
-//		if (normals[i].second != mirrors[i].second)
-//			retval.emplace_back(std::move(normals[i].second), std::move(mirrors[i].second));
-//		else
-//			retval.emplace_back(std::move(normals[i].second), nullopt);
-//	return retval;
-//}
+/**
+ * Canonicalizes a gadget in SLLS format, returning in database row format.
+ * Intended for use when loading human-readable gadget definitions into the
+ * database.
+ */
+vector<pair<vector<std::byte>, optional<vector<std::byte>>>> canonicalize_from_slls(
+		vector<encoding::GadgetEdge> uedges, vector<encoding::GadgetEdge> dedges) {
+	unique_ptr<WorkingAutomaton> a = encoding::inflate_slls(uedges, dedges);
+	vector<std::byte> row = encoding::encode(*a);
+	//just computed these in encoding::encode, could try to save them
+	SCCs sccs = automaton::find_components(*a);
+	auto activealpha = a->active_alphabet_size();
+
+	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> normals;
+	normals.emplace_back(std::move(a), std::move(row));
+	//When initializing the database with named gadgets, we want to try all
+	//initial states in the initial connected component.
+	unsigned int initial_component = component_for_state(sccs, 0);
+	for (auto state : make_range_for_pair(sccs.begin(initial_component), sccs.end(initial_component))) //TODO: SCCs::range
+		if (normals.front().first->accept(state)) {
+			unique_ptr<WorkingAutomaton> p = normals.front().first->clone();
+			p->swapStateNumbers(0, state);
+			canonicalize(*p, activealpha, false); //no mirroring
+			row = encoding::encode(*p);
+			normals.emplace_back(std::move(p), std::move(row));
+		}
+	std::sort(normals.begin(), normals.end(), [](const auto& l, const auto& r) {return l.second < r.second;});
+	normals.erase(std::unique(normals.begin(), normals.end(),
+			[](const auto& l, const auto& r) {return l.second == r.second;}), normals.end());
+
+	//It's plausible that only a subset of the states are chiral.
+	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> mirrors;
+	for (const auto& n : normals) {
+		//We don't return the rotation, but we won't add a mirror provenance edge
+		//either, so the usual mirror machinery will fill it in later.  We just
+		//need the gadget up front so we can give it an appropriate name.
+		unique_ptr<WorkingAutomaton> p = mirror(*n.first).first;
+		row = encoding::encode(*p);
+		mirrors.emplace_back(std::move(p), std::move(row));
+	}
+
+	//Mirror order is the same as the normal order (mirrors aren't sorted).
+	//We're also just taking the first enantiomorph as 'normal', rather than
+	//the lexicographically lesser one.
+	vector<pair<vector<std::byte>, optional<vector<std::byte>>>> retval;
+	for (auto i : xrange(normals.size()))
+		if (normals[i].second != mirrors[i].second)
+			retval.emplace_back(std::move(normals[i].second), std::move(mirrors[i].second));
+		else
+			retval.emplace_back(std::move(normals[i].second), nullopt);
+	return retval;
+}
+
+namespace YAML {
+template<>
+struct convert<encoding::GadgetEdge> {
+	static Node encode(const encoding::GadgetEdge& e) {
+		Node node;
+		node.push_back(e.start);
+		node.push_back(e.from);
+		node.push_back(e.to);
+		node.push_back(e.end);
+		return node;
+	}
+	static bool decode(const Node& node, encoding::GadgetEdge& e) {
+		if (!node.IsSequence() || node.size() != 4)
+			return false;
+		e.start = node[0].as<unsigned int>();
+		e.from = node[0].as<unsigned int>();
+		e.to = node[0].as<unsigned int>();
+		e.end = node[0].as<unsigned int>();
+		return true;
+	}
+};
+}
+
+int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
+	vector<vector<std::byte>> canonicals;
+	tsl::hopscotch_map<std::string, vector<std::size_t>> naming;
+	for (std::string_view filename : files) {
+		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
+		YAML::Node gadgets = toplevel["gadgets"];
+		for (auto it = gadgets.begin(); it != gadgets.end(); ++it) {
+			std::string gadget_name = it->first.as<std::string>();
+			vector<encoding::GadgetEdge> uedges, dedges;
+			if (it->second["uedges"])
+				uedges = it->second["uedges"].as<vector<encoding::GadgetEdge>>();
+			if (it->second["dedges"])
+				dedges = it->second["dedges"].as<vector<encoding::GadgetEdge>>();
+			if (uedges.empty() && dedges.empty()) {
+				fmt::print(stderr, "no edges for gadget {} in {}\n", gadget_name, filename);
+				return 1;
+			}
+
+			vector<pair<vector<std::byte>, optional<vector<std::byte>>>> morphs =
+					canonicalize_from_slls(std::move(uedges), std::move(dedges));
+			//We are chiral if any state has enantiomorphs.
+			bool chiral = std::any_of(morphs.begin(), morphs.end(), [](const auto& q){return q.second.has_value();});
+			std::size_t group_start = canonicals.size();
+			if (morphs.size() == 1 && !chiral) {
+				canonicals.push_back(std::move(morphs[0].first));
+				//singleton group -- we'll install the usual group name later
+			} else if (morphs.size() == 1 && chiral) {
+				auto& p = morphs[0];
+				naming["r-"+gadget_name] = {canonicals.size()};
+				canonicals.push_back(std::move(p.first));
+				naming["s-"+gadget_name] = {canonicals.size()};
+				canonicals.push_back(std::move(*p.second));
+			} else if (morphs.size() > 1 && !chiral)
+				for (std::size_t i = 0; i < morphs.size(); ++i) {
+					naming[fmt::format("{}-{}", gadget_name, i)] = {canonicals.size()};
+					canonicals.push_back(std::move(morphs[i].first));
+				}
+			else if (morphs.size() > 1 && chiral)
+				for (std::size_t i = 0; i < morphs.size(); ++i) {
+					naming[fmt::format("r-{}-{}", gadget_name, i)] = {canonicals.size()};
+					canonicals.push_back(std::move(morphs[i].first));
+					if (morphs[i].second) {
+						naming[fmt::format("s-{}-{}", gadget_name, i)] = {canonicals.size()};
+						canonicals.push_back(std::move(*morphs[i].second));
+					}
+				}
+			else
+				throw std::logic_error("empty morphs somehow?");
+			vector<std::size_t> whole_group_indices(canonicals.size() - group_start);
+			std::iota(whole_group_indices.begin(), whole_group_indices.end(), group_start);
+			naming[gadget_name] = std::move(whole_group_indices);
+		}
+
+		YAML::Node aliases = toplevel["aliases"];
+		for (auto it = aliases.begin(); it != aliases.end(); ++it) {
+			std::string source = it->first.as<std::string>(), target = it->second.as<std::string>();
+			if (naming.count(source)) {
+				fmt::print(stderr, "alias {} (intended for {}) in {} already names a gadget", source, target, filename);
+				return 1;
+			}
+			if (!naming.count(target)) {
+				//An alias can reference another alias, but only if the referent
+				//is defined first.
+				fmt::print(stderr, "alias target {} (from {}) in {} doesn't name a gadget", target, source, filename);
+				return 1;
+			}
+			naming[source] = naming[target];
+		}
+	}
+
+
+	return 0;
+}
 
 
 Finisher<ConnectProvenance> do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
@@ -294,74 +393,121 @@ std::string build_insert_mirror_completion_query(std::size_t rows) {
 	return build_insert_completion_query(rows, "completed_mirrors");
 }
 
-//This is basically a workaround for NetBeans' choking on structured bindings.
-//If I ever stop using it, this can just be a pair.
 struct SelsertGadgetByDataResult {
+	//TODO: novel_global_ids will always be an interval, so should just be a pair
+	//TODO: local_to_global could be a dynarray to allow allocating without initializing it
 	vector<std::uint64_t> local_to_global, novel_global_ids;
+	std::size_t early_pruned, late_pruned, novel_size;
 };
 /**
  * Returns the global gadget id of each of the given rows, inserting the row if
  * not already present.  The vector of ids matches the order of the rows.
  */
-SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans, vector<vector<std::byte>>&& rows) {
-	//We want multiple runners to select and insert gadgets in a consistent
-	//order to reduce serialization failures, but we also need local_to_global
-	//in the same order.  So we sort an array of indices, then use that order.
-	vector<unsigned int> indices(rows.size());
+SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, vector<vector<std::byte>>&& gadgets) {
+	SelsertGadgetByDataResult ret;
+	ret.local_to_global.resize(gadgets.size(), std::numeric_limits<std::uint64_t>::max());
+	ret.early_pruned = ret.late_pruned = ret.novel_size = 0;
+
+	vector<std::uint64_t> hashes(gadgets.size(), std::numeric_limits<std::uint64_t>::max());
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		for (std::size_t i = 0; i < gadgets.size(); ++i) {
+			std::string_view data(reinterpret_cast<const char*>(gadgets[i].data()), gadgets[i].size());
+			hashes[i] = farmhash::Fingerprint64(data.data(), data.size());
+			std::string_view existing;
+			while (gadget_hashtable.get(txn, lmdb::to_sv(hashes[i]), existing))
+				if (data == existing.substr(0, existing.size()-8)) { //skip the appended ID (remove_suffix is a mutator)
+					gadgets[i].clear(); //don't bother with shrink-to-fit as we won't touch that memory again anyway
+					hashes[i] = std::numeric_limits<std::uint64_t>::max();
+					ret.local_to_global[i] = lmdb::from_sv<std::uint64_t>(existing.substr(existing.size()-8));
+					++ret.early_pruned;
+					break;
+				} else
+					++hashes[i]; //linear probing
+			//hashes[i] now contains the proposed insert point for absent gadgets
+			//and max() for present ones (so they'll be sorted to the end).  It's
+			//fine if some gadget actually hashes to max(), we'll still check it
+			//later, and those may not be the final insert positions anyway.
+		}
+		txn.commit();
+	}
+
+	//Inserting in sorted order is faster (though as this is a hash table, we'll
+	//probably end up rewriting the whole tree anyway).  But we also need to
+	//fill in local_to_global, so we need to remember the initial order.
+	vector<unsigned int> indices(gadgets.size());
 	std::iota(indices.begin(), indices.end(), 0u);
-	std::sort(indices.begin(), indices.end(), [&rows](unsigned int a, unsigned int b) {
-		return rows[a] < rows[b];
+	std::sort(indices.begin(), indices.end(), [&hashes, &gadgets](unsigned int a, unsigned int b) {
+		if (hashes[a] != hashes[b])
+			return hashes[a] < hashes[b];
+		//We want to sort all the empty gadgets (which were present) to the end
+		//so we don't have to check them during the write transaction.  Those
+		//gadgets' hashes were set to max(), but some gadget might have hashed
+		//to max(), and we need to check the absent one before exiting.  Thus we
+		//sort by reverse-length.  It's probably cheaper to always do this for
+		//equal hashes than to test for max() specifically.
+		return gadgets[a].size() > gadgets[b].size();
 	});
 
-	//This duplicates some logic from batch_parameterized.  This function is
-	//hard to fit into that format because we're using the indices array and
-	//because there are effectively two different implementations for
-	//database_invoke_apply for OutputRow (one for select, another for insert).
-	vector<std::uint64_t> local_to_global(rows.size(), std::numeric_limits<std::uint64_t>::max());
-//	std::size_t pending_insert_count = 0;
-//	std::size_t batch_base = 0;
-//	while (batch_base < indices.size()) {
-//		std::size_t batch_size = std::min<std::size_t>(65535/2, indices.size() - batch_base);
-//		pqxx::internal::parameterized_invocation inv = trans.parameterized(build_select_gadget_data_to_id(batch_size));
-//		for (std::size_t offset = 0; offset < batch_size; ++offset) {
-//			unsigned int i = indices[batch_base + offset];
-//			inv(i)(pqxx::binarystring(rows[i].edges.data(), rows[i].edges.size()));
-//		}
-//		pqxx::result already_have = inv.exec();
-//		for (const pqxx::row& r : already_have)
-//			local_to_global[r[0].as<std::size_t>()] = r[1].as<std::uint64_t>();
-//		pending_insert_count += batch_size - already_have.size();
-//		batch_base += batch_size;
-//	}
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr);
+		{
+			//We need an extra scope to ensure the cursor is destroyed before the
+			//transaction commits or aborts.
+			lmdb::cursor index_cur = lmdb::cursor::open(txn, gadget_index);
+			std::string_view last_id_view;
+			std::uint64_t last_id;
+			if (index_cur.get(last_id_view, MDB_LAST))
+				last_id = lmdb::from_sv<std::uint64_t>(last_id_view);
+			else
+				last_id = 0; //empty index; starting at 0 means first key will be 1
 
-	vector<std::uint64_t> novel_global_ids;
-//	novel_global_ids.reserve(pending_insert_count);
-//	batch_base = 0;
-//	std::size_t index = 0;
-//	while (batch_base < pending_insert_count) {
-//		std::size_t batch_size = std::min<std::size_t>(65535/7, pending_insert_count - batch_base);
-//		pqxx::internal::parameterized_invocation inv = trans.parameterized(
-//				build_insert_gadgets_query(batch_size));
-//		for (std::size_t batch_offset = 0; batch_offset < batch_size; ++index /* not batch_offset */) {
-//			unsigned int i = indices[index];
-//			if (local_to_global[i] == std::numeric_limits<std::uint64_t>::max()) {
-//				const OutputRow& r = rows[i];
-//				inv(i)(r.states)(r.locations)(r.uedges)(r.dedges)(r.sccs)(pqxx::binarystring(r.edges.data(), r.edges.size()));
-//				++batch_offset; //made progress on this batch
-//			}
-//		}
-//		pqxx::result inserted = inv.exec();
-//		for (const pqxx::row& r : inserted) {
-//			std::uint64_t gid = r[1].as<std::uint64_t>();
-//			local_to_global[r[0].as<std::size_t>()] = gid;
-//			novel_global_ids.push_back(gid);
-//		}
-//		batch_base += batch_size;
-//	}
-//	//Should have filled in everything now.
-//	assert(std::find(local_to_global.begin(), local_to_global.end(),
-//			std::numeric_limits<std::uint64_t>::max()) == local_to_global.end());
-	return {std::move(local_to_global), std::move(novel_global_ids)};
+			//We'll try to insert at the proposed insert point, but some other
+			//transaction may have written there as well (or ourselves if we have
+			//duplicates), so we may still need to linear-probe here.
+			for (unsigned int i : indices) {
+				if (gadgets[i].empty()) {
+					//Per the sort above, all remaining gadgets are empty, so we are done.
+					assert(std::all_of(gadgets.begin()+i, gadgets.end(), std::mem_fn(&vector<std::byte>::empty)));
+					break;
+				}
+
+				std::string_view data(reinterpret_cast<const char*>(gadgets[i].data()), gadgets[i].size());
+				//Constructing a string_view to nullptr is technically undefined
+				//behavior.  We have to const_cast it later again anyway, so
+				//string_view is just the wrong abstraction for MDB_RESERVE.
+				std::string_view existing(nullptr, gadgets[i].size()+8);
+				while (!gadget_hashtable.put(txn, lmdb::to_sv(hashes[i]), existing, MDB_NOOVERWRITE | MDB_RESERVE))
+					if (data == existing.substr(0, existing.size()-8)) { //did someone insert in the meantime?
+						ret.local_to_global[i] = lmdb::from_sv<std::uint64_t>(existing.substr(existing.size()-8));
+						++ret.late_pruned;
+						goto labeled_continue;
+					} else
+						++hashes[i]; //linear probing
+				//We successfully inserted.  Copy into the reserved space.
+				std::memcpy(const_cast<char*>(existing.begin()), gadgets[i].data(), gadgets[i].size());
+				++last_id;
+				std::memcpy(const_cast<char*>(existing.begin()) + gadgets[i].size(), &last_id, sizeof(last_id));
+				if (!index_cur.put(lmdb::to_sv(last_id), lmdb::to_sv(hashes[i]), MDB_APPEND))
+					throw std::runtime_error(fmt::format("failed to append to index: index {} key {} hash {}",
+							i, last_id, hashes[i]));
+				ret.local_to_global[i] = last_id;
+				ret.novel_global_ids.push_back(last_id);
+				++ret.novel_size;
+
+				labeled_continue: ;
+			}
+		}
+		txn.commit();
+	}
+	//Should have filled in everything now.
+	assert(std::find(ret.local_to_global.begin(), ret.local_to_global.end(),
+			std::numeric_limits<std::uint64_t>::max()) == ret.local_to_global.end());
+	return ret;
+}
+SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans, vector<vector<std::byte>>&& rows) {
+	return {};
 }
 //as above, but executes as its own transaction
 SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, vector<vector<std::byte>>&& rows) {
@@ -737,30 +883,58 @@ void write_output(const void* data, size_t size) {
 	std::fflush(stdout);
 }
 
-int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -llmdb -lyaml-cpp'}
-	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
-			db_port = "5432", db_name = "togglesearch";
-	for (int i = 1; i < argc; ++i) {
-		if (argv[i] == "--db-user"sv)
-			db_user = argv[++i];
-		else if (argv[i] == "--db-pass"sv)
-			db_pass = argv[++i];
-		else if (argv[i] == "--db-host"sv)
-			db_host = argv[++i];
-		else if (argv[i] == "--db-port"sv)
-			db_port = argv[++i];
-		else if (argv[i] == "--db-name"sv)
-			db_name = argv[++i];
-		else {
-			fmt::print(stderr, "ERROR: unknown option {}\n", argv[i]);
-			std::exit(2);
+int msgpack_mode(std::string_view db_path, std::string_view input_file, std::string_view output_file) {
+	if (input_file != "-"sv) {
+		if (!std::freopen(std::string(input_file).c_str(), "rb", stdin)) {
+			auto savederrno = errno;
+			fmt::print(stderr, "unable to reopen stdin from {}: {} ({})\n", input_file, strerror(savederrno), errno);
+			std::exit(1);
+		}
+	}
+	if (output_file != "-"sv) {
+		if (!std::freopen(std::string(output_file).c_str(), "wbx", stdout)) {
+			auto savederrno = errno;
+			fmt::print(stderr, "unable to reopen stdout from {}: {} ({})\n", output_file, strerror(savederrno), errno);
+			std::exit(1);
 		}
 	}
 
-	g_database_connect_string = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
-
 	simple_buffer response = dispatch(read_input(), std::begin(handlers), std::end(handlers));
 	write_output(response.data(), response.size());
+	return 0;
+}
 
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -llmdb -lyaml-cpp'}
+	std::string_view mode = "unknown-mode";
+	std::string_view db_path = "/bad-db-path-arg", input_file = "-", output_file = "-";
+	vector<std::string_view> positionals;
+	for (int i = 1; i < argc; ++i) {
+		if (i == 1)
+			mode = argv[i];
+		else if (argv[i] == "--db-path"sv)
+			db_path = argv[++i];
+		else if (argv[i] == "--input-file"sv || argv[i] == "--input"sv || argv[i] == "-i"sv)
+			input_file = argv[++i];
+		else if (argv[i] == "--output-file"sv || argv[i] == "--output"sv || argv[i] == "-o"sv)
+			output_file = argv[++i];
+		else if (argv[i][0] == '-') {
+			fmt::print(stderr, "ERROR: unknown option {}\n", argv[i]);
+			std::exit(2);
+		} else
+			positionals.push_back(argv[i]);
+	}
+
+	if (mode == "sync"sv) {
+		return sync_mode(db_path, positionals);
+	} else if (mode == "msgpack"sv) {
+		if (!positionals.empty()) {
+			fmt::print(stderr, "ERROR: msgpack mode takes no positional arguments, but some passed: {}\n", positionals);
+			std::exit(2);
+		}
+		return msgpack_mode(db_path, input_file, output_file);
+	} else {
+		fmt::print(stderr, "ERROR: unknown mode {}\n", mode);
+		std::exit(2);
+	}
 	return 0;
 }
