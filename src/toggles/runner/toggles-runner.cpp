@@ -9,6 +9,7 @@
 #include "hopscotch/hopscotch_set.h"
 #include "hopscotch/hopscotch_map.h"
 #include "tsl/ordered_set.h"
+#include "tsl/ordered_map.h"
 #include "msgpack.hpp"
 #include "farmhash/farmhash.h"
 #include "lmdb++.h"
@@ -31,165 +32,6 @@ using namespace std::literals::string_view_literals;
 //forward declaration:
 void write_output(const void* data, size_t size);
 
-////TODO: make this SCCs::find
-unsigned int component_for_state(SCCs sccs, AutomatonBase::state_type state) {
-	for (unsigned int c : xrange(sccs.size()))
-		for (unsigned int s : make_range_for_pair(sccs.begin(c), sccs.end(c))) //TODO: add SCCs::range (name TBD)
-			if (s == state)
-				return c;
-	//TODO: add an SCCs method giving the number of states, so we can report here
-	throw std::logic_error(fmt::format("component_for_state failed: {} {}", state, sccs.size()));
-}
-
-/**
- * Canonicalizes a gadget in SLLS format, returning in database row format.
- * Intended for use when loading human-readable gadget definitions into the
- * database.
- */
-vector<pair<vector<std::byte>, optional<vector<std::byte>>>> canonicalize_from_slls(
-		vector<encoding::GadgetEdge> uedges, vector<encoding::GadgetEdge> dedges) {
-	unique_ptr<WorkingAutomaton> a = encoding::inflate_slls(uedges, dedges);
-	vector<std::byte> row = encoding::encode(*a);
-	//just computed these in encoding::encode, could try to save them
-	SCCs sccs = automaton::find_components(*a);
-	auto activealpha = a->active_alphabet_size();
-
-	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> normals;
-	normals.emplace_back(std::move(a), std::move(row));
-	//When initializing the database with named gadgets, we want to try all
-	//initial states in the initial connected component.
-	unsigned int initial_component = component_for_state(sccs, 0);
-	for (auto state : make_range_for_pair(sccs.begin(initial_component), sccs.end(initial_component))) //TODO: SCCs::range
-		if (normals.front().first->accept(state)) {
-			unique_ptr<WorkingAutomaton> p = normals.front().first->clone();
-			p->swapStateNumbers(0, state);
-			canonicalize(*p, activealpha, false); //no mirroring
-			row = encoding::encode(*p);
-			normals.emplace_back(std::move(p), std::move(row));
-		}
-	std::sort(normals.begin(), normals.end(), [](const auto& l, const auto& r) {return l.second < r.second;});
-	normals.erase(std::unique(normals.begin(), normals.end(),
-			[](const auto& l, const auto& r) {return l.second == r.second;}), normals.end());
-
-	//It's plausible that only a subset of the states are chiral.
-	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> mirrors;
-	for (const auto& n : normals) {
-		//We don't return the rotation, but we won't add a mirror provenance edge
-		//either, so the usual mirror machinery will fill it in later.  We just
-		//need the gadget up front so we can give it an appropriate name.
-		unique_ptr<WorkingAutomaton> p = mirror(*n.first).first;
-		row = encoding::encode(*p);
-		mirrors.emplace_back(std::move(p), std::move(row));
-	}
-
-	//Mirror order is the same as the normal order (mirrors aren't sorted).
-	//We're also just taking the first enantiomorph as 'normal', rather than
-	//the lexicographically lesser one.
-	vector<pair<vector<std::byte>, optional<vector<std::byte>>>> retval;
-	for (auto i : xrange(normals.size()))
-		if (normals[i].second != mirrors[i].second)
-			retval.emplace_back(std::move(normals[i].second), std::move(mirrors[i].second));
-		else
-			retval.emplace_back(std::move(normals[i].second), nullopt);
-	return retval;
-}
-
-namespace YAML {
-template<>
-struct convert<encoding::GadgetEdge> {
-	static Node encode(const encoding::GadgetEdge& e) {
-		Node node;
-		node.push_back(e.start);
-		node.push_back(e.from);
-		node.push_back(e.to);
-		node.push_back(e.end);
-		return node;
-	}
-	static bool decode(const Node& node, encoding::GadgetEdge& e) {
-		if (!node.IsSequence() || node.size() != 4)
-			return false;
-		e.start = node[0].as<unsigned int>();
-		e.from = node[0].as<unsigned int>();
-		e.to = node[0].as<unsigned int>();
-		e.end = node[0].as<unsigned int>();
-		return true;
-	}
-};
-}
-
-int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
-	vector<vector<std::byte>> canonicals;
-	tsl::hopscotch_map<std::string, vector<std::size_t>> naming;
-	for (std::string_view filename : files) {
-		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
-		YAML::Node gadgets = toplevel["gadgets"];
-		for (auto it = gadgets.begin(); it != gadgets.end(); ++it) {
-			std::string gadget_name = it->first.as<std::string>();
-			vector<encoding::GadgetEdge> uedges, dedges;
-			if (it->second["uedges"])
-				uedges = it->second["uedges"].as<vector<encoding::GadgetEdge>>();
-			if (it->second["dedges"])
-				dedges = it->second["dedges"].as<vector<encoding::GadgetEdge>>();
-			if (uedges.empty() && dedges.empty()) {
-				fmt::print(stderr, "no edges for gadget {} in {}\n", gadget_name, filename);
-				return 1;
-			}
-
-			vector<pair<vector<std::byte>, optional<vector<std::byte>>>> morphs =
-					canonicalize_from_slls(std::move(uedges), std::move(dedges));
-			//We are chiral if any state has enantiomorphs.
-			bool chiral = std::any_of(morphs.begin(), morphs.end(), [](const auto& q){return q.second.has_value();});
-			std::size_t group_start = canonicals.size();
-			if (morphs.size() == 1 && !chiral) {
-				canonicals.push_back(std::move(morphs[0].first));
-				//singleton group -- we'll install the usual group name later
-			} else if (morphs.size() == 1 && chiral) {
-				auto& p = morphs[0];
-				naming["r-"+gadget_name] = {canonicals.size()};
-				canonicals.push_back(std::move(p.first));
-				naming["s-"+gadget_name] = {canonicals.size()};
-				canonicals.push_back(std::move(*p.second));
-			} else if (morphs.size() > 1 && !chiral)
-				for (std::size_t i = 0; i < morphs.size(); ++i) {
-					naming[fmt::format("{}-{}", gadget_name, i)] = {canonicals.size()};
-					canonicals.push_back(std::move(morphs[i].first));
-				}
-			else if (morphs.size() > 1 && chiral)
-				for (std::size_t i = 0; i < morphs.size(); ++i) {
-					naming[fmt::format("r-{}-{}", gadget_name, i)] = {canonicals.size()};
-					canonicals.push_back(std::move(morphs[i].first));
-					if (morphs[i].second) {
-						naming[fmt::format("s-{}-{}", gadget_name, i)] = {canonicals.size()};
-						canonicals.push_back(std::move(*morphs[i].second));
-					}
-				}
-			else
-				throw std::logic_error("empty morphs somehow?");
-			vector<std::size_t> whole_group_indices(canonicals.size() - group_start);
-			std::iota(whole_group_indices.begin(), whole_group_indices.end(), group_start);
-			naming[gadget_name] = std::move(whole_group_indices);
-		}
-
-		YAML::Node aliases = toplevel["aliases"];
-		for (auto it = aliases.begin(); it != aliases.end(); ++it) {
-			std::string source = it->first.as<std::string>(), target = it->second.as<std::string>();
-			if (naming.count(source)) {
-				fmt::print(stderr, "alias {} (intended for {}) in {} already names a gadget", source, target, filename);
-				return 1;
-			}
-			if (!naming.count(target)) {
-				//An alias can reference another alias, but only if the referent
-				//is defined first.
-				fmt::print(stderr, "alias target {} (from {}) in {} doesn't name a gadget", target, source, filename);
-				return 1;
-			}
-			naming[source] = naming[target];
-		}
-	}
-
-
-	return 0;
-}
 
 
 Finisher<ConnectProvenance> do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
@@ -483,13 +325,15 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 						ret.local_to_global[i] = lmdb::from_sv<std::uint64_t>(existing.substr(existing.size()-8));
 						++ret.late_pruned;
 						goto labeled_continue;
-					} else
+					} else {
 						++hashes[i]; //linear probing
+						existing = std::string_view(nullptr, gadgets[i].size()+8);
+					}
 				//We successfully inserted.  Copy into the reserved space.
 				std::memcpy(const_cast<char*>(existing.begin()), gadgets[i].data(), gadgets[i].size());
 				++last_id;
 				std::memcpy(const_cast<char*>(existing.begin()) + gadgets[i].size(), &last_id, sizeof(last_id));
-				if (!index_cur.put(lmdb::to_sv(last_id), lmdb::to_sv(hashes[i]), MDB_APPEND))
+				if (!index_cur.put(lmdb::to_sv(last_id), lmdb::to_sv(hashes[i]), MDB_NOOVERWRITE | MDB_APPEND))
 					throw std::runtime_error(fmt::format("failed to append to index: index {} key {} hash {}",
 							i, last_id, hashes[i]));
 				ret.local_to_global[i] = last_id;
@@ -903,6 +747,213 @@ int msgpack_mode(std::string_view db_path, std::string_view input_file, std::str
 	write_output(response.data(), response.size());
 	return 0;
 }
+
+
+
+////TODO: make this SCCs::find
+unsigned int component_for_state(SCCs sccs, AutomatonBase::state_type state) {
+	for (unsigned int c : xrange(sccs.size()))
+		for (unsigned int s : make_range_for_pair(sccs.begin(c), sccs.end(c))) //TODO: add SCCs::range (name TBD)
+			if (s == state)
+				return c;
+	//TODO: add an SCCs method giving the number of states, so we can report here
+	throw std::logic_error(fmt::format("component_for_state failed: {} {}", state, sccs.size()));
+}
+
+/**
+ * Canonicalizes a gadget in SLLS format, returning in database row format.
+ * Intended for use when loading human-readable gadget definitions into the
+ * database.
+ */
+vector<pair<vector<std::byte>, optional<vector<std::byte>>>> canonicalize_from_slls(
+		vector<encoding::GadgetEdge> uedges, vector<encoding::GadgetEdge> dedges) {
+	unique_ptr<WorkingAutomaton> a = encoding::inflate_slls(uedges, dedges);
+	vector<std::byte> row = encoding::encode(*a);
+	//just computed these in encoding::encode, could try to save them
+	SCCs sccs = automaton::find_components(*a);
+	auto activealpha = a->active_alphabet_size();
+
+	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> normals;
+	normals.emplace_back(std::move(a), std::move(row));
+	//When initializing the database with named gadgets, we want to try all
+	//initial states in the initial connected component.
+	unsigned int initial_component = component_for_state(sccs, 0);
+	for (auto state : make_range_for_pair(sccs.begin(initial_component), sccs.end(initial_component))) //TODO: SCCs::range
+		if (normals.front().first->accept(state)) {
+			unique_ptr<WorkingAutomaton> p = normals.front().first->clone();
+			p->swapStateNumbers(0, state);
+			canonicalize(*p, activealpha, false); //no mirroring
+			row = encoding::encode(*p);
+			normals.emplace_back(std::move(p), std::move(row));
+		}
+	std::sort(normals.begin(), normals.end(), [](const auto& l, const auto& r) {return l.second < r.second;});
+	normals.erase(std::unique(normals.begin(), normals.end(),
+			[](const auto& l, const auto& r) {return l.second == r.second;}), normals.end());
+
+	//It's plausible that only a subset of the states are chiral.
+	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> mirrors;
+	for (const auto& n : normals) {
+		//We don't return the rotation, but we won't add a mirror provenance edge
+		//either, so the usual mirror machinery will fill it in later.  We just
+		//need the gadget up front so we can give it an appropriate name.
+		unique_ptr<WorkingAutomaton> p = mirror(*n.first).first;
+		row = encoding::encode(*p);
+		mirrors.emplace_back(std::move(p), std::move(row));
+	}
+
+	//Mirror order is the same as the normal order (mirrors aren't sorted).
+	//We're also just taking the first enantiomorph as 'normal', rather than
+	//the lexicographically lesser one.
+	vector<pair<vector<std::byte>, optional<vector<std::byte>>>> retval;
+	for (auto i : xrange(normals.size()))
+		if (normals[i].second != mirrors[i].second)
+			retval.emplace_back(std::move(normals[i].second), std::move(mirrors[i].second));
+		else
+			retval.emplace_back(std::move(normals[i].second), nullopt);
+	return retval;
+}
+
+namespace YAML {
+template<>
+struct convert<encoding::GadgetEdge> {
+	static Node encode(const encoding::GadgetEdge& e) {
+		Node node;
+		node.push_back(e.start);
+		node.push_back(e.from);
+		node.push_back(e.to);
+		node.push_back(e.end);
+		return node;
+	}
+	static bool decode(const Node& node, encoding::GadgetEdge& e) {
+		if (!node.IsSequence() || node.size() != 4)
+			return false;
+		e.start = node[0].as<unsigned int>();
+		e.from = node[1].as<unsigned int>();
+		e.to = node[2].as<unsigned int>();
+		e.end = node[3].as<unsigned int>();
+		return true;
+	}
+};
+}
+
+int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
+	vector<vector<std::byte>> canonicals;
+	tsl::ordered_map<std::string, vector<std::size_t>> naming;
+	for (std::string_view filename : files) {
+		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
+		YAML::Node gadgets = toplevel["gadgets"];
+		for (auto it = gadgets.begin(); it != gadgets.end(); ++it) {
+			std::string gadget_name = it->first.as<std::string>();
+			vector<encoding::GadgetEdge> uedges, dedges;
+			if (it->second["uedges"])
+				uedges = it->second["uedges"].as<vector<encoding::GadgetEdge>>();
+			if (it->second["dedges"])
+				dedges = it->second["dedges"].as<vector<encoding::GadgetEdge>>();
+			if (uedges.empty() && dedges.empty()) {
+				fmt::print(stderr, "no edges for gadget {} in {}\n", gadget_name, filename);
+				return 1;
+			}
+
+			vector<pair<vector<std::byte>, optional<vector<std::byte>>>> morphs =
+					canonicalize_from_slls(std::move(uedges), std::move(dedges));
+			//We are chiral if any state has enantiomorphs.
+			bool chiral = std::any_of(morphs.begin(), morphs.end(), [](const auto& q){return q.second.has_value();});
+			std::size_t group_start = canonicals.size();
+			if (morphs.size() == 1 && !chiral) {
+				canonicals.push_back(std::move(morphs[0].first));
+				//singleton group -- we'll install the usual group name later
+			} else if (morphs.size() == 1 && chiral) {
+				auto& p = morphs[0];
+				naming["r-"+gadget_name] = {canonicals.size()};
+				canonicals.push_back(std::move(p.first));
+				naming["s-"+gadget_name] = {canonicals.size()};
+				canonicals.push_back(std::move(*p.second));
+			} else if (morphs.size() > 1 && !chiral)
+				for (std::size_t i = 0; i < morphs.size(); ++i) {
+					naming[fmt::format("{}-{}", gadget_name, i)] = {canonicals.size()};
+					canonicals.push_back(std::move(morphs[i].first));
+				}
+			else if (morphs.size() > 1 && chiral)
+				for (std::size_t i = 0; i < morphs.size(); ++i) {
+					naming[fmt::format("r-{}-{}", gadget_name, i)] = {canonicals.size()};
+					canonicals.push_back(std::move(morphs[i].first));
+					if (morphs[i].second) {
+						naming[fmt::format("s-{}-{}", gadget_name, i)] = {canonicals.size()};
+						canonicals.push_back(std::move(*morphs[i].second));
+					}
+				}
+			else
+				throw std::logic_error("empty morphs somehow?");
+			vector<std::size_t> whole_group_indices(canonicals.size() - group_start);
+			std::iota(whole_group_indices.begin(), whole_group_indices.end(), group_start);
+			naming[gadget_name] = std::move(whole_group_indices);
+		}
+
+		YAML::Node aliases = toplevel["aliases"];
+		for (auto it = aliases.begin(); it != aliases.end(); ++it) {
+			std::string source = it->first.as<std::string>(), target = it->second.as<std::string>();
+			if (naming.count(source)) {
+				fmt::print(stderr, "alias {} (intended for {}) in {} already names a gadget", source, target, filename);
+				return 1;
+			}
+			if (!naming.count(target)) {
+				//An alias can reference another alias, but only if the referent
+				//is defined first.
+				fmt::print(stderr, "alias target {} (from {}) in {} doesn't name a gadget", target, source, filename);
+				return 1;
+			}
+			naming[source] = naming[target];
+		}
+	}
+
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(std::string(db_path).c_str()); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index, names_db;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable", MDB_CREATE | MDB_INTEGERKEY);
+		//TODO: can we pass MDB_INTEGERDUP without MDB_DUPSORT/FIXED?  We won't
+		//have duplicates, but all our keys are binary integers.
+		gadget_index = lmdb::dbi::open(txn, "gadget_index", MDB_CREATE | MDB_INTEGERKEY);
+		//We could use duplicate integer keys here, but because we aren't adding
+		//or removing any keys, it's more convenient for our code to just store
+		//byte arrays.  There are few enough names that compression isn't useful.
+		names_db = lmdb::dbi::open(txn, "names", MDB_CREATE);
+		txn.commit();
+	}
+
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(canonicals));
+	//Punning a bit on this vector: in the map, it's indices into canonicals,
+	//but we're about to remap it to gadget ids.
+	std::deque<pair<std::string, std::vector<uint64_t>>> sorted_names = std::move(naming).values_container();
+	for (auto& p : sorted_names)
+		for (std::size_t i = 0; i < p.second.size(); ++i)
+			p.second[i] = selsert_result.local_to_global[p.second[i]];
+	//TODO: this compare-tupleish-by-nth-element also appears in the driver,
+	//and is probably worth elevating to a named utility function/lambda.
+	std::sort(sorted_names.begin(), sorted_names.end(), [](const auto& a, const auto& b) {
+		return std::get<0>(a) < std::get<0>(b);
+	});
+
+	{
+		lmdb::txn txn = lmdb::txn::begin(env);
+		names_db.drop(txn);
+		for (const pair<std::string, vector<std::uint64_t>>& p : sorted_names)
+			if (!names_db.put(txn, p.first,
+					std::string_view(reinterpret_cast<const char*>(p.second.data()), p.second.size()*sizeof(std::uint64_t)),
+					MDB_APPEND | MDB_NOOVERWRITE))
+				throw std::runtime_error(fmt::format("failed to insert names {} -> {}", p.first, p.second));
+		txn.commit();
+	}
+
+	//TODO: close/mirroring
+
+	return 0;
+}
+
+
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -llmdb -lyaml-cpp'}
 	std::string_view mode = "unknown-mode";
