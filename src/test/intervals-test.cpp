@@ -141,6 +141,60 @@ TEST_CASE("IntervalsTest_IntervalIntersection06") {
 	CHECK_UNARY(std::equal(actual2.begin(), actual2.end(), expected.begin(), expected.end()));
 }
 
+
+
+TEST_CASE("IntervalsTest_IntervalUnion00") {
+	initializer_list<pair<int, int>> left = {};
+	initializer_list<pair<int, int>> right = {};
+	initializer_list<pair<int, int>> expected = {};
+	auto actual = interval_union(left.begin(), left.end(), right.begin(), right.end());
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+	auto actual2 = interval_union(right.begin(), right.end(), left.begin(), left.end());
+	CHECK_UNARY(std::equal(actual2.begin(), actual2.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("IntervalsTest_IntervalUnion01") {
+	initializer_list<pair<int, int>> left = {{1, 10}};
+	initializer_list<pair<int, int>> right = {};
+	initializer_list<pair<int, int>> expected = {{1, 10}};
+	auto actual = interval_union(left.begin(), left.end(), right.begin(), right.end());
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+	auto actual2 = interval_union(right.begin(), right.end(), left.begin(), left.end());
+	CHECK_UNARY(std::equal(actual2.begin(), actual2.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("IntervalsTest_IntervalUnion02") {
+	initializer_list<pair<int, int>> left = {{1, 10}};
+	initializer_list<pair<int, int>> right = {{1, 10}};
+	initializer_list<pair<int, int>> expected = {{1, 10}};
+	auto actual = interval_union(left.begin(), left.end(), right.begin(), right.end());
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+	auto actual2 = interval_union(right.begin(), right.end(), left.begin(), left.end());
+	CHECK_UNARY(std::equal(actual2.begin(), actual2.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("IntervalsTest_IntervalUnion03") {
+	initializer_list<pair<int, int>> left = {{1, 10}};
+	initializer_list<pair<int, int>> right = {{3, 7}};
+	initializer_list<pair<int, int>> expected = {{1, 10}};
+	auto actual = interval_union(left.begin(), left.end(), right.begin(), right.end());
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+	auto actual2 = interval_union(right.begin(), right.end(), left.begin(), left.end());
+	CHECK_UNARY(std::equal(actual2.begin(), actual2.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("IntervalsTest_IntervalUnion04") {
+	initializer_list<pair<int, int>> left = {{1, 2}, {3, 4}};
+	initializer_list<pair<int, int>> right = {{2, 3}, {4, 5}};
+	initializer_list<pair<int, int>> expected = {{1, 5}};
+	auto actual = interval_union(left.begin(), left.end(), right.begin(), right.end());
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+	auto actual2 = interval_union(right.begin(), right.end(), left.begin(), left.end());
+	CHECK_UNARY(std::equal(actual2.begin(), actual2.end(), expected.begin(), expected.end()));
+}
+
+
+
 namespace {
 vector<int> indices_of_set_bits(unsigned int x) {
 	vector<int> ret;
@@ -169,6 +223,29 @@ TEST_CASE("IntervalsTest_IntervalIntersectionExhaustion") {
 			auto expectranges = maximal_intervals(expectbits.cbegin(), expectbits.cend());
 
 			auto actual = interval_intersection(leftranges.cbegin(), leftranges.cend(), rightranges.cbegin(), rightranges.cend());
+			//doctest stringization grumble: uncomment this and use --abort-after=1 to see what failed
+//			fmt::print(stderr, "{} / {} / {} / {}\n", leftranges, rightranges, actual, expectranges);
+			CHECK_EQ(actual, expectranges);
+		}
+	}
+}
+
+TEST_CASE("IntervalsTest_IntervalUnionExhaustion") {
+	//Union of intervals is equivalent to union of elements.
+	//This test isn't perfect, because it only tests maximal ranges.  But we
+	//intend to keep our interval sets maximal, so it's a case we care about.
+	constexpr unsigned int limit = 1 << 8;
+	for (unsigned int left = 0; left < limit; ++left) {
+		auto leftbits = indices_of_set_bits(left);
+		auto leftranges = maximal_intervals(leftbits.cbegin(), leftbits.cend());
+		for (unsigned int right = 0; right < limit; ++right) {
+			auto rightbits = indices_of_set_bits(right);
+			auto rightranges = maximal_intervals(rightbits.cbegin(), rightbits.cend());
+
+			auto expectbits = indices_of_set_bits(left | right);
+			auto expectranges = maximal_intervals(expectbits.cbegin(), expectbits.cend());
+
+			auto actual = interval_union(leftranges.cbegin(), leftranges.cend(), rightranges.cbegin(), rightranges.cend());
 			//doctest stringization grumble: uncomment this and use --abort-after=1 to see what failed
 //			fmt::print(stderr, "{} / {} / {} / {}\n", leftranges, rightranges, actual, expectranges);
 			CHECK_EQ(actual, expectranges);

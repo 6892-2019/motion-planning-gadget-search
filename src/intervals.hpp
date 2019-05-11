@@ -74,45 +74,50 @@ std::vector<std::pair<T, T>> interval_intersection(It1 left, It1 left_end, It2 r
 	return ret;
 }
 
-//template<typename T, typename It1>
-//std::vector<std::pair<T, T>> interval_intersection(It1 first1, It1 last1, std::pair<T, T> interval) {
-//	std::array<std::pair<T, T>, 1> right = {std::move(interval)};
-//	return interval_intersection(first1, last1, right.cbegin(), right.cend());
-//}
-//template<typename T, typename It1>
-//std::vector<std::pair<T, T>> interval_intersection(It1 first1, It1 last1, T beginInclusive, T endExclusive) {
-//	return interval_intersection(first1, last1, std::make_pair(std::move(beginInclusive), std::move(endExclusive)));
-//}
+template<typename It1, typename It2,
+		typename T = typename std::common_type<
+				//should be using std::tuple_element here, I guess...
+				typename std::iterator_traits<It1>::value_type::first_type,
+				typename std::iterator_traits<It1>::value_type::second_type,
+				typename std::iterator_traits<It2>::value_type::first_type,
+				typename std::iterator_traits<It2>::value_type::second_type
+		>::type>
+std::vector<std::pair<T, T>> interval_union(It1 left, It1 left_end, It2 right, It2 right_end) {
+	if (left == left_end && right == right_end)
+		return {};
+	if (left == left_end)
+		return {right, right_end};
+	if (right == right_end)
+		return {left, left_end};
 
-//template<typename It1, typename It2,
-//		typename T = typename std::common_type<
-//				//should be using std::tuple_element here, I guess...
-//				typename std::iterator_traits<It1>::value_type::first_type,
-//				typename std::iterator_traits<It1>::value_type::second_type,
-//				typename std::iterator_traits<It2>::value_type::first_type,
-//				typename std::iterator_traits<It2>::value_type::second_type
-//		>::type>
-//std::vector<std::pair<T, T>> interval_union(It1 left, It1 left_end, It2 right, It2 right_end) {
-//	std::vector<std::pair<T, T>> ret;
-//	while (left != left_end && right != right_end) {
-//
-//	}
-//	while (left != left_end)
-//		ret.push_back(*left++);
-//	while (right != right_end)
-//		ret.push_back(*right++);
-//	return ret;
-//}
-
-//template<typename T, typename It1>
-//std::vector<std::pair<T, T>> interval_union(It1 first1, It1 last1, std::pair<T, T> interval) {
-//	std::array<std::pair<T, T>, 1> right = {std::move(interval)};
-//	return interval_union(first1, last1, right.cbegin(), right.cend());
-//}
-//template<typename T, typename It1>
-//std::vector<std::pair<T, T>> interval_union(It1 first1, It1 last1, T beginInclusive, T endExclusive) {
-//	return interval_union(first1, last1, std::make_pair(std::move(beginInclusive), std::move(endExclusive)));
-//}
+	std::vector<std::pair<T, T>> ret;
+	while (left != left_end && right != right_end) {
+		if (ret.empty())
+			ret.push_back(left->first < right-> first ? *left++ : *right++);
+		else if (left->first < right->first)
+			if (left->first <= ret.back().second)
+				ret.back().second = std::max(ret.back().second, left++->second);
+			else
+				ret.push_back(*left++);
+		else
+			if (right->first <= ret.back().second)
+				ret.back().second = std::max(ret.back().second, right++->second);
+			else
+				ret.push_back(*right++);
+	}
+	//We could do slightly better here if we assume the inputs are disjoint and non-adjacent.
+	while (left != left_end)
+		if (left->first <= ret.back().second)
+			ret.back().second = std::max(ret.back().second, left++->second);
+		else
+			ret.push_back(*left++);
+	while (right != right_end)
+		if (right->first <= ret.back().second)
+			ret.back().second = std::max(ret.back().second, right++->second);
+		else
+			ret.push_back(*right++);
+	return ret;
+}
 
 #endif /* INTERVALS_HPP */
 
