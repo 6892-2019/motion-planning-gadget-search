@@ -6,6 +6,7 @@
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
 #include "stringutils.hpp"
+#include "intervals.hpp"
 #include "hopscotch/hopscotch_set.h"
 #include "hopscotch/hopscotch_map.h"
 #include "tsl/ordered_set.h"
@@ -363,23 +364,9 @@ SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, vector<
 	}, 10, "selsert_gadget_by_data");
 }
 
-vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(const vector<std::uint64_t>& data) {
-	assert(std::is_sorted(data.begin(), data.end()));
-	vector<pair<std::uint64_t, std::uint64_t>> ranges;
-	auto first = data.begin(), last = data.begin();
-	//Build maximal ranges, first inclusive and last exclusive.
-	while (true) {
-		if (last+1 == data.end()) {
-			ranges.emplace_back(*first, *last + 1);
-			break;
-		} else if (*(last+1) - *last != 1) {
-			ranges.emplace_back(*first, *last + 1);
-			first = last = last+1;
-		} else
-			++last;
-	}
-	assert(std::is_sorted(ranges.begin(), ranges.end()));
-	return ranges;
+vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(vector<std::uint64_t>&& data) {
+	vector<std::uint64_t> ensure_memory_is_freed(std::move(data));
+	return maximal_intervals(ensure_memory_is_freed.begin(), ensure_memory_is_freed.end());
 }
 
 template<typename T>

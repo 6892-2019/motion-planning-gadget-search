@@ -26,6 +26,7 @@
         <in>bounded_queue-test.cpp</in>
         <in>circular_deque-test.cpp</in>
         <in>expr-test.cpp</in>
+        <in>intervals-test.cpp</in>
         <in>regex-test.cpp</in>
         <in>util-test.cpp</in>
         <in>util.cpp</in>
@@ -62,6 +63,7 @@
       <in>expr.cpp</in>
       <in>hopcroft.cpp</in>
       <in>hopcroft.hpp</in>
+      <in>intervals.hpp</in>
       <in>ioutils.cpp</in>
       <in>maybe_owning_ptr.hpp</in>
       <in>natural_map.hpp</in>
@@ -197,6 +199,8 @@
       </item>
       <item path="src/hopcroft.hpp" ex="false" tool="3" flavor2="0">
       </item>
+      <item path="src/intervals.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/ioutils.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="0">
           <incDir>
@@ -270,6 +274,8 @@
       <item path="src/test/circular_deque-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/expr-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/intervals-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/regex-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
