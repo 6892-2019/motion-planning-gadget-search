@@ -34,7 +34,7 @@ TEST_CASE("AutomatonTest_VarintSize") {
 
 		detail::PackWriter writer(data.begin(), data.end());
 		writer.writeVarint(i);
-		CHECK_EQ(PackWriter::varint_size(i), writer.tell() - data.begin());
+		CHECK_EQ(detail::PackWriter::varint_size(i), writer.tell() - data.begin());
 	}
 }
 
