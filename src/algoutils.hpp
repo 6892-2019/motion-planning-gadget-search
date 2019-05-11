@@ -239,5 +239,20 @@ TIter partition_on_range_exclusion(TIter ids_first, TIter ids_last, PairIter ran
 	return needy_end;
 }
 
-#endif /* ALGOUTILS_HPP */
 
+//based on https://stackoverflow.com/a/335972/3614835, modified to not use the
+//deprecated std::iterator
+struct null_output_iterator {
+	using iterator_category = std::output_iterator_tag;
+	using value_type = void;
+	using difference_type = void;
+	using pointer = void;
+	using reference = void;
+	template<typename T>
+	void operator=(T const&) {}
+    null_output_iterator & operator++() {return *this;}
+	null_output_iterator operator++(int) {return *this;}
+	null_output_iterator & operator*() { return *this; }
+};
+
+#endif /* ALGOUTILS_HPP */
