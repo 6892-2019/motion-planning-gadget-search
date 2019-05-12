@@ -2,11 +2,13 @@
 #include "toggles-shared.hpp"
 #include "stringutils.hpp"
 #include "tsl/ordered_set.h"
+#include "intervals.hpp"
 #include <regex>
 
 using std::vector;
 using std::pair;
 using std::uint64_t;
+using namespace std::literals::string_view_literals;
 
 GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs) {
 	std::regex is_integer(R"((\d+))"), is_range(R"((\(|\[)(\d+), ?(\d+)(\)|\]))");
@@ -185,4 +187,69 @@ std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_t
 		}
 	}
 	return select_gadget_id_to_data0(env, txn, gadget_hashtable, id_to_hash);
+}
+
+namespace {
+std::array<std::string_view, 3> completions_key_whitelist = {
+	"connect"sv,
+	"close"sv,
+	"mirror"sv,
+};
+std::array<std::string_view, 1> completions_key_prefix_whitelist = {
+	"combine-"sv,
+};
+void check_completions_key(std::string_view key) {
+	for (std::string_view x : completions_key_whitelist)
+		if (key == x)
+			return;
+	for (std::string_view x : completions_key_prefix_whitelist)
+		if (key.size() >= x.size() && key.compare(0, x.size(), x) == 0)
+			return;
+	throw std::logic_error(fmt::format("bad completions key: {}", key));
+}
+
+pair<const pair<uint64_t, uint64_t>*, const pair<uint64_t, uint64_t>*>
+get_completions_key(lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind) {
+	check_completions_key(kind);
+	std::string_view value;
+	if (!completions.get(txn, kind, value))
+		//We checked the key validity above, so we must have no completions yet.
+		//It's a bit silly to copy here, but this probably isn't the common case.
+		return {nullptr, nullptr};
+	//TODO: this kind of logic is pretty common, but with different types/throw info;
+	//maybe there's a helper that returns a range or throws via a lambda?
+	if (value.size() % sizeof(pair<uint64_t, uint64_t>) != 0)
+		throw std::logic_error(fmt::format("completions key {} has value length {} (not a multiple of {})",
+				kind, value.size(), sizeof(pair<uint64_t, uint64_t>)));
+	const pair<uint64_t, uint64_t>* first = reinterpret_cast<const pair<uint64_t, uint64_t>*>(value.data());
+	const pair<uint64_t, uint64_t>* last = first + value.size() / sizeof(pair<uint64_t, uint64_t>);
+}
+}
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
+		lmdb::env& env, lmdb::dbi& completions, std::string_view kind,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto comp_range = get_completions_key(env, txn, completions, kind);
+	if (!comp_range.first)
+		return intervals;
+	auto ret = interval_difference(intervals.begin(), intervals.end(), p.first, p.last);
+	txn.commit();
+	return ret;
+}
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
+		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
+	auto comp_range = get_completions_key(env, txn, completions, kind);
+	auto result = comp_range.first ?
+		interval_union(comp_range.first, comp_range.second, intervals.begin(), intervals.end()) :
+		intervals; //if key not present, our intervals are the first
+	std::string_view value(reinterpret_cast<const char*>(intervals.data()),
+			intervals.size() * sizeof(pair<uint64_t, uint64_t>));
+	if (!completions.put(txn, kind, value))
+		throw std::logic_error("can't happen? failed to put completion data for {} with {} intervals ({} bytes)",
+				kind, result.size(), value.size());
+	//We may as well return this given we computed it.
+	return result;
 }
