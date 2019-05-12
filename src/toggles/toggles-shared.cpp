@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "toggles-shared.hpp"
 #include "stringutils.hpp"
+#include "tsl/ordered_set.h"
 #include <regex>
 
 using std::vector;
@@ -41,118 +42,56 @@ std::string format_gadget_set(const GadgetSet& spec) {
 	return join(parts, " ");
 }
 
-namespace {
-std::string build_missing_gadget_ids_query_immediate(const vector<uint64_t>& gids) {
-	vector<std::string> things;
-	things.reserve(gids.size());
-	for (auto i : gids)
-		things.push_back(fmt::format("({})", i));
-	return "select * from (values " +
-			join(things, ", ") +
-			") as maybe(id) where not exists (select 1 from gadgets where gadgets.id = maybe.id limit 1)";
+std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, const GadgetSet& gs) {
+	lmdb::dbi gadget_hashtable, gadget_index, names;
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		names = lmdb::dbi::open(txn, "names");
+		txn.commit();
+	}
+	return collect_initial_gadget_set(env, gadget_hashtable, gadget_index, names, gs);
 }
+std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& names, const GadgetSet& gs) {
+	//Our ids are dense between 1 and the max.
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	uint64_t max_id = gadget_index.stat(txn).ms_entries;
+	//vector_ordered_set
+	tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> set;
 
-std::string build_missing_gadget_id_ranges_query_immediate(const vector<pair<uint64_t, uint64_t>>& ranges) {
-	vector<std::string> things;
-	things.reserve(ranges.size());
-	for (auto r : ranges)
-		things.push_back(fmt::format("(int8range({}, {}))", r.first, r.second));
-	return "select * from (values " +
-			join(things, ", ") +
-			") as maybe(r) where not exists (select 1 from gadgets where gadgets.id <@ maybe.r limit 1)";
-}
+	for (uint64_t i : gs.ids) {
+		if (i < 1 || i > max_id)
+			throw std::runtime_error(fmt::format("id {} not in database; max is {}", i, max_id));
+	}
+	set.insert(gs.ids.begin(), gs.ids.end());
 
-std::string build_missing_names_query(std::size_t count) {
-	//The other two missing queries are immediates, but we want parameterized
-	//here to tolerate ' in gadget names.
-	vector<std::string> things;
-	things.reserve(count);
-	for (std::size_t i = 1; i <= count; ++i)
-		things.push_back(fmt::format("(${}::text)", i));
-	return "select * from (values " +
-			join(things, ", ") +
-			") as maybe(name) where not exists (select 1 from names where names.name = maybe.name limit 1)";
-}
+	for (std::pair<uint64_t, uint64_t> p : gs.ranges) {
+		if (p.first == p.second)
+			throw std::runtime_error(fmt::format("range {} is empty", p));
+		if (p.first < 1 || p.second < 1 || p.first > max_id || p.second > max_id+1)
+			throw std::runtime_error(fmt::format("range {} not in databaes; max id is {}", p, max_id));
+		auto r = xrange(p.first, p.second);
+		set.insert(r.begin(), r.end());
+	}
 
-std::string build_name_to_ids_query(std::size_t count) {
-	vector<std::string> things;
-	things.reserve(count);
-	for (std::size_t i = 1; i <= count; ++i)
-		things.push_back(fmt::format("${}::text", i));
-	return "select gadget_id from names where name in (" + join(things, ", ") + ");";
-}
+	for (const std::string& name : gs.names) {
+		std::string_view data;
+		if (!names.get(txn, name, data))
+			throw std::runtime_error(fmt::format("name '{}' not in database", name));
+		if (data.size() == 0 || data.size() % sizeof(uint64_t) != 0)
+			//Either we screwed up in sync or the database is corrupt.
+			throw std::logic_error(fmt::format("name '{}' found, but has size {}", name, data.size()));
+		const uint64_t* first = reinterpret_cast<const uint64_t*>(data.data());
+		const uint64_t* last = first + data.size()/sizeof(uint64_t);
+		set.insert(first, last);
+	}
 
-std::string build_ids_from_specs_immediate(const vector<uint64_t>& gids, const vector<pair<uint64_t, uint64_t>>& ranges) {
-	vector<std::string> ids, rstr;
-	ids.reserve(gids.size());
-	for (auto i : gids)
-		ids.push_back(fmt::format("{}", i));
-	rstr.reserve(ranges.size());
-	for (auto r : ranges)
-		rstr.push_back(fmt::format("int8range({}, {})", r.first, r.second));
-	//'in ()' is a syntax error, so use known-invalid ids.
-	if (ids.empty())
-		ids.push_back("-1");
-	//We previously used a range of negative ids here, but that triggers postgres
-	//to do a (parallel) sequential scan.  Instead we have to skip the condition
-	//if we don't need it.  (And yes, when we do need it, it will be slow.)
-	return "select id from gadgets where id in (" + join(ids, ", ") + ")" +
-			(rstr.empty() ? "" : " or id <@ any(array[" + join(rstr, ", ") + "])");
-}
-} //anonymous namespace
-
-vector<uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs) {
-	return retry_db_operation([&]() {
-		ro_transaction trans(conn);
-
-		if (!gs.ids.empty()) {
-			pqxx::result result = trans.exec(build_missing_gadget_ids_query_immediate(gs.ids));
-			if (result.size()) {
-				vector<std::string> missing;
-				missing.reserve(result.size());
-				for (const auto& r : result)
-					missing.push_back(fmt::format("{}", r[0].as<uint64_t>()));
-				throw std::runtime_error(fmt::format("ids not found in database: {}", join(missing, ", ")));
-			}
-		}
-		if (!gs.ranges.empty()) {
-			pqxx::result result = trans.exec(build_missing_gadget_id_ranges_query_immediate(gs.ranges));
-			if (result.size()) {
-				vector<std::string> missing;
-				missing.reserve(result.size());
-				for (const auto& r : result)
-					missing.push_back(fmt::format("{}", r[0].c_str()));
-				throw std::runtime_error(fmt::format("ranges did not contain any gadgets: {}", join(missing, ", ")));
-			}
-		}
-		if (!gs.names.empty()) {
-			pqxx::result result = trans.exec_params(build_missing_names_query(gs.names.size()),
-					pqxx::prepare::make_dynamic_params(gs.names));
-			if (result.size()) {
-				vector<std::string> missing;
-				missing.reserve(result.size());
-				for (const auto& r : result)
-					missing.push_back(r[0].c_str());
-				throw std::runtime_error(fmt::format("unknown gadget names: {}", join(missing, ", ")));
-			}
-		}
-
-		vector<uint64_t> ids = gs.ids;
-		if (!gs.names.empty()) {
-			pqxx::result result = trans.exec_params(build_name_to_ids_query(gs.names.size()),
-					pqxx::prepare::make_dynamic_params(gs.names));
-			for (const auto& r : result)
-				ids.push_back(r[0].as<uint64_t>());
-		}
-		pqxx::result result = trans.exec(build_ids_from_specs_immediate(ids, gs.ranges));
-		ids.clear();
-		ids.reserve(result.size());
-		for (const auto& r : result)
-			ids.push_back(r[0].as<uint64_t>());
-
-		trans.commit();
-		return ids;
-	}, 10, "collect_initial_gadget_set");
+	txn.commit();
+	vector<uint64_t> ret = std::move(set).values_container();
+	std::sort(ret.begin(), ret.end());
+	return ret;
 }
 
 

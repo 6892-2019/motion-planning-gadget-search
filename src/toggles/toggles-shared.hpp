@@ -10,6 +10,7 @@
 
 #include "database.hpp"
 #include <msgpack.hpp>
+#include <lmdb++.h>
 
 struct farmhash_hash {
 	//std::hash<uint64_t> is the identity, and hopscotch doesn't like that.
@@ -43,7 +44,9 @@ struct GadgetSet {
 
 GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs);
 std::string format_gadget_set(const GadgetSet& gs);
-std::vector<std::uint64_t> collect_initial_gadget_set(pqxx::connection& conn, const GadgetSet& gs);
+std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, const GadgetSet& gs);
+std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& names, const GadgetSet& gs);
 
 
 
