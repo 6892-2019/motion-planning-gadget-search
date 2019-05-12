@@ -252,3 +252,26 @@ TEST_CASE("IntervalsTest_IntervalUnionExhaustion") {
 		}
 	}
 }
+
+TEST_CASE("IntervalsTest_IntervalDifferenceExhaustion") {
+	//Difference of intervals is equivalent to difference of elements.
+	//This test isn't perfect, because it only tests maximal ranges.  But we
+	//intend to keep our interval sets maximal, so it's a case we care about.
+	constexpr unsigned int limit = 1 << 8;
+	for (unsigned int left = 0; left < limit; ++left) {
+		auto leftbits = indices_of_set_bits(left);
+		auto leftranges = maximal_intervals(leftbits.cbegin(), leftbits.cend());
+		for (unsigned int right = 0; right < limit; ++right) {
+			auto rightbits = indices_of_set_bits(right);
+			auto rightranges = maximal_intervals(rightbits.cbegin(), rightbits.cend());
+
+			auto expectbits = indices_of_set_bits(left & ~right);
+			auto expectranges = maximal_intervals(expectbits.cbegin(), expectbits.cend());
+
+			auto actual = interval_difference(leftranges.cbegin(), leftranges.cend(), rightranges.cbegin(), rightranges.cend());
+			//doctest stringization grumble: uncomment this and use --abort-after=1 to see what failed
+//			fmt::print(stderr, "{} / {} / {} / {}\n", leftranges, rightranges, actual, expectranges);
+			CHECK_EQ(actual, expectranges);
+		}
+	}
+}

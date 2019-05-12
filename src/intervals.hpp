@@ -119,5 +119,66 @@ std::vector<std::pair<T, T>> interval_union(It1 left, It1 left_end, It2 right, I
 	return ret;
 }
 
+template<typename It1, typename It2,
+		typename T = typename std::common_type<
+				//should be using std::tuple_element here, I guess...
+				typename std::iterator_traits<It1>::value_type::first_type,
+				typename std::iterator_traits<It1>::value_type::second_type,
+				typename std::iterator_traits<It2>::value_type::first_type,
+				typename std::iterator_traits<It2>::value_type::second_type
+		>::type>
+std::vector<std::pair<T, T>> interval_difference(It1 left, It1 left_end, It2 right, It2 right_end) {
+	if (left == left_end)
+		return {};
+	if (right == right_end)
+		return {left, left_end};
+
+	//Based on https://stackoverflow.com/a/11891418/3614835.  It's an unclear
+	//description of the algorithm; the core idea is to pretend we're setting
+	//the first endpoint of one or the other interval.  The effect is like a
+	//1-dimensional sweep line algorithm.
+	std::vector<std::pair<T, T>> ret;
+	T pos = std::min(left->first, right->first);
+	while (left != left_end && right != right_end) {
+		//pos is the "effective" first endpoint of one or both of the intervals.
+		T elf = std::max(pos, left->first), erf = std::max(pos, right->first);
+		if (elf < erf)
+			if (left->second <= right->first) {
+				ret.emplace_back(elf, left->second);
+				pos = left->second;
+				++left;
+			} else {
+				ret.emplace_back(elf, right->first);
+				pos = right->first;
+			}
+		else if (erf < elf) {
+			//we don't emit anything in this case because we're finding the
+			//(asymmetric) difference.
+			pos = left->first;
+			if (right->second <= pos)
+				++right;
+		} else {
+			if (left->second < right->second)
+				pos = left++->second;
+			else if (right->second < left->second)
+				pos = right++->second;
+			else {
+				pos = left->second;
+				++left;
+				++right;
+			}
+		}
+	}
+
+	if (left != left_end) {
+		//We have to handle the first left interval specially in case it was
+		//interrupted by a right interval.  Then just copy any remaining.
+		if (pos > left->first)
+			ret.emplace_back(pos, left++->second);
+		ret.insert(ret.end(), left, left_end);
+	}
+	return ret;
+}
+
 #endif /* INTERVALS_HPP */
 
