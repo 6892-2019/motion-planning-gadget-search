@@ -96,31 +96,93 @@ std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, lmdb::dbi&
 
 
 
-std::string build_select_gadget_id_to_data_immediate(const std::vector<std::uint64_t>& gids) {
-	//TODO: stringutils.hpp:join overload?  (use std::to_chars)
-	vector<std::string> gids_as_strings;
-	for (std::uint64_t t : gids)
-		gids_as_strings.push_back(std::to_string(t));
-	std::string in_clause_list = join(gids_as_strings, ",");
-	return "select id, data from gadgets where id in ("+in_clause_list+")";
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
+		lmdb::env& env, const std::vector<std::uint64_t>& gids) {
+	lmdb::dbi gadget_hashtable, gadget_index;
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		txn.commit();
+	}
+	return select_gadget_id_to_data(env, gadget_hashtable, gadget_index, gids);
+}
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
+		lmdb::env& env, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals) {
+	lmdb::dbi gadget_hashtable, gadget_index;
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		txn.commit();
+	}
+	return select_gadget_id_to_data(env, gadget_hashtable, gadget_index, gid_intervals);
 }
 
-vector<pair<std::uint64_t, vector<std::byte>>> select_gadget_id_to_data(pqxx::connection& conn, const vector<std::uint64_t>& gids) {
-	pqxx::result input_data = retry_db_operation([&](){
-		ro_transaction trans(conn);
-		pqxx::result result = trans.exec_n(gids.size(), build_select_gadget_id_to_data_immediate(gids));
-		trans.commit();
-		return result;
-	}, 10, "select_gadget_id_to_data_immediate");
-
-	//Returned rows are text internally, so we may as well convert now.
-	vector<pair<std::uint64_t, vector<std::byte>>> inputs;
-	for (const auto& row : input_data) {
-		std::uint64_t gid = row.at(0).as<std::uint64_t>();
-		pqxx::binarystring data(row.at(1));
-		vector<std::byte> bytes;
-		bytes.insert(bytes.begin(), reinterpret_cast<const std::byte*>(data.begin()), reinterpret_cast<const std::byte*>(data.end()));
-		inputs.emplace_back(gid, std::move(bytes));
+namespace {
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data0(
+		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& gadget_hashtable,
+		vector<pair<uint64_t, std::size_t>>& id_to_hash) {
+	//TODO: merge with the other std::get-based comparators
+	std::sort(id_to_hash.begin(), id_to_hash.end(), [](const auto& a, const auto& b) {
+		return std::get<1>(a) < std::get<1>(b);
+	});
+	std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> ret;
+	for (auto& p : id_to_hash) {
+		std::string_view value;
+		if (!gadget_hashtable.get(txn, lmdb::to_sv(p.second), value))
+			throw std::logic_error(fmt::format("hash {} not found (for id {})", p.second, p.first));
+		//The last 8 bytes are the id.  Check them, then don't return them.
+		uint64_t appended_id = lmdb::from_sv<uint64_t>(value.substr(value.size()-8));
+		if (appended_id != p.first)
+			throw std::logic_error(fmt::format("looked up hash {} for id {}, but hashtable gives id {}",
+					p.second, p.first, appended_id));
+		value.remove_suffix(8);
+		vector<std::byte> value_copy;
+		value_copy.resize(value.size());
+		std::memcpy(value_copy.data(), value.data(), value.size());
+		ret.emplace_back(p.first, std::move(value_copy));
 	}
-	return inputs;
+	txn.commit();
+	return ret;
+}
+} //anonymous namespace
+
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		const std::vector<std::uint64_t>& gids) {
+	assert(std::is_sorted(gids.begin(), gids.end()));
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	vector<pair<uint64_t, std::size_t>> id_to_hash;
+	for (uint64_t id : gids) {
+		std::string_view value;
+		if (!gadget_index.get(txn, lmdb::to_sv(id), value))
+			throw std::logic_error(fmt::format("id {} not found", id));
+		id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
+	}
+	return select_gadget_id_to_data0(env, txn, gadget_hashtable, id_to_hash);
+}
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals) {
+	assert(std::is_sorted(gid_intervals.begin(), gid_intervals.end()));
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	vector<pair<uint64_t, std::size_t>> id_to_hash;
+	lmdb::cursor cur = lmdb::cursor::open(txn, gadget_index);
+	for (pair<uint64_t, uint64_t> p : gid_intervals) {
+		uint64_t id = p.first;
+		std::string_view key = lmdb::to_sv(id), value;
+		if (!cur.get(key, value, MDB_SET))
+			throw std::logic_error(fmt::format("id {} (from interval {}) not found", id, p.first));
+		id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
+
+		while (id++ < p.second) {
+			if (!cur.get(key, value, MDB_NEXT))
+				throw std::logic_error(fmt::format("id {} (from interval {}) not found", id, p));
+			if (lmdb::from_sv<uint64_t>(key) != id) //might mean discontiguous ids
+				throw std::logic_error(fmt::format("expected id {} (from interval {}), but next was {}", id, p, lmdb::from_sv<uint64_t>(key)));
+			id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
+		}
+	}
+	return select_gadget_id_to_data0(env, txn, gadget_hashtable, id_to_hash);
 }
