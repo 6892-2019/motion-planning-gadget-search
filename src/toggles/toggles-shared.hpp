@@ -123,6 +123,42 @@ inline bool operator!=(const SimpleEdge& a, const SimpleEdge& b) {
 	return !(a == b);
 }
 
+//We could replace these formatters with specializations of std::tuple_element,
+//std::tuple_size, and an appropriate get implementation somewhere.
+namespace fmt {
+template<>
+struct formatter<CombineEdge> {
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
+	template<typename FormatContext>
+	auto format(const CombineEdge& e, FormatContext& ctx) {
+		return format_to(ctx.begin(), "[{}, {}, {}, {}, {}]",
+				e.output, e.splice, e.rotation, e.connectPoint, e.canonicalizePermutation);
+	}
+};
+
+template<>
+struct formatter<ConnectEdge> {
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
+	template<typename FormatContext>
+	auto format(const ConnectEdge& e, FormatContext& ctx) {
+		return format_to(ctx.begin(), "[{}, {}, {}]",
+				e.output, e.connectPoint, e.canonicalizePermutation);
+	}
+};
+
+template<>
+struct formatter<SimpleEdge> {
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
+	template<typename FormatContext>
+	auto format(const SimpleEdge& e, FormatContext& ctx) {
+		return format_to(ctx.begin(), "[{}, {}]", e.output, e.canonicalizePermutation);
+	}
+};
+} //namespace fmt
+
 
 
 /**

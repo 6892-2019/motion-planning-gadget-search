@@ -12,6 +12,7 @@
 #include "hopscotch/hopscotch_map.h"
 #include "tsl/ordered_set.h"
 #include "tsl/ordered_map.h"
+#include <boost/container/static_vector.hpp>
 #include "msgpack.hpp"
 #include "farmhash/farmhash.h"
 #include "lmdb++.h"
@@ -273,55 +274,6 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(vector<std::uint64_t>&
 
 static std::string g_database_path;
 
-//DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
-//		vector<std::uint64_t>&& input_gids, //for completion data
-//		vector<vector<std::byte>>&& rows, vector<ConnectProvenance>&& prov, std::size_t pruned) {
-//	std::sort(input_gids.begin(), input_gids.end());
-//	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
-//	std::size_t survivor_size = rows.size();
-//	std::size_t edge_count = prov.size();
-//	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
-//	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
-//	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-//
-//	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(ConnectProvenance::output1)>())) {
-//		for (ConnectProvenance& p : prov)
-//			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
-//		std::sort(prov.begin(), prov.end());
-//
-//		retry_db_operation([&]() {
-//			transaction trans(conn);
-//			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(prov));
-//			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
-//			trans.commit();
-//			return nullptr;
-//		}, 10, "commit_connect_result inserting provs");
-//	} else {
-//		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
-//		vector<std::tuple<uint64_t, uint64_t, std::uint16_t, std::uint16_t>> edges;
-//		for (const ConnectProvenance& p : prov)
-//			edges.emplace_back(p.input1, local_to_global[p.output1], p.connectPoint, p.canonicalizePermutation);
-//		std::sort(edges.begin(), edges.end());
-//
-//		retry_db_operation([&]() {
-//			transaction trans(conn);
-//			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(edges));
-//			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
-//			trans.commit();
-//			return nullptr;
-//		}, 10, "commit_connect_result inserting edges");
-//	}
-//	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
-//}
-//
-//DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
-//	pqxx::connection conn(g_database_connect_string);
-//	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-//	Finisher outputs = do_connect(std::move(inputs));
-//	return commit_connect_result(conn, std::move(input_gids), std::move(outputs.rows_).values_container(),
-//			std::move(outputs.prov_), outputs.pruned_);
-//}
-//
 //DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, vector<vector<std::byte>>&& rows,
 //		vector<CombineProvenance>&& prov, std::size_t pruned) {
 //	std::size_t survivor_size = rows.size(), edge_count = prov.size();
@@ -368,6 +320,86 @@ static std::string g_database_path;
 //	Finisher outputs = do_combine(std::move(map), left_gids, right_gids, precision);
 //	return commit_combine_result(conn, std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_);
 //}
+
+
+DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
+		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
+		vector<ConnectProvenance>&& prov, std::size_t pruned) {
+	std::size_t survivor_size = gadgets.size();
+	std::size_t edge_count = prov.size();
+
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets));
+
+	//Group provs by input1, if they aren't already.
+	if (!std::is_sorted(prov.begin(), prov.end(), InputGroupingProvCmp()))
+		std::sort(prov.begin(), prov.end(), InputGroupingProvCmp());
+
+	auto txn = lmdb::txn::begin(env);
+	{
+		lmdb::cursor cur = lmdb::cursor::open(txn, edges);
+		boost::container::static_vector<ConnectEdge, 16> buf;
+
+		for (std::size_t i = 0; i < prov.size();) {
+			buf.clear();
+			//Find the block sharing the same input1.
+			std::size_t j = i;
+			while (j < prov.size() && prov[i].input1 == prov[j].input1) {
+				const ConnectProvenance& p = prov[j];
+				ConnectEdge e;
+				e.output = selsert_result.local_to_global[p.output1];
+				e.connectPoint = p.connectPoint;
+				e.canonicalizePermutation = p.canonicalizePermutation;
+				buf.push_back(e);
+				++j;
+			}
+			//For canonicalization purposes, sort the edges.  (We have to remap
+			//through local_to_global before we can do this.)
+			std::sort(buf.begin(), buf.end());
+			std::string_view value(reinterpret_cast<char*>(buf.data()), buf.size()*sizeof(ConnectEdge));
+			if (!cur.put(lmdb::to_sv(prov[i].input1), value, MDB_NOOVERWRITE)) {
+				if (value.size() == 0 || value.size() % sizeof(ConnectEdge) != 0)
+					throw std::logic_error(fmt::format("connect edge data for key {} has value length {} (not a multiple of {})",
+							prov[i].input1, value.size(), sizeof(ConnectEdge)));
+				const ConnectEdge* first = reinterpret_cast<const ConnectEdge*>(value.data());
+				const ConnectEdge* last = first + value.size() / sizeof(ConnectEdge);
+				if (!std::equal(buf.cbegin(), buf.cend(), first, last))
+					throw std::logic_error(fmt::format("differing connect edges from {}: {} and {}",
+							prov[i].input1, buf, make_range_for_pair(first, last)));
+				--edge_count; //we didn't actually add this edge, don't count it
+			}
+			i = j;
+		}
+	}
+
+	union_completion(env, txn, completions, "connect", input_intervals);
+	txn.commit();
+
+	return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+}
+
+DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str()); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		connect_edges = lmdb::dbi::open(txn, "edges-connect");
+		txn.commit();
+	}
+
+	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, input_intervals);
+	Finisher<ConnectProvenance> outputs = do_connect(std::move(inputs));
+	return commit_connect_result(env, gadget_hashtable, gadget_index, connect_edges, completions,
+			std::move(input_intervals), std::move(outputs.rows_).values_container(),
+			std::move(outputs.prov_), outputs.pruned_);
+}
 
 DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
