@@ -370,7 +370,8 @@ static std::string g_database_path;
 //}
 
 DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
-		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions, std::string_view completion_kind,
+		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
+		std::string_view completion_kind, bool idempotent,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
 		vector<SimpleProvenance>&& prov, std::size_t pruned) {
 	std::size_t survivor_size = gadgets.size();
@@ -405,6 +406,16 @@ DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadg
 		}
 	}
 
+	if (idempotent) {
+		//Any target of a close edge cannot also be the source of a close edge,
+		//so we can add completion for them.  (We can't sort local_to_global
+		//until we're done with the above loop, though we could copy if we
+		//really want to get this out of the transaction.)
+		std::sort(selsert_result.local_to_global.begin(), selsert_result.local_to_global.end());
+		auto stuff = maximal_intervals(selsert_result.local_to_global.cbegin(), selsert_result.local_to_global.cend());
+		input_intervals = interval_union(input_intervals.cbegin(), input_intervals.cend(), stuff.cbegin(), stuff.cend());
+	}
+
 	union_completion(env, txn, completions, completion_kind, input_intervals);
 	txn.commit();
 
@@ -415,7 +426,7 @@ DatabaseOperationStatistics commit_close_result(lmdb::env& env, lmdb::dbi& gadge
 		lmdb::dbi& gadget_index, lmdb::dbi& close_edges, lmdb::dbi& completions,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
 		vector<SimpleProvenance>&& prov, std::size_t pruned) {
-	return commit_simple_result(env, gadget_hashtable, gadget_index, close_edges, completions, "close",
+	return commit_simple_result(env, gadget_hashtable, gadget_index, close_edges, completions, "close", true,
 			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned);
 }
 
@@ -452,7 +463,7 @@ DatabaseOperationStatistics commit_mirror_result(lmdb::env& env, lmdb::dbi& gadg
 		lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges, lmdb::dbi& completions,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
 		vector<SimpleProvenance>&& prov, std::size_t pruned) {
-	return commit_simple_result(env, gadget_hashtable, gadget_index, mirror_edges, completions, "mirror",
+	return commit_simple_result(env, gadget_hashtable, gadget_index, mirror_edges, completions, "mirror", false,
 			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned);
 }
 
