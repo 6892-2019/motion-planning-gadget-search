@@ -275,3 +275,30 @@ TEST_CASE("IntervalsTest_IntervalDifferenceExhaustion") {
 		}
 	}
 }
+
+TEST_CASE("IntervalsTest_IntervalCoalesceExhaustion") {
+	//Coalescence of the sorted concatenation of interval lists is equivalent to union.
+	//For this test, we don't care about left and right, because the sorted
+	//concatenation is the same.
+	constexpr unsigned int limit = 1 << 8;
+	for (unsigned int left = 0; left < limit; ++left) {
+		auto leftbits = indices_of_set_bits(left);
+		auto leftranges = maximal_intervals(leftbits.cbegin(), leftbits.cend());
+		for (unsigned int right = 0; right <= left; ++right) {
+			auto rightbits = indices_of_set_bits(right);
+			auto rightranges = maximal_intervals(rightbits.cbegin(), rightbits.cend());
+
+			//could also compare against interval_union here
+			auto expectbits = indices_of_set_bits(left | right);
+			auto expectranges = maximal_intervals(expectbits.cbegin(), expectbits.cend());
+
+			auto mergeranges = leftranges;
+			mergeranges.insert(mergeranges.end(), rightranges.begin(), rightranges.end());
+			std::sort(mergeranges.begin(), mergeranges.end());
+			auto actual = interval_coalesce(mergeranges.cbegin(), mergeranges.cend());
+			//doctest stringization grumble: uncomment this and use --abort-after=1 to see what failed
+//			fmt::print(stderr, "{} / {} / {} / {} / {}\n", leftranges, rightranges, mergeranges, actual, expectranges);
+			CHECK_EQ(actual, expectranges);
+		}
+	}
+}

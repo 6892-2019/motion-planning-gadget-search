@@ -40,6 +40,27 @@ auto maximal_intervals(ForwardIterator first, ForwardIterator last) -> std::vect
 }
 
 
+//TODO: should be easy enough to make this modify in-place (like std::unique),
+//though we could still have interval_coalesce_copy if useful
+template<typename It1,
+		typename T = typename std::common_type<
+				//should be using std::tuple_element here, I guess...
+				typename std::iterator_traits<It1>::value_type::first_type,
+				typename std::iterator_traits<It1>::value_type::second_type
+		>::type>
+std::vector<std::pair<T, T>> interval_coalesce(It1 left, It1 left_end) {
+	if (left == left_end)
+		return {};
+	std::vector<std::pair<T, T>> ret;
+	ret.push_back(*left++);
+	while (left != left_end) {
+		if (left->first <= ret.back().second)
+			ret.back().second = std::max(ret.back().second, left++->second);
+		else
+			ret.push_back(*left++);
+	}
+	return ret;
+}
 
 template<typename It1, typename It2,
 		typename T = typename std::common_type<
