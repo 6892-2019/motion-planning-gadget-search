@@ -765,7 +765,8 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 					if (morphs[i].second) {
 						naming[fmt::format("s-{}-{}", gadget_name, i)] = {canonicals.size()};
 						canonicals.push_back(std::move(*morphs[i].second));
-					}
+					} else
+						naming[fmt::format("s-{}-{}", gadget_name, i)] = naming.at(fmt::format("r-{}-{}", gadget_name, i));
 				}
 			else
 				throw std::logic_error("empty morphs somehow?");
