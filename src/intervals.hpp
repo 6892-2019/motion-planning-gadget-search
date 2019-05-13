@@ -62,6 +62,14 @@ std::vector<std::pair<T, T>> interval_coalesce(It1 left, It1 left_end) {
 	return ret;
 }
 
+template<typename It1>
+std::size_t interval_size(It1 left, It1 left_end) {
+	std::size_t size = 0;
+	for (auto i = left; i != left_end; ++i)
+		size += i->second - i-> first;
+	return size;
+}
+
 template<typename It1, typename It2,
 		typename T = typename std::common_type<
 				//should be using std::tuple_element here, I guess...

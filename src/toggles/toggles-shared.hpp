@@ -123,5 +123,25 @@ inline bool operator!=(const SimpleEdge& a, const SimpleEdge& b) {
 	return !(a == b);
 }
 
+
+
+/**
+ * Follows edges in an edge database from the source intervals, returning target
+ * intervals (the deduplicated union of all targets).  This function is declared
+ * here and defined in the corresponding object file because the runner's sync
+ * mode wants to follow close edges, and the implementation only depends on the
+ * location of the 'output' member of the edge struct (actually, because it's
+ * always the first member, only on the size of the struct).
+ */
+template<class Edge>
+std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env,
+		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+extern template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<CombineEdge>(
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+extern template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<ConnectEdge>(
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+extern template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<SimpleEdge>(
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+
 #endif /* TOGGLES_SHARED_HPP */
 

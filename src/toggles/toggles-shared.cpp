@@ -178,7 +178,7 @@ std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_t
 			throw std::logic_error(fmt::format("id {} (from interval {}) not found", id, p.first));
 		id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
 
-		while (id++ < p.second) {
+		while (++id < p.second) {
 			if (!cur.get(key, value, MDB_NEXT))
 				throw std::logic_error(fmt::format("id {} (from interval {}) not found", id, p));
 			if (lmdb::from_sv<uint64_t>(key) != id) //might mean discontiguous ids
@@ -255,11 +255,77 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
 	auto result = comp_range.first ?
 		interval_union(comp_range.first, comp_range.second, intervals.begin(), intervals.end()) :
 		intervals; //if key not present, our intervals are the first
-	std::string_view value(reinterpret_cast<const char*>(intervals.data()),
-			intervals.size() * sizeof(pair<uint64_t, uint64_t>));
+	std::string_view value(reinterpret_cast<const char*>(result.data()),
+			result.size() * sizeof(pair<uint64_t, uint64_t>));
 	if (!completions.put(txn, kind, value))
 		throw std::logic_error(fmt::format("can't happen? failed to put completion data for {} with {} intervals ({} bytes)",
 				kind, result.size(), value.size()));
 	//We may as well return this given we computed it.
 	return result;
 }
+
+
+
+template<class Edge>
+std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env,
+		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources) {
+	vector<pair<uint64_t, uint64_t>> accum;
+	vector<uint64_t> buf;
+	buf.reserve(256);
+
+	auto drain_buffer = [&]() {
+		//TODO: I guess we might want to abort the txn and renew it and the
+		//cursor before we return.  need to be careful with key/value lifetime
+		std::sort(buf.begin(), buf.end());
+		buf.erase(std::unique(buf.begin(), buf.end()), buf.end());
+		//TODO: we could avoid this temporary with a maximal_intervals overload
+		//using an output iterator (a back_inserter into accum);
+		auto ints = maximal_intervals(buf.begin(), buf.end());
+		accum.insert(accum.end(), ints.begin(), ints.end());
+		buf.clear();
+	};
+
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	lmdb::cursor cur = lmdb::cursor::open(txn, edge_db);
+	for (const pair<uint64_t, uint64_t>& p : sources) {
+		std::string_view key = lmdb::to_sv(p.first), value;
+		if (!cur.get(key, value, MDB_SET_RANGE))
+			break; //reached end of database
+		while (lmdb::from_sv<uint64_t>(key) < p.second) {
+			//If we have to replace this pointer-based code for alignment etc.,
+			//we can instead template this function on sizeof(Edge), relying on
+			//'output' being the first member.  (Or maybe still template on
+			//Edge, but use sizeof/offsetof to achieve the same.)
+			if (value.size() == 0 || value.size() % sizeof(Edge) != 0)
+				throw std::logic_error(fmt::format("edge data of type {} has value length {} (not a multiple of {})",
+						//We want the dbi's name here, but I don't see how to get it.
+						//The message won't distinguish close and mirror.
+						typeid(Edge).name(), value.size(), sizeof(Edge)));
+			const Edge* first = reinterpret_cast<const Edge*>(value.data());
+			const Edge* last = first + value.size() / sizeof(Edge);
+			std::size_t count = numeric_cast<std::size_t>(last - first);
+			if (count > buf.capacity())
+				throw std::logic_error(fmt::format("target buffer has capacity {}, but key {} has {} edges of type {}",
+						buf.capacity(), lmdb::from_sv<uint64_t>(key), count, typeid(Edge).name()));
+			if (count > buf.capacity() - buf.size())
+				drain_buffer();
+			while (first != last)
+				buf.push_back(first++->output);
+
+			if (!cur.get(key, value, MDB_NEXT)) break;
+		}
+	}
+	drain_buffer();
+	txn.commit();
+
+	std::sort(accum.begin(), accum.end());
+	return interval_coalesce(accum.cbegin(), accum.cend());
+}
+
+//explicitly instantiate the three we need
+template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<CombineEdge>(
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<ConnectEdge>(
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<SimpleEdge>(
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);

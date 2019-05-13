@@ -223,7 +223,9 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 			for (unsigned int i : indices) {
 				if (gadgets[i].empty()) {
 					//Per the sort above, all remaining gadgets are empty, so we are done.
-					assert(std::all_of(gadgets.begin()+i, gadgets.end(), std::mem_fn(&vector<std::byte>::empty)));
+					//It's awkward to write an assertion here -- the relevant
+					//span is over the rest of the *indices*, not gadgets.begin()+i
+					//to gadgets.end().
 					break;
 				}
 
@@ -367,8 +369,8 @@ static std::string g_database_path;
 //	return commit_combine_result(conn, std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_);
 //}
 
-DatabaseOperationStatistics commit_close_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
-		lmdb::dbi& gadget_index, lmdb::dbi& close_edges, lmdb::dbi& completions,
+DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions, std::string_view completion_kind,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
 		vector<SimpleProvenance>&& prov, std::size_t pruned) {
 	std::size_t survivor_size = gadgets.size();
@@ -383,7 +385,7 @@ DatabaseOperationStatistics commit_close_result(lmdb::env& env, lmdb::dbi& gadge
 
 	auto txn = lmdb::txn::begin(env);
 	{
-		lmdb::cursor cur = lmdb::cursor::open(txn, close_edges);
+		lmdb::cursor cur = lmdb::cursor::open(txn, edges);
 		SimpleEdge e;
 		for (SimpleProvenance& p : prov) {
 			e.output = selsert_result.local_to_global[p.output1];
@@ -395,17 +397,26 @@ DatabaseOperationStatistics commit_close_result(lmdb::env& env, lmdb::dbi& gadge
 				//database is corrupt.
 				SimpleEdge exist = lmdb::from_sv<SimpleEdge>(value);
 				if (e != exist)
-					throw std::runtime_error(fmt::format("differing close edges from {}: {}/{} and {}/{}",
-							p.input1, e.output, e.canonicalizePermutation, exist.output, exist.canonicalizePermutation));
+					throw std::runtime_error(fmt::format("differing {} edges from {}: {}/{} and {}/{}",
+							completion_kind, p.input1, e.output, e.canonicalizePermutation,
+							exist.output, exist.canonicalizePermutation));
 				--edge_count; //we didn't actually add this edge, don't count it
 			}
 		}
 	}
 
-	union_completion(env, txn, completions, "close", input_intervals);
+	union_completion(env, txn, completions, completion_kind, input_intervals);
 	txn.commit();
 
 	return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+}
+
+DatabaseOperationStatistics commit_close_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& close_edges, lmdb::dbi& completions,
+		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
+		vector<SimpleProvenance>&& prov, std::size_t pruned) {
+	return commit_simple_result(env, gadget_hashtable, gadget_index, close_edges, completions, "close",
+			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned);
 }
 
 //extracted for the benefit of sync_mode
@@ -437,78 +448,45 @@ DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_i
 	return do_close_db0(std::move(input_intervals), env, gadget_hashtable, gadget_index, close_edges, completions);
 }
 
-//DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
-//		vector<std::uint64_t>&& input_gids, //for completion data
-//		vector<vector<std::byte>>&& rows, vector<SimpleProvenance>&& prov, std::size_t pruned) {
-//	std::size_t survivor_size = rows.size();
-//	std::size_t edge_count = prov.size();
-//
-//	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
-//	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-//	const vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
-//	std::size_t novel_gadgets_size = novel_global_ids.size();
-//
-//	//Mirror is undirected, so we've also finished for any new gadgets.
-//	input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
-//	std::sort(input_gids.begin(), input_gids.end());
-//	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
-//
-//	//We have to sort the edge's vertices after remapping.  That means our check
-//	//for reusing the provs is stricter.  We don't need to deduplicate due "on
-//	//conflict do nothing", but it is probably faster to do so if it saves us a
-//	//database round-trip.
-//	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(SimpleProvenance::output1)>()) &&
-//			//p.input1 also fits in output1 (no clean way without a lambda)
-//			std::all_of(prov.begin(), prov.end(), [](const SimpleProvenance& p) {
-//				return p.input1 <= std::numeric_limits<decltype(SimpleProvenance::output1)>::max();
-//			})) {
-//		for (SimpleProvenance& p : prov) {
-//			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
-//			if (p.input1 > p.output1) {
-//				//We can't just swap because they aren't the same size.
-//				std::size_t x = p.input1;
-//				p.input1 = p.output1;
-//				p.output1 = static_cast<std::uint32_t>(x);
-//			}
-//		}
-//		std::sort(prov.begin(), prov.end());
-//		prov.erase(std::unique(prov.begin(), prov.end()), prov.end());
-//
-//		retry_db_operation([&]() {
-//			transaction trans(conn);
-//			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(prov));
-//			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
-//			trans.commit();
-//			return nullptr;
-//		}, 10, "commit_mirror_result inserting provs");
-//	} else {
-//		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
-//		vector<std::tuple<uint64_t, uint64_t, std::uint16_t>> edges;
-//		for (const SimpleProvenance& p : prov) {
-//			uint64_t output = local_to_global[p.output1];
-//			edges.emplace_back(std::min(p.input1, output), std::max(p.input1, output), p.canonicalizePermutation);
-//		}
-//		std::sort(edges.begin(), edges.end());
-//		edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
-//
-//		retry_db_operation([&]() {
-//			transaction trans(conn);
-//			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(edges));
-//			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
-//			trans.commit();
-//			return nullptr;
-//		}, 10, "commit_mirror_result inserting edges");
-//	}
-//	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
-//}
-//
-//DatabaseOperationStatistics do_mirror_db(vector<std::uint64_t> input_gids) {
-//	pqxx::connection conn(g_database_connect_string);
-//	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-//	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
-//	return commit_mirror_result(conn, std::move(input_gids), std::move(outputs.rows_).values_container(),
-//			std::move(outputs.prov_), outputs.pruned_);
-//}
+DatabaseOperationStatistics commit_mirror_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges, lmdb::dbi& completions,
+		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
+		vector<SimpleProvenance>&& prov, std::size_t pruned) {
+	return commit_simple_result(env, gadget_hashtable, gadget_index, mirror_edges, completions, "mirror",
+			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned);
+}
+
+//TODO: There's a lot of duplication between close and mirror (and maybe also
+//connect in the future).  Can we parameterize/templatize them together?
+
+//extracted for the benefit of sync_mode
+DatabaseOperationStatistics do_mirror_db0(vector<pair<uint64_t, uint64_t>> input_intervals,
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges,
+		lmdb::dbi& completions) {
+	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, input_intervals);
+	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
+	return commit_mirror_result(env, gadget_hashtable, gadget_index, mirror_edges, completions,
+			std::move(input_intervals), std::move(outputs.rows_).values_container(),
+			std::move(outputs.prov_), outputs.pruned_);
+}
+
+DatabaseOperationStatistics do_mirror_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str()); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index, completions, mirror_edges;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		mirror_edges = lmdb::dbi::open(txn, "edges-mirror");
+		txn.commit();
+	}
+	return do_mirror_db0(std::move(input_intervals), env, gadget_hashtable, gadget_index, mirror_edges, completions);
+}
 
 
 
@@ -807,7 +785,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str()); //TODO: flags?
-	lmdb::dbi gadget_hashtable, gadget_index, names_db, completions, close_edges;
+	lmdb::dbi gadget_hashtable, gadget_index, names_db, completions, close_edges, mirror_edges;
 	{
 		lmdb::txn txn = lmdb::txn::begin(env);
 		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable", MDB_CREATE | MDB_INTEGERKEY);
@@ -827,7 +805,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		//and "combine-{}" whose values are an interval list.
 		completions = lmdb::dbi::open(txn, "completions", MDB_CREATE);
 
-		lmdb::dbi::open(txn, "edges-mirror", MDB_CREATE | MDB_INTEGERKEY);
+		mirror_edges = lmdb::dbi::open(txn, "edges-mirror", MDB_CREATE | MDB_INTEGERKEY);
 		close_edges = lmdb::dbi::open(txn, "edges-close", MDB_CREATE | MDB_INTEGERKEY);
 		lmdb::dbi::open(txn, "edges-combine", MDB_CREATE | MDB_INTEGERKEY);
 
@@ -858,8 +836,8 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				throw std::runtime_error(fmt::format("failed to insert names {} -> {}", p.first, p.second));
 		txn.commit();
 	}
-	fmt::print("loaded {} gadgets ({} novel) and {} names",
-			canonicals.size(), selsert_result.novel_size(), sorted_names.size());
+	fmt::print("loaded {} gadgets ({} novel) and {} names\n",
+			canonicals_size, selsert_result.novel_size(), sorted_names.size());
 
 	//Now close and mirror all gadgets (even non-novel ones) that need it, for
 	//the benefit of the reporter.
@@ -871,7 +849,16 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 	fmt::print("close: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
 			close_stats.pruned_locally, close_stats.pruned_database, close_stats.novel_gadgets, close_stats.edges);
 
-	
+	auto followed_close = follow_edges<SimpleEdge>(env, close_edges, named_gadgets);
+	fmt::print("followed close edges to {} gadgets\n", interval_size(followed_close.cbegin(), followed_close.cend()));
+
+	auto desire_mirror = interval_union(named_gadgets.cbegin(), named_gadgets.cend(),
+			followed_close.cbegin(), followed_close.cend());
+	auto needs_mirror = filter_completion(env, completions, "mirror", desire_mirror);
+	DatabaseOperationStatistics mirror_stats = do_mirror_db0(std::move(needs_mirror),
+			env, gadget_hashtable, gadget_index, mirror_edges, completions);
+	fmt::print("mirror: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
+			mirror_stats.pruned_locally, mirror_stats.pruned_database, mirror_stats.novel_gadgets, mirror_stats.edges);
 
 	return 0;
 }
