@@ -103,6 +103,7 @@ private:
 };
 
 std::pair<std::vector<GadgetEdge>, std::vector<GadgetEdge>> deflate_slls(const AutomatonBase& a) {
+	assert(a.canonical());
 	auto state_size = a.state_size();
 	auto activealpha = a.activeAlphabet();
 
@@ -154,12 +155,15 @@ struct LLSSEdgeCoder {
 	unsigned int locations, states;
 	LLSSEdgeCoder(unsigned int location, unsigned int state) : locations(location), states(state) {}
 	std::uint64_t encode(const GadgetEdge& e) const {
-		return ((std::uint64_t)e.from * locations * states * states) +
+		std::uint64_t i = ((std::uint64_t)e.from * locations * states * states) +
 				(e.to * states * states) +
 				(e.start * states) +
 				e.end;
+		assert(i < max_value());
+		return i;
 	}
 	GadgetEdge decode(std::uint64_t i) const {
+		assert(i < max_value());
 		//TODO: libdivide divmod optimization
 		GadgetEdge e;
 		e.from = numeric_cast<unsigned int>(i / (locations * states * states));
@@ -346,6 +350,7 @@ Stats stats(const std::byte* encoded_gadget) {
 }
 
 std::vector<std::byte> encode(const automaton::WorkingAutomaton& a) {
+	assert(a.canonical());
 	auto&& [uedges, dedges] = deflate_slls(a);
 	Stats stats = {};
 	stats.locations = a.active_alphabet_size();
