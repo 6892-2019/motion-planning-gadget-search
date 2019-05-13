@@ -223,6 +223,7 @@ get_completions_key(lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std:
 				kind, value.size(), sizeof(pair<uint64_t, uint64_t>)));
 	const pair<uint64_t, uint64_t>* first = reinterpret_cast<const pair<uint64_t, uint64_t>*>(value.data());
 	const pair<uint64_t, uint64_t>* last = first + value.size() / sizeof(pair<uint64_t, uint64_t>);
+	return {first, last};
 }
 }
 
@@ -233,9 +234,18 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
 	auto comp_range = get_completions_key(env, txn, completions, kind);
 	if (!comp_range.first)
 		return intervals;
-	auto ret = interval_difference(intervals.begin(), intervals.end(), p.first, p.last);
+	auto ret = interval_difference(intervals.begin(), intervals.end(), comp_range.first, comp_range.second);
 	txn.commit();
 	return ret;
+}
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_completion(
+		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
+	auto comp_range = get_completions_key(env, txn, completions, kind);
+	if (!comp_range.first)
+		return {};
+	return interval_intersection(intervals.begin(), intervals.end(), comp_range.first, comp_range.second);
 }
 
 std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
@@ -248,8 +258,8 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
 	std::string_view value(reinterpret_cast<const char*>(intervals.data()),
 			intervals.size() * sizeof(pair<uint64_t, uint64_t>));
 	if (!completions.put(txn, kind, value))
-		throw std::logic_error("can't happen? failed to put completion data for {} with {} intervals ({} bytes)",
-				kind, result.size(), value.size());
+		throw std::logic_error(fmt::format("can't happen? failed to put completion data for {} with {} intervals ({} bytes)",
+				kind, result.size(), value.size()));
 	//We may as well return this given we computed it.
 	return result;
 }

@@ -2,6 +2,7 @@
 #include "automaton.hpp"
 #include "canonicalize.hpp"
 #include "ops.hpp"
+#include "provenance.hpp"
 #include "../database.hpp"
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
@@ -15,7 +16,7 @@
 #include "farmhash/farmhash.h"
 #include "lmdb++.h"
 #include <yaml-cpp/yaml.h>
-#include <pqxx/pqxx>
+//#include <pqxx/pqxx>
 #include <cstdio>
 
 using namespace automaton;
@@ -81,166 +82,75 @@ Finisher<SimpleProvenance> do_mirror(vector<pair<std::uint64_t, vector<std::byte
 
 
 
-//return type is just to satisfy rpc machinery; we don't special-case for void
-//and msgpack can't handle nullptr_t
-[[noreturn]] int do_batch_combine(vector<pair<uint64_t, vector<std::byte>>> inputs,
-		vector<uint64_t> lefts, vector<uint64_t> rights, unsigned int precision) {
-	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
-	for (auto& p : inputs)
-		map[p.first] = std::move(p.second);
-	inputs.clear();
-	inputs.shrink_to_fit();
-	Finisher<CombineProvenance> finisher = do_combine(std::move(map), std::move(lefts), std::move(rights), precision);
-	//TODO: We'd like to use the same sequence number here, but we don't have
-	//access.  Introduce a seqno_t "strong typedef" that handler_adapter
-	//recognizes and fills in (in addition to whatever other args are present).
-	simple_buffer buf = pack_call(0, "batch-combine-commit", finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-	//By printing to stdout and exiting, we emit an RPC call rather than a
-	//response.  If we threw an exception, though, the dispatcher will generate
-	//an error response as normal, so we'll detect the failure when trying to
-	//commit the results.
-	write_output(buf.data(), buf.size());
-	std::exit(0);
-}
+////return type is just to satisfy rpc machinery; we don't special-case for void
+////and msgpack can't handle nullptr_t
+//[[noreturn]] int do_batch_combine(vector<pair<uint64_t, vector<std::byte>>> inputs,
+//		vector<uint64_t> lefts, vector<uint64_t> rights, unsigned int precision) {
+//	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
+//	for (auto& p : inputs)
+//		map[p.first] = std::move(p.second);
+//	inputs.clear();
+//	inputs.shrink_to_fit();
+//	Finisher<CombineProvenance> finisher = do_combine(std::move(map), std::move(lefts), std::move(rights), precision);
+//	//TODO: We'd like to use the same sequence number here, but we don't have
+//	//access.  Introduce a seqno_t "strong typedef" that handler_adapter
+//	//recognizes and fills in (in addition to whatever other args are present).
+//	simple_buffer buf = pack_call(0, "batch-combine-commit", finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
+//	//By printing to stdout and exiting, we emit an RPC call rather than a
+//	//response.  If we threw an exception, though, the dispatcher will generate
+//	//an error response as normal, so we'll detect the failure when trying to
+//	//commit the results.
+//	write_output(buf.data(), buf.size());
+//	std::exit(0);
+//}
 
-namespace {
-vector<uint64_t> extract_first(const vector<pair<uint64_t, vector<std::byte>>>& inputs) {
-	vector<uint64_t> input_gids;
-	input_gids.reserve(inputs.size());
-	for (const auto& p : inputs)
-		input_gids.push_back(p.first);
-	return input_gids;
-}
-}
+//namespace {
+//vector<uint64_t> extract_first(const vector<pair<uint64_t, vector<std::byte>>>& inputs) {
+//	vector<uint64_t> input_gids;
+//	input_gids.reserve(inputs.size());
+//	for (const auto& p : inputs)
+//		input_gids.push_back(p.first);
+//	return input_gids;
+//}
+//}
 
-[[noreturn]] int do_batch_connect(vector<pair<uint64_t, vector<std::byte>>> inputs) {
-	vector<uint64_t> input_gids = extract_first(inputs);
-	Finisher<ConnectProvenance> finisher = do_connect(std::move(inputs));
-	simple_buffer buf = pack_call(0, "batch-connect-commit", input_gids,
-			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-	write_output(buf.data(), buf.size());
-	std::exit(0);
-}
+//[[noreturn]] int do_batch_connect(vector<pair<uint64_t, vector<std::byte>>> inputs) {
+//	vector<uint64_t> input_gids = extract_first(inputs);
+//	Finisher<ConnectProvenance> finisher = do_connect(std::move(inputs));
+//	simple_buffer buf = pack_call(0, "batch-connect-commit", input_gids,
+//			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
+//	write_output(buf.data(), buf.size());
+//	std::exit(0);
+//}
+//
+//[[noreturn]] int do_batch_close(vector<pair<uint64_t, vector<std::byte>>> inputs) {
+//	vector<uint64_t> input_gids = extract_first(inputs);
+//	Finisher<SimpleProvenance> finisher = do_close(std::move(inputs));
+//	simple_buffer buf = pack_call(0, "batch-close-commit", input_gids,
+//			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
+//	write_output(buf.data(), buf.size());
+//	std::exit(0);
+//}
+//
+//[[noreturn]] int do_batch_mirror(vector<pair<uint64_t, vector<std::byte>>> inputs) {
+//	vector<uint64_t> input_gids = extract_first(inputs);
+//	Finisher<SimpleProvenance> finisher = do_mirror(std::move(inputs));
+//	simple_buffer buf = pack_call(0, "batch-mirror-commit", input_gids,
+//			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
+//	write_output(buf.data(), buf.size());
+//	std::exit(0);
+//}
 
-[[noreturn]] int do_batch_close(vector<pair<uint64_t, vector<std::byte>>> inputs) {
-	vector<uint64_t> input_gids = extract_first(inputs);
-	Finisher<SimpleProvenance> finisher = do_close(std::move(inputs));
-	simple_buffer buf = pack_call(0, "batch-close-commit", input_gids,
-			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-	write_output(buf.data(), buf.size());
-	std::exit(0);
-}
 
-[[noreturn]] int do_batch_mirror(vector<pair<uint64_t, vector<std::byte>>> inputs) {
-	vector<uint64_t> input_gids = extract_first(inputs);
-	Finisher<SimpleProvenance> finisher = do_mirror(std::move(inputs));
-	simple_buffer buf = pack_call(0, "batch-mirror-commit", input_gids,
-			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-	write_output(buf.data(), buf.size());
-	std::exit(0);
-}
-
-
-
-std::string build_select_gadget_data_to_id(std::size_t rows) {
-	assert(rows >= 1);
-	vector<std::string> values;
-	values.reserve(rows);
-	values.push_back("  ($1::integer, $2::bytea)"); //first one is special to specify types
-	for (unsigned int i = 1; i < rows; ++i)
-		values.push_back(fmt::format("(${}, ${})", 2*i + 1, 2*i + 2));
-	return "with input_rows (n, data) as (values\n" +
-			join(values, ",\n  ") +
-			"\n)\n" +
-			"select input_rows.n, gadgets.id from gadgets join input_rows using (data);";
-}
-
-std::string build_insert_gadgets_query(std::size_t rows) {
-	assert(rows >= 1);
-	vector<std::string> values;
-	values.reserve(rows);
-	//first one is special to specify types
-	values.push_back("  ($1::integer, $2::integer, $3::integer, $4::integer, $5::integer, $6::integer, $7::bytea)");
-	for (unsigned int i = 1; i < rows; ++i)
-		values.push_back(fmt::format("(${}, ${}, ${}, ${}, ${}, ${}, ${})",
-				7*i+1, 7*i+2, 7*i+3, 7*i+4, 7*i+5, 7*i+6, 7*i+7));
-	return "with input_rows (n, states, locations, uedges, dedges, components, data) as (values" +
-			join(values, ",\n  ") +
-			"\n), ins as (\n"
-			"  insert into gadgets (states, locations, undirected_edges, directed_edges, components, data)\n"
-			"  select states, locations, uedges, dedges, components, data from input_rows\n"
-			"  returning gadgets.id, gadgets.data\n"
-			")\n"
-			"select input_rows.n, ins.id from input_rows join ins using (data);";
-}
-
-std::string build_insert_connect_edges_query(std::size_t rows) {
-	assert(rows >= 1);
-	vector<std::string> values;
-	values.reserve(rows);
-	values.push_back("  ($1::bigint, $2::bigint, $3::smallint, $4::smallint)");
-	for (unsigned int i = 1; i < rows; ++i)
-		values.push_back(fmt::format("(${}, ${}, ${}, ${})", 4*i + 1, 4*i + 2, 4*i+3, 4*i+4));
-	return "insert into connect_edges (input1, output1, connect_location, canonicalize_rotation) values\n" +
-			join(values, ",\n  ") + ";";
-}
-
-std::string build_insert_combine_edges_query(std::size_t rows) {
-	assert(rows >= 1);
-	vector<std::string> values;
-	values.reserve(rows);
-	values.push_back("  ($1::bigint, $2::bigint, $3::bigint, $4::smallint, $5::smallint, $6::smallint, $7::smallint)");
-	for (unsigned int i = 1; i < rows; ++i)
-		values.push_back(fmt::format("(${}, ${}, ${}, ${}, ${}, ${}, ${})",
-				7*i+1, 7*i+2, 7*i+3, 7*i+4, 7*i+5, 7*i+6, 7*i+7));
-	return "insert into combine_edges (input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation) values\n" +
-			join(values, ",\n  ") + ";";
-}
-
-std::string build_insert_simple_edges_query(std::size_t rows, std::string_view table_name, std::string_view column_name_list) {
-	assert(rows >= 1);
-	vector<std::string> values;
-	values.reserve(rows);
-	values.push_back("  ($1::bigint, $2::bigint, $3::smallint)");
-	for (unsigned int i = 1; i < rows; ++i)
-		values.push_back(fmt::format("(${}, ${}, ${})", 3*i + 1, 3*i + 2, 3*i+3));
-	return fmt::format("insert into {} ({}) values\n", table_name, column_name_list) +
-			join(values, ",\n  ") +
-			"\n on conflict do nothing;";
-}
-
-std::string build_insert_close_edges_query(std::size_t rows) {
-	return build_insert_simple_edges_query(rows, "close_edges", "input1, output1, canonicalize_rotation");
-}
-std::string build_insert_mirror_edges_query(std::size_t rows) {
-	return build_insert_simple_edges_query(rows, "mirror_edges", "a, b, canonicalize_rotation");
-}
-
-std::string build_insert_completion_query(std::size_t rows, std::string_view table_name) {
-	assert(rows >= 1);
-	vector<std::string> values;
-	values.reserve(rows);
-	values.push_back("  (int8range($1::bigint, $2::bigint))");
-	for (unsigned int i = 1; i < rows; ++i)
-		values.push_back(fmt::format("(int8range(${}, ${}))", 2*i + 1, 2*i + 2));
-	return fmt::format("insert into {} (r) values\n", table_name) +
-			join(values, ",\n  ") + ";";
-}
-std::string build_insert_connect_completion_query(std::size_t rows) {
-	return build_insert_completion_query(rows, "completed_connects");
-}
-std::string build_insert_close_completion_query(std::size_t rows) {
-	return build_insert_completion_query(rows, "completed_closes");
-}
-std::string build_insert_mirror_completion_query(std::size_t rows) {
-	return build_insert_completion_query(rows, "completed_mirrors");
-}
 
 struct SelsertGadgetByDataResult {
-	//TODO: novel_global_ids will always be an interval, so should just be a pair
 	//TODO: local_to_global could be a dynarray to allow allocating without initializing it
-	vector<std::uint64_t> local_to_global, novel_global_ids;
-	std::size_t early_pruned, late_pruned, novel_size;
+	vector<std::uint64_t> local_to_global;
+	pair<uint64_t, uint64_t> novel_global_ids;
+	std::size_t early_pruned, late_pruned;
+	std::size_t novel_size() const {
+		return novel_global_ids.second - novel_global_ids.first;
+	}
 };
 /**
  * Returns the global gadget id of each of the given rows, inserting the row if
@@ -250,7 +160,7 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 		lmdb::dbi& gadget_index, vector<vector<std::byte>>&& gadgets) {
 	SelsertGadgetByDataResult ret;
 	ret.local_to_global.resize(gadgets.size(), std::numeric_limits<std::uint64_t>::max());
-	ret.early_pruned = ret.late_pruned = ret.novel_size = 0;
+	ret.early_pruned = ret.late_pruned = 0;
 
 	vector<std::uint64_t> hashes(gadgets.size(), std::numeric_limits<std::uint64_t>::max());
 	{
@@ -305,6 +215,7 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 				last_id = lmdb::from_sv<std::uint64_t>(last_id_view);
 			else
 				last_id = 0; //empty index; starting at 0 means first key will be 1
+			ret.novel_global_ids.first = ret.novel_global_ids.second = last_id + 1;
 
 			//We'll try to insert at the proposed insert point, but some other
 			//transaction may have written there as well (or ourselves if we have
@@ -338,8 +249,7 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 					throw std::runtime_error(fmt::format("failed to append to index: index {} key {} hash {}",
 							i, last_id, hashes[i]));
 				ret.local_to_global[i] = last_id;
-				ret.novel_global_ids.push_back(last_id);
-				++ret.novel_size;
+				ret.novel_global_ids.second++;
 
 				labeled_continue: ;
 			}
@@ -349,19 +259,9 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 	//Should have filled in everything now.
 	assert(std::find(ret.local_to_global.begin(), ret.local_to_global.end(),
 			std::numeric_limits<std::uint64_t>::max()) == ret.local_to_global.end());
+	//We may have modified gadgets, so it's not safe for the caller to use anyway.
+	vector<vector<std::byte>> ensure_memory_is_freed(std::move(gadgets));
 	return ret;
-}
-SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, transaction& trans, vector<vector<std::byte>>&& rows) {
-	return {};
-}
-//as above, but executes as its own transaction
-SelsertGadgetByDataResult selsert_gadget_by_data(pqxx::connection& conn, vector<vector<std::byte>>&& rows) {
-	return retry_db_operation([&]() {
-		transaction trans(conn);
-		SelsertGadgetByDataResult res = selsert_gadget_by_data(conn, trans, std::move(rows));
-		trans.commit();
-		return std::move(res);
-	}, 10, "selsert_gadget_by_data");
 }
 
 vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(vector<std::uint64_t>&& data) {
@@ -369,259 +269,268 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(vector<std::uint64_t>&
 	return maximal_intervals(ensure_memory_is_freed.begin(), ensure_memory_is_freed.end());
 }
 
-template<typename T>
-struct fits_in {
-	bool operator()(T t) const noexcept {
-		return t <= std::numeric_limits<T>::max();
-	}
-};
+static std::string g_database_path;
 
-static std::string g_database_connect_string;
+//DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
+//		vector<std::uint64_t>&& input_gids, //for completion data
+//		vector<vector<std::byte>>&& rows, vector<ConnectProvenance>&& prov, std::size_t pruned) {
+//	std::sort(input_gids.begin(), input_gids.end());
+//	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
+//	std::size_t survivor_size = rows.size();
+//	std::size_t edge_count = prov.size();
+//	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
+//	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
+//	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+//
+//	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(ConnectProvenance::output1)>())) {
+//		for (ConnectProvenance& p : prov)
+//			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
+//		std::sort(prov.begin(), prov.end());
+//
+//		retry_db_operation([&]() {
+//			transaction trans(conn);
+//			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(prov));
+//			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
+//			trans.commit();
+//			return nullptr;
+//		}, 10, "commit_connect_result inserting provs");
+//	} else {
+//		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
+//		vector<std::tuple<uint64_t, uint64_t, std::uint16_t, std::uint16_t>> edges;
+//		for (const ConnectProvenance& p : prov)
+//			edges.emplace_back(p.input1, local_to_global[p.output1], p.connectPoint, p.canonicalizePermutation);
+//		std::sort(edges.begin(), edges.end());
+//
+//		retry_db_operation([&]() {
+//			transaction trans(conn);
+//			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(edges));
+//			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
+//			trans.commit();
+//			return nullptr;
+//		}, 10, "commit_connect_result inserting edges");
+//	}
+//	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
+//}
+//
+//DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
+//	pqxx::connection conn(g_database_connect_string);
+//	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
+//	Finisher outputs = do_connect(std::move(inputs));
+//	return commit_connect_result(conn, std::move(input_gids), std::move(outputs.rows_).values_container(),
+//			std::move(outputs.prov_), outputs.pruned_);
+//}
+//
+//DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, vector<vector<std::byte>>&& rows,
+//		vector<CombineProvenance>&& prov, std::size_t pruned) {
+//	std::size_t survivor_size = rows.size(), edge_count = prov.size();
+//	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
+//	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+//	//We only need the size here, so clean up.
+//	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
+//	selsert_result.novel_global_ids.clear();
+//	selsert_result.novel_global_ids.shrink_to_fit();
+//
+//	//We want to insert edges in sorted order to reduce serialization failures.
+//	//We can use the Provenance if the new ids fit; otherwise we have to copy.
+//	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(CombineProvenance::output1)>())) {
+//		for (CombineProvenance& p : prov)
+//			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
+//		std::sort(prov.begin(), prov.end());
+//		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(prov), "commit_combine_result inserting provs");
+//	} else {
+//		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
+//		vector<std::tuple<uint64_t, uint64_t, uint64_t, std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t>> edges;
+//		for (const CombineProvenance& p : prov)
+//			edges.emplace_back(p.input1, p.input2, local_to_global[p.output1], p.splice, p.rotation, p.connectPoint, p.canonicalizePermutation);
+//		std::sort(edges.begin(), edges.end());
+//		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(edges), "commit_combine_result inserting tuples");
+//	}
+//	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
+//}
+//
+//DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
+//	vector<std::uint64_t> input_gids;
+//	input_gids.reserve(left_gids.size() + right_gids.size());
+//	input_gids.insert(input_gids.end(), left_gids.begin(), left_gids.end());
+//	input_gids.insert(input_gids.end(), right_gids.begin(), right_gids.end());
+//	std::sort(input_gids.begin(), input_gids.end());
+//	input_gids.erase(std::unique(input_gids.begin(), input_gids.end()), input_gids.end());
+//
+//	pqxx::connection conn(g_database_connect_string);
+//
+//	//TODO: select_gadget_id_to_data should be templated on the result container so we can directly build this map
+//	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
+//	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
+//	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
+//		map.try_emplace(p.first, std::move(p.second));
+//	Finisher outputs = do_combine(std::move(map), left_gids, right_gids, precision);
+//	return commit_combine_result(conn, std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_);
+//}
 
-DatabaseOperationStatistics commit_connect_result(pqxx::connection& conn,
-		vector<std::uint64_t>&& input_gids, //for completion data
-		vector<vector<std::byte>>&& rows, vector<ConnectProvenance>&& prov, std::size_t pruned) {
-	std::sort(input_gids.begin(), input_gids.end());
-	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
-	std::size_t survivor_size = rows.size();
-	std::size_t edge_count = prov.size();
-	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
-	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
-	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-
-	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(ConnectProvenance::output1)>())) {
-		for (ConnectProvenance& p : prov)
-			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
-		std::sort(prov.begin(), prov.end());
-
-		retry_db_operation([&]() {
-			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(prov));
-			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
-			trans.commit();
-			return nullptr;
-		}, 10, "commit_connect_result inserting provs");
-	} else {
-		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
-		vector<std::tuple<uint64_t, uint64_t, std::uint16_t, std::uint16_t>> edges;
-		for (const ConnectProvenance& p : prov)
-			edges.emplace_back(p.input1, local_to_global[p.output1], p.connectPoint, p.canonicalizePermutation);
-		std::sort(edges.begin(), edges.end());
-
-		retry_db_operation([&]() {
-			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_connect_edges_query, 65535/4, std::move(edges));
-			batch_parameterized(conn, trans, build_insert_connect_completion_query, 65535/2, std::move(completed_ranges));
-			trans.commit();
-			return nullptr;
-		}, 10, "commit_connect_result inserting edges");
-	}
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
-}
-
-DatabaseOperationStatistics do_connect_db(vector<std::uint64_t> input_gids) {
-	pqxx::connection conn(g_database_connect_string);
-	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-	Finisher outputs = do_connect(std::move(inputs));
-	return commit_connect_result(conn, std::move(input_gids), std::move(outputs.rows_).values_container(),
-			std::move(outputs.prov_), outputs.pruned_);
-}
-
-DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, vector<vector<std::byte>>&& rows,
-		vector<CombineProvenance>&& prov, std::size_t pruned) {
-	std::size_t survivor_size = rows.size(), edge_count = prov.size();
-	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
-	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-	//We only need the size here, so clean up.
-	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
-	selsert_result.novel_global_ids.clear();
-	selsert_result.novel_global_ids.shrink_to_fit();
-
-	//We want to insert edges in sorted order to reduce serialization failures.
-	//We can use the Provenance if the new ids fit; otherwise we have to copy.
-	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(CombineProvenance::output1)>())) {
-		for (CombineProvenance& p : prov)
-			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
-		std::sort(prov.begin(), prov.end());
-		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(prov), "commit_combine_result inserting provs");
-	} else {
-		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
-		vector<std::tuple<uint64_t, uint64_t, uint64_t, std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t>> edges;
-		for (const CombineProvenance& p : prov)
-			edges.emplace_back(p.input1, p.input2, local_to_global[p.output1], p.splice, p.rotation, p.connectPoint, p.canonicalizePermutation);
-		std::sort(edges.begin(), edges.end());
-		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(edges), "commit_combine_result inserting tuples");
-	}
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
-}
-
-DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
-	vector<std::uint64_t> input_gids;
-	input_gids.reserve(left_gids.size() + right_gids.size());
-	input_gids.insert(input_gids.end(), left_gids.begin(), left_gids.end());
-	input_gids.insert(input_gids.end(), right_gids.begin(), right_gids.end());
-	std::sort(input_gids.begin(), input_gids.end());
-	input_gids.erase(std::unique(input_gids.begin(), input_gids.end()), input_gids.end());
-
-	pqxx::connection conn(g_database_connect_string);
-
-	//TODO: select_gadget_id_to_data should be templated on the result container so we can directly build this map
-	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
-	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
-		map.try_emplace(p.first, std::move(p.second));
-	Finisher outputs = do_combine(std::move(map), left_gids, right_gids, precision);
-	return commit_combine_result(conn, std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_);
-}
-
-DatabaseOperationStatistics commit_close_result(pqxx::connection& conn,
-		vector<std::uint64_t>&& input_gids, //for completion data
-		vector<vector<std::byte>>&& rows, vector<SimpleProvenance>&& prov, std::size_t pruned) {
-	std::size_t survivor_size = rows.size();
+DatabaseOperationStatistics commit_close_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& close_edges, lmdb::dbi& completions,
+		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
+		vector<SimpleProvenance>&& prov, std::size_t pruned) {
+	std::size_t survivor_size = gadgets.size();
 	std::size_t edge_count = prov.size();
 
-	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
-	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
-	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-	const vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets));
 
-	//Closure is idempotent, so we've also finished for any new gadgets.
-	input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
-	std::sort(input_gids.begin(), input_gids.end());
-	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
+	//We don't need to group provs by input1 (as there's only one close edge
+	//from a given gadget), but sorting improves insert performance.
+	if (!std::is_sorted(prov.begin(), prov.end(), InputGroupingProvCmp()))
+		std::sort(prov.begin(), prov.end(), InputGroupingProvCmp());
 
-	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(SimpleProvenance::output1)>())) {
-		for (SimpleProvenance& p : prov)
-			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
-		std::sort(prov.begin(), prov.end());
-
-		retry_db_operation([&]() {
-			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_close_edges_query, 65535/3, std::move(prov));
-			batch_parameterized(conn, trans, build_insert_close_completion_query, 65535/2, std::move(completed_ranges));
-			trans.commit();
-			return nullptr;
-		}, 10, "commit_close_result inserting provs");
-	} else {
-		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
-		vector<std::tuple<uint64_t, uint64_t, std::uint16_t>> edges;
-		for (const SimpleProvenance& p : prov)
-			edges.emplace_back(p.input1, local_to_global[p.output1], p.canonicalizePermutation);
-		std::sort(edges.begin(), edges.end());
-
-		retry_db_operation([&]() {
-			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_close_edges_query, 65535/3, std::move(edges));
-			batch_parameterized(conn, trans, build_insert_close_completion_query, 65535/2, std::move(completed_ranges));
-			trans.commit();
-			return nullptr;
-		}, 10, "commit_close_result inserting edges");
-	}
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
-}
-
-DatabaseOperationStatistics do_close_db(vector<std::uint64_t> input_gids) {
-	pqxx::connection conn(g_database_connect_string);
-	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-	Finisher<SimpleProvenance> outputs = do_close(std::move(inputs));
-	return commit_close_result(conn, std::move(input_gids), std::move(outputs.rows_).values_container(),
-			std::move(outputs.prov_), outputs.pruned_);
-}
-
-DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
-		vector<std::uint64_t>&& input_gids, //for completion data
-		vector<vector<std::byte>>&& rows, vector<SimpleProvenance>&& prov, std::size_t pruned) {
-	std::size_t survivor_size = rows.size();
-	std::size_t edge_count = prov.size();
-
-	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
-	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-	const vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
-	std::size_t novel_gadgets_size = novel_global_ids.size();
-
-	//Mirror is undirected, so we've also finished for any new gadgets.
-	input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
-	std::sort(input_gids.begin(), input_gids.end());
-	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
-
-	//We have to sort the edge's vertices after remapping.  That means our check
-	//for reusing the provs is stricter.  We don't need to deduplicate due "on
-	//conflict do nothing", but it is probably faster to do so if it saves us a
-	//database round-trip.
-	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(SimpleProvenance::output1)>()) &&
-			//p.input1 also fits in output1 (no clean way without a lambda)
-			std::all_of(prov.begin(), prov.end(), [](const SimpleProvenance& p) {
-				return p.input1 <= std::numeric_limits<decltype(SimpleProvenance::output1)>::max();
-			})) {
+	auto txn = lmdb::txn::begin(env);
+	{
+		lmdb::cursor cur = lmdb::cursor::open(txn, close_edges);
+		SimpleEdge e;
 		for (SimpleProvenance& p : prov) {
-			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
-			if (p.input1 > p.output1) {
-				//We can't just swap because they aren't the same size.
-				std::size_t x = p.input1;
-				p.input1 = p.output1;
-				p.output1 = static_cast<std::uint32_t>(x);
+			e.output = selsert_result.local_to_global[p.output1];
+			e.canonicalizePermutation = p.canonicalizePermutation;
+			std::string_view value = lmdb::to_sv(e);
+			if (!cur.put(lmdb::to_sv(p.input1), value, MDB_NOOVERWRITE)) {
+				//Having done some duplicate work is fine, so long as we got the
+				//same result.  If not, either there's a bug in the code or the
+				//database is corrupt.
+				SimpleEdge exist = lmdb::from_sv<SimpleEdge>(value);
+				if (e != exist)
+					throw std::runtime_error(fmt::format("differing close edges from {}: {}/{} and {}/{}",
+							p.input1, e.output, e.canonicalizePermutation, exist.output, exist.canonicalizePermutation));
+				--edge_count; //we didn't actually add this edge, don't count it
 			}
 		}
-		std::sort(prov.begin(), prov.end());
-		prov.erase(std::unique(prov.begin(), prov.end()), prov.end());
-
-		retry_db_operation([&]() {
-			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(prov));
-			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
-			trans.commit();
-			return nullptr;
-		}, 10, "commit_mirror_result inserting provs");
-	} else {
-		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
-		vector<std::tuple<uint64_t, uint64_t, std::uint16_t>> edges;
-		for (const SimpleProvenance& p : prov) {
-			uint64_t output = local_to_global[p.output1];
-			edges.emplace_back(std::min(p.input1, output), std::max(p.input1, output), p.canonicalizePermutation);
-		}
-		std::sort(edges.begin(), edges.end());
-		edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
-
-		retry_db_operation([&]() {
-			transaction trans(conn);
-			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(edges));
-			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
-			trans.commit();
-			return nullptr;
-		}, 10, "commit_mirror_result inserting edges");
 	}
-	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
+
+	union_completion(env, txn, completions, "close", input_intervals);
+	txn.commit();
+
+	return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 }
 
-DatabaseOperationStatistics do_mirror_db(vector<std::uint64_t> input_gids) {
-	pqxx::connection conn(g_database_connect_string);
-	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
-	return commit_mirror_result(conn, std::move(input_gids), std::move(outputs.rows_).values_container(),
+//extracted for the benefit of sync_mode
+DatabaseOperationStatistics do_close_db0(vector<pair<uint64_t, uint64_t>> input_intervals,
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, lmdb::dbi& close_edges,
+		lmdb::dbi& completions) {
+	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, input_intervals);
+	Finisher<SimpleProvenance> outputs = do_close(std::move(inputs));
+	return commit_close_result(env, gadget_hashtable, gadget_index, close_edges, completions,
+			std::move(input_intervals), std::move(outputs.rows_).values_container(),
 			std::move(outputs.prov_), outputs.pruned_);
 }
 
+DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str()); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index, completions, close_edges;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		close_edges = lmdb::dbi::open(txn, "edges-close");
+		txn.commit();
+	}
+	return do_close_db0(std::move(input_intervals), env, gadget_hashtable, gadget_index, close_edges, completions);
+}
+
+//DatabaseOperationStatistics commit_mirror_result(pqxx::connection& conn,
+//		vector<std::uint64_t>&& input_gids, //for completion data
+//		vector<vector<std::byte>>&& rows, vector<SimpleProvenance>&& prov, std::size_t pruned) {
+//	std::size_t survivor_size = rows.size();
+//	std::size_t edge_count = prov.size();
+//
+//	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
+//	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
+//	const vector<std::uint64_t>& novel_global_ids = selsert_result.novel_global_ids;
+//	std::size_t novel_gadgets_size = novel_global_ids.size();
+//
+//	//Mirror is undirected, so we've also finished for any new gadgets.
+//	input_gids.insert(input_gids.end(), novel_global_ids.begin(), novel_global_ids.end());
+//	std::sort(input_gids.begin(), input_gids.end());
+//	vector<pair<std::uint64_t, std::uint64_t>> completed_ranges = maximal_ranges(std::move(input_gids));
+//
+//	//We have to sort the edge's vertices after remapping.  That means our check
+//	//for reusing the provs is stricter.  We don't need to deduplicate due "on
+//	//conflict do nothing", but it is probably faster to do so if it saves us a
+//	//database round-trip.
+//	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(SimpleProvenance::output1)>()) &&
+//			//p.input1 also fits in output1 (no clean way without a lambda)
+//			std::all_of(prov.begin(), prov.end(), [](const SimpleProvenance& p) {
+//				return p.input1 <= std::numeric_limits<decltype(SimpleProvenance::output1)>::max();
+//			})) {
+//		for (SimpleProvenance& p : prov) {
+//			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
+//			if (p.input1 > p.output1) {
+//				//We can't just swap because they aren't the same size.
+//				std::size_t x = p.input1;
+//				p.input1 = p.output1;
+//				p.output1 = static_cast<std::uint32_t>(x);
+//			}
+//		}
+//		std::sort(prov.begin(), prov.end());
+//		prov.erase(std::unique(prov.begin(), prov.end()), prov.end());
+//
+//		retry_db_operation([&]() {
+//			transaction trans(conn);
+//			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(prov));
+//			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
+//			trans.commit();
+//			return nullptr;
+//		}, 10, "commit_mirror_result inserting provs");
+//	} else {
+//		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
+//		vector<std::tuple<uint64_t, uint64_t, std::uint16_t>> edges;
+//		for (const SimpleProvenance& p : prov) {
+//			uint64_t output = local_to_global[p.output1];
+//			edges.emplace_back(std::min(p.input1, output), std::max(p.input1, output), p.canonicalizePermutation);
+//		}
+//		std::sort(edges.begin(), edges.end());
+//		edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+//
+//		retry_db_operation([&]() {
+//			transaction trans(conn);
+//			batch_parameterized(conn, trans, build_insert_mirror_edges_query, 65535/3, std::move(edges));
+//			batch_parameterized(conn, trans, build_insert_mirror_completion_query, 65535/2, std::move(completed_ranges));
+//			trans.commit();
+//			return nullptr;
+//		}, 10, "commit_mirror_result inserting edges");
+//	}
+//	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
+//}
+//
+//DatabaseOperationStatistics do_mirror_db(vector<std::uint64_t> input_gids) {
+//	pqxx::connection conn(g_database_connect_string);
+//	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
+//	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
+//	return commit_mirror_result(conn, std::move(input_gids), std::move(outputs.rows_).values_container(),
+//			std::move(outputs.prov_), outputs.pruned_);
+//}
 
 
-DatabaseOperationStatistics do_batch_combine_commit(vector<vector<std::byte>> rows, vector<CombineProvenance> prov, std::size_t pruned) {
-	pqxx::connection conn(g_database_connect_string);
-	return commit_combine_result(conn, std::move(rows), std::move(prov), pruned);
-}
-DatabaseOperationStatistics do_batch_connect_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
-		vector<ConnectProvenance> prov, std::size_t pruned) {
-	pqxx::connection conn(g_database_connect_string);
-	return commit_connect_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
-}
-DatabaseOperationStatistics do_batch_close_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
-		vector<SimpleProvenance> prov, std::size_t pruned) {
-	pqxx::connection conn(g_database_connect_string);
-	return commit_close_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
-}
-DatabaseOperationStatistics do_batch_mirror_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
-		vector<SimpleProvenance> prov, std::size_t pruned) {
-	pqxx::connection conn(g_database_connect_string);
-	return commit_mirror_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
-}
+
+//DatabaseOperationStatistics do_batch_combine_commit(vector<vector<std::byte>> rows, vector<CombineProvenance> prov, std::size_t pruned) {
+//	pqxx::connection conn(g_database_connect_string);
+//	return commit_combine_result(conn, std::move(rows), std::move(prov), pruned);
+//}
+//DatabaseOperationStatistics do_batch_connect_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
+//		vector<ConnectProvenance> prov, std::size_t pruned) {
+//	pqxx::connection conn(g_database_connect_string);
+//	return commit_connect_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
+//}
+//DatabaseOperationStatistics do_batch_close_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
+//		vector<SimpleProvenance> prov, std::size_t pruned) {
+//	pqxx::connection conn(g_database_connect_string);
+//	return commit_close_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
+//}
+//DatabaseOperationStatistics do_batch_mirror_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
+//		vector<SimpleProvenance> prov, std::size_t pruned) {
+//	pqxx::connection conn(g_database_connect_string);
+//	return commit_mirror_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
+//}
 
 
 
@@ -643,19 +552,19 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 
 //	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 
-	{"connect-db"sv, &handler_adapter<do_connect_db>},
-	{"combine-db"sv, &handler_adapter<do_combine_db>},
-	{"close-db"sv, &handler_adapter<do_close_db>},
-	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
-
-	{"batch-combine"sv, &handler_adapter<do_batch_combine>},
-	{"batch-combine-commit"sv, &handler_adapter<do_batch_combine_commit>},
-	{"batch-connect"sv, &handler_adapter<do_batch_connect>},
-	{"batch-connect-commit"sv, &handler_adapter<do_batch_connect_commit>},
-	{"batch-close"sv, &handler_adapter<do_batch_close>},
-	{"batch-close-commit"sv, &handler_adapter<do_batch_close_commit>},
-	{"batch-mirror"sv, &handler_adapter<do_batch_mirror>},
-	{"batch-mirror-commit"sv, &handler_adapter<do_batch_mirror_commit>},
+//	{"connect-db"sv, &handler_adapter<do_connect_db>},
+//	{"combine-db"sv, &handler_adapter<do_combine_db>},
+//	{"close-db"sv, &handler_adapter<do_close_db>},
+//	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
+//
+//	{"batch-combine"sv, &handler_adapter<do_batch_combine>},
+//	{"batch-combine-commit"sv, &handler_adapter<do_batch_combine_commit>},
+//	{"batch-connect"sv, &handler_adapter<do_batch_connect>},
+//	{"batch-connect-commit"sv, &handler_adapter<do_batch_connect_commit>},
+//	{"batch-close"sv, &handler_adapter<do_batch_close>},
+//	{"batch-close-commit"sv, &handler_adapter<do_batch_close_commit>},
+//	{"batch-mirror"sv, &handler_adapter<do_batch_mirror>},
+//	{"batch-mirror-commit"sv, &handler_adapter<do_batch_mirror_commit>},
 };
 
 
@@ -892,12 +801,13 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 			naming[source] = naming[target];
 		}
 	}
+	std::size_t canonicals_size = canonicals.size();
 
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str()); //TODO: flags?
-	lmdb::dbi gadget_hashtable, gadget_index, names_db;
+	lmdb::dbi gadget_hashtable, gadget_index, names_db, completions, close_edges;
 	{
 		lmdb::txn txn = lmdb::txn::begin(env);
 		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable", MDB_CREATE | MDB_INTEGERKEY);
@@ -908,6 +818,20 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		//or removing any keys, it's more convenient for our code to just store
 		//byte arrays.  There are few enough names that compression isn't useful.
 		names_db = lmdb::dbi::open(txn, "names", MDB_CREATE);
+
+		//We also open some databases we don't use here, just to ensure they
+		//exist when the database starts.  Combine-related databases are created
+		//on demand (because they are specific to the right operand).
+
+		//The completions database holds keys named "close", "mirror", "connect"
+		//and "combine-{}" whose values are an interval list.
+		completions = lmdb::dbi::open(txn, "completions", MDB_CREATE);
+
+		lmdb::dbi::open(txn, "edges-mirror", MDB_CREATE | MDB_INTEGERKEY);
+		close_edges = lmdb::dbi::open(txn, "edges-close", MDB_CREATE | MDB_INTEGERKEY);
+		lmdb::dbi::open(txn, "edges-combine", MDB_CREATE | MDB_INTEGERKEY);
+
+		//TODO: driver's work-tracking things? or leave those for the driver?
 		txn.commit();
 	}
 
@@ -934,8 +858,20 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				throw std::runtime_error(fmt::format("failed to insert names {} -> {}", p.first, p.second));
 		txn.commit();
 	}
+	fmt::print("loaded {} gadgets ({} novel) and {} names",
+			canonicals.size(), selsert_result.novel_size(), sorted_names.size());
 
-	//TODO: close/mirroring
+	//Now close and mirror all gadgets (even non-novel ones) that need it, for
+	//the benefit of the reporter.
+	std::sort(selsert_result.local_to_global.begin(), selsert_result.local_to_global.end());
+	vector<pair<uint64_t, uint64_t>> named_gadgets = maximal_ranges(std::move(selsert_result.local_to_global));
+	auto needs_close = filter_completion(env, completions, "close", named_gadgets);
+	DatabaseOperationStatistics close_stats = do_close_db0(std::move(needs_close),
+			env, gadget_hashtable, gadget_index, close_edges, completions);
+	fmt::print("close: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
+			close_stats.pruned_locally, close_stats.pruned_database, close_stats.novel_gadgets, close_stats.edges);
+
+	
 
 	return 0;
 }
@@ -961,6 +897,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		} else
 			positionals.push_back(argv[i]);
 	}
+
+	g_database_path = std::string(db_path);
 
 	if (mode == "sync"sv) {
 		return sync_mode(db_path, positionals);

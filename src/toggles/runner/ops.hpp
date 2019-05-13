@@ -4,8 +4,9 @@
 #include "automaton.hpp"
 #include "canonicalize.hpp"
 #include "gadget-encoding.hpp"
-#include "tsl/ordered_set.h"
+#include "provenance.hpp"
 #include "../toggles-shared.hpp"
+#include "tsl/ordered_set.h"
 
 template<class Provenance>
 struct Finisher {
