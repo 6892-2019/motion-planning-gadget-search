@@ -203,7 +203,7 @@ std::size_t write_compressed(const std::vector<GadgetEdge>& edges, const EdgeCod
 	return size;
 }
 
-template<class EdgeCoder>
+template<bool directed, class EdgeCoder>
 void read_compressed(PackReader& reader, unsigned int count, const EdgeCoder& coder, GadgetBuilder& builder) {
 	std::uint64_t previous = 0;
 	for (unsigned int i = 0; i < count; ++i) {
@@ -211,6 +211,8 @@ void read_compressed(PackReader& reader, unsigned int count, const EdgeCoder& co
 		cur += previous;
 		GadgetEdge e = coder.decode(cur);
 		builder.trans(e.start, e.from, e.to, e.end);
+		if (!directed)
+			builder.trans(e.end, e.to, e.from, e.start);
 		previous = cur;
 	}
 }
@@ -384,8 +386,8 @@ std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gad
 	//error checking.  We know how many edges to read, just not how many bytes
 	//they were encoded with.
 	PackReader reader(edgelist_begin, encoded_gadget + length);
-	read_compressed(reader, stats.undirected_edges, coder, builder);
-	read_compressed(reader, stats.directed_edges, coder, builder);
+	read_compressed<false>(reader, stats.undirected_edges, coder, builder);
+	read_compressed<true>(reader, stats.directed_edges, coder, builder);
 	assert(reader.tell() == encoded_gadget + length);
 	assert(!reader.overflow());
 	return builder.build();
