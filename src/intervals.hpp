@@ -62,6 +62,59 @@ std::vector<std::pair<T, T>> interval_coalesce(It1 left, It1 left_end) {
 	return ret;
 }
 
+
+
+template<typename T>
+class interval_accumulator {
+public:
+	interval_accumulator(std::size_t buffer_capacity) {
+		if (!buffer_capacity)
+			throw std::length_error("interval_accumulator must have buffer capacity");
+		buf.reserve(buffer_capacity);
+	}
+	void operator()(T x) {
+		//TODO: We're usually adding in sorted order, and some of those things
+		//have duplicates, so we could return early if (!buf.empty() && x == buf.back()).
+		//That would mean we drain less often at the cost of an unpredictable
+		//branch in operator().
+		if (buf.size() == buf.capacity())
+			drain_buffer();
+		buf.push_back(x);
+	}
+	//TODO: when this class was written inline, before inserting a batch of N
+	//items, we'd check we had space (draining early if necessary), saving
+	//having to check on each element.  Our elements aren't usually contiguous
+	//(being extracted from structs), so it's not clear how to modularize that.
+	//That approach also threw if any one batch was too big for the buffer, but
+	//the new approach never has that problem, so there's some advantage here.
+
+	//This is &&-qualified to preserve the chance to use a mutating
+	//interval_coalesce if I ever write one.
+	std::vector<std::pair<T, T>> finish() && {
+		drain_buffer();
+		auto ret = interval_coalesce(accum.cbegin(), accum.cend());
+		accum.clear();
+		return ret;
+	}
+private:
+	std::vector<std::pair<T, T>> accum;
+	std::vector<T> buf;
+	void drain_buffer() {
+		std::sort(buf.begin(), buf.end());
+		buf.erase(std::unique(buf.begin(), buf.end()), buf.end());
+		//TODO: we could avoid this temporary with a maximal_intervals overload
+		//using an output iterator (a back_inserter into accum);
+		auto ints = maximal_intervals(buf.begin(), buf.end());
+		accum.insert(accum.end(), ints.begin(), ints.end());
+		buf.clear();
+		//TODO: we might want to coalesce accum periodically to reduce peak
+		//memory usage, though we'd also want to stop coalescing if we don't
+		//get any size reduction.
+	}
+};
+
+
+
 template<typename It1>
 std::size_t interval_size(It1 left, It1 left_end) {
 	std::size_t size = 0;

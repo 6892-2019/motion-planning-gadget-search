@@ -269,22 +269,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
 template<class Edge>
 std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env,
 		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources) {
-	vector<pair<uint64_t, uint64_t>> accum;
-	vector<uint64_t> buf;
-	buf.reserve(256);
-
-	auto drain_buffer = [&]() {
-		//TODO: I guess we might want to abort the txn and renew it and the
-		//cursor before we return.  need to be careful with key/value lifetime
-		std::sort(buf.begin(), buf.end());
-		buf.erase(std::unique(buf.begin(), buf.end()), buf.end());
-		//TODO: we could avoid this temporary with a maximal_intervals overload
-		//using an output iterator (a back_inserter into accum);
-		auto ints = maximal_intervals(buf.begin(), buf.end());
-		accum.insert(accum.end(), ints.begin(), ints.end());
-		buf.clear();
-	};
-
+	interval_accumulator<uint64_t> accum(256);
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 	lmdb::cursor cur = lmdb::cursor::open(txn, edge_db);
 	for (const pair<uint64_t, uint64_t>& p : sources) {
@@ -303,23 +288,14 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env
 						typeid(Edge).name(), value.size(), sizeof(Edge)));
 			const Edge* first = reinterpret_cast<const Edge*>(value.data());
 			const Edge* last = first + value.size() / sizeof(Edge);
-			std::size_t count = numeric_cast<std::size_t>(last - first);
-			if (count > buf.capacity())
-				throw std::logic_error(fmt::format("target buffer has capacity {}, but key {} has {} edges of type {}",
-						buf.capacity(), lmdb::from_sv<uint64_t>(key), count, typeid(Edge).name()));
-			if (count > buf.capacity() - buf.size())
-				drain_buffer();
 			while (first != last)
-				buf.push_back(first++->output);
+				accum(first++->output);
 
 			if (!cur.get(key, value, MDB_NEXT)) break;
 		}
 	}
-	drain_buffer();
 	txn.commit();
-
-	std::sort(accum.begin(), accum.end());
-	return interval_coalesce(accum.cbegin(), accum.cend());
+	return std::move(accum).finish();
 }
 
 //explicitly instantiate the three we need
