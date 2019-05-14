@@ -105,15 +105,17 @@ Finisher<SimpleProvenance> do_mirror(vector<pair<std::uint64_t, vector<std::byte
 //	std::exit(0);
 //}
 
-//namespace {
-//vector<uint64_t> extract_first(const vector<pair<uint64_t, vector<std::byte>>>& inputs) {
-//	vector<uint64_t> input_gids;
-//	input_gids.reserve(inputs.size());
-//	for (const auto& p : inputs)
-//		input_gids.push_back(p.first);
-//	return input_gids;
-//}
-//}
+namespace {
+//I guess this could be a generalized projection function...
+template<class T>
+auto extract_first(const vector<T>& inputs) {
+	vector<typename std::tuple_element<0, T>::type> firsts;
+	firsts.reserve(inputs.size());
+	for (const auto& p : inputs)
+		firsts.push_back(std::get<0>(p));
+	return firsts;
+}
+}
 
 //[[noreturn]] int do_batch_connect(vector<pair<uint64_t, vector<std::byte>>> inputs) {
 //	vector<uint64_t> input_gids = extract_first(inputs);
@@ -274,52 +276,130 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(vector<std::uint64_t>&
 
 static std::string g_database_path;
 
-//DatabaseOperationStatistics commit_combine_result(pqxx::connection& conn, vector<vector<std::byte>>&& rows,
-//		vector<CombineProvenance>&& prov, std::size_t pruned) {
-//	std::size_t survivor_size = rows.size(), edge_count = prov.size();
-//	auto selsert_result = selsert_gadget_by_data(conn, std::move(rows));
-//	const vector<std::uint64_t>& local_to_global = selsert_result.local_to_global;
-//	//We only need the size here, so clean up.
-//	std::size_t novel_gadgets_size = selsert_result.novel_global_ids.size();
-//	selsert_result.novel_global_ids.clear();
-//	selsert_result.novel_global_ids.shrink_to_fit();
-//
-//	//We want to insert edges in sorted order to reduce serialization failures.
-//	//We can use the Provenance if the new ids fit; otherwise we have to copy.
-//	if (std::all_of(local_to_global.begin(), local_to_global.end(), fits_in<decltype(CombineProvenance::output1)>())) {
-//		for (CombineProvenance& p : prov)
-//			p.output1 = static_cast<std::uint32_t>(local_to_global[p.output1]);
-//		std::sort(prov.begin(), prov.end());
-//		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(prov), "commit_combine_result inserting provs");
-//	} else {
-//		//We use larger types than necessary because pqxx doesn't want to string/unstring uint8_t.
-//		vector<std::tuple<uint64_t, uint64_t, uint64_t, std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t>> edges;
-//		for (const CombineProvenance& p : prov)
-//			edges.emplace_back(p.input1, p.input2, local_to_global[p.output1], p.splice, p.rotation, p.connectPoint, p.canonicalizePermutation);
-//		std::sort(edges.begin(), edges.end());
-//		batch_parameterized(conn, build_insert_combine_edges_query, 65535/7, std::move(edges), "commit_combine_result inserting tuples");
-//	}
-//	return {pruned, survivor_size - novel_gadgets_size, novel_gadgets_size, edge_count};
-//}
-//
-//DatabaseOperationStatistics do_combine_db(vector<std::uint64_t> left_gids, vector<std::uint64_t> right_gids, unsigned int precision) {
-//	vector<std::uint64_t> input_gids;
-//	input_gids.reserve(left_gids.size() + right_gids.size());
-//	input_gids.insert(input_gids.end(), left_gids.begin(), left_gids.end());
-//	input_gids.insert(input_gids.end(), right_gids.begin(), right_gids.end());
-//	std::sort(input_gids.begin(), input_gids.end());
-//	input_gids.erase(std::unique(input_gids.begin(), input_gids.end()), input_gids.end());
-//
-//	pqxx::connection conn(g_database_connect_string);
-//
-//	//TODO: select_gadget_id_to_data should be templated on the result container so we can directly build this map
-//	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(conn, input_gids);
-//	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
-//	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
-//		map.try_emplace(p.first, std::move(p.second));
-//	Finisher outputs = do_combine(std::move(map), left_gids, right_gids, precision);
-//	return commit_combine_result(conn, std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_);
-//}
+DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, vector<pair<uint64_t, lmdb::dbi>>& edge_tables, lmdb::dbi& completions,
+		vector<vector<std::byte>>&& gadgets, vector<CombineProvenance>&& prov, std::size_t pruned) {
+	std::size_t survivor_size = gadgets.size();
+	std::size_t edge_count = prov.size();
+
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets));
+
+	//The loop control below assumes provs isn't empty.  It shouldn't be.
+	if (prov.empty()) {
+		fmt::print(stderr, "warning: skipping empty combine provs; there were {} gadgets\n", survivor_size);
+		return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+	}
+
+	//We group by input2, then by input1.  Because we combine against each right
+	//operand in sequence, we're usually not already sorted, so we don't check
+	//is_sorted like we do in the other commit_*_result functions.
+	std::sort(prov.begin(), prov.end(), InputGroupingProvCmp());
+
+	//We commit edges and completions one right operand at a time (so we're only
+	//touching one edge table at a time).  This is more to simplify managing
+	//cursor lifetime than to keep transactions short, as we'll start another
+	//immediately and we can't do anything useful if we're suspended.
+	auto same_input2 = [](uint64_t input2, const CombineProvenance& p){return input2 <= p.input2;};
+	for (auto block_first = prov.begin(), block_end = std::upper_bound(block_first, prov.end(), block_first->input2, same_input2);
+			block_first != prov.end();
+			block_first = block_end, block_end = std::upper_bound(block_first, prov.end(), block_first->input2, same_input2)) {
+		uint64_t input2 = block_first->input2;
+		auto edges_it = std::find_if(edge_tables.begin(), edge_tables.end(),
+				[input2](const auto& p){return p.first == input2;});
+		if (edges_it == edge_tables.end()) //TODO: unlikely
+			throw std::logic_error(fmt::format("combine edge database for right operand {} not found; available databases: {}",
+					input2, extract_first(edge_tables)));
+
+		//Combines for a pair of operands always succeed, so completions is just
+		//a summary of the edges.  (If we skipped a pair due to insufficient
+		//precision, we didn't generate any edges, so we don't record any
+		//completions and can come back for that pair later.)
+		std::string completions_kind = fmt::format("combine-{}", input2);
+		interval_accumulator<uint64_t> comp_input1(512);
+
+		auto txn = lmdb::txn::begin(env);
+		{
+			lmdb::cursor cur = lmdb::cursor::open(txn, edges_it->second);
+			boost::container::static_vector<CombineEdge, 16> buf;
+			for (std::size_t i = 0; i < prov.size();) {
+				buf.clear();
+				//Find the block sharing the same input1.
+				std::size_t j = i;
+				while (j < prov.size() && prov[i].input1 == prov[j].input1) {
+					const CombineProvenance& p = prov[j];
+					CombineEdge e;
+					e.output = selsert_result.local_to_global[p.output1];
+					e.splice = p.splice;
+					e.rotation = p.rotation;
+					e.connectPoint = p.connectPoint;
+					e.canonicalizePermutation = p.canonicalizePermutation;
+					buf.push_back(e);
+					++j;
+				}
+				//For canonicalization purposes, sort the edges.  (We have to remap
+				//through local_to_global before we can do this.)
+				std::sort(buf.begin(), buf.end());
+				std::string_view value(reinterpret_cast<char*>(buf.data()), buf.size()*sizeof(CombineEdge));
+				if (!cur.put(lmdb::to_sv(prov[i].input1), value, MDB_NOOVERWRITE)) {
+					if (value.size() == 0 || value.size() % sizeof(CombineEdge) != 0)
+						throw std::logic_error(fmt::format("combine edge data for key {}/{} has value length {} (not a multiple of {})",
+								prov[i].input1, prov[i].input2, value.size(), sizeof(CombineEdge)));
+					const CombineEdge* first = reinterpret_cast<const CombineEdge*>(value.data());
+					const CombineEdge* last = first + value.size() / sizeof(CombineEdge);
+					if (!std::equal(buf.cbegin(), buf.cend(), first, last))
+						throw std::logic_error(fmt::format("differing combine edges from {}/{}: {} and {}",
+								prov[i].input1, prov[i].input2, buf, make_range_for_pair(first, last)));
+					edge_count -= buf.size(); //don't count edges already present
+				}
+				comp_input1(prov[i].input1);
+				i = j;
+			}
+		}
+		union_completion(env, txn, completions, completions_kind, std::move(comp_input1).finish());
+		txn.commit();
+	}
+
+	return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+}
+
+DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_intervals,
+		vector<std::uint64_t> right_gids, unsigned int precision) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str()); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index, completions;
+	vector<pair<uint64_t, lmdb::dbi>> edge_tables;
+	{
+		//This is a write txn because we may have to create edge databases.  It
+		//may be better to leave it up to the driver to create them for us.
+		//TODO: try with a read-only txn, take the lock only if not present
+		lmdb::txn txn = lmdb::txn::begin(env);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		for (uint64_t i : right_gids)
+			edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", i).c_str(),
+					MDB_CREATE | MDB_INTEGERKEY));
+		txn.commit();
+	}
+
+	if (!std::is_sorted(right_gids.begin(), right_gids.end()))
+		std::sort(right_gids.begin(), right_gids.end());
+	vector<pair<uint64_t, uint64_t>> right_intervals = maximal_intervals(right_gids.begin(), right_gids.end());
+	vector<pair<uint64_t, uint64_t>> input_intervals = interval_union(
+			left_intervals.cbegin(), left_intervals.cend(), right_intervals.cbegin(), right_intervals.cend());
+	//TODO: select_gadget_id_to_data should be templated on the result container so we can directly build this map
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, std::move(input_intervals));
+	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
+	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
+		map.try_emplace(p.first, std::move(p.second));
+	Finisher<CombineProvenance> outputs = do_combine(std::move(map),
+			std::move(left_intervals), std::move(right_gids), precision);
+	return commit_combine_result(env, gadget_hashtable, gadget_index, edge_tables, completions,
+			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_);
+}
 
 
 DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
@@ -366,7 +446,7 @@ DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gad
 				if (!std::equal(buf.cbegin(), buf.cend(), first, last))
 					throw std::logic_error(fmt::format("differing connect edges from {}: {} and {}",
 							prov[i].input1, buf, make_range_for_pair(first, last)));
-				--edge_count; //we didn't actually add this edge, don't count it
+				edge_count -= buf.size(); //don't count edges already present
 			}
 			i = j;
 		}

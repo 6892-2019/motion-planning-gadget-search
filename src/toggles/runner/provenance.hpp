@@ -68,14 +68,18 @@ inline bool operator<(const SimpleProvenance& a, const SimpleProvenance& b) {
 
 
 /**
- * A comparator that sorts by input1 (only), grouping them together for database
- * insertion.  We have to remap output1 anyway so there's no point in a full
- * sort until afterward, and that's on the "half" edges.
+ * A comparator that groups provenance to prepare for database insertion.  We
+ * sort by input2 (if present), then by input1.  We have to remap output1 anyway
+ * so there's no point in a full sort until afterward, and that's on the "half"
+ * edges.
  */
 struct InputGroupingProvCmp {
 	template<class P>
 	bool operator()(const P& a, const P& b) const noexcept {
 		return a.input1 < b.input1;
+	}
+	bool operator()(const CombineProvenance& a, const CombineProvenance& b) const noexcept {
+		return std::tie(a.input2, a.input1) < std::tie(b.input2, b.input1);
 	}
 };
 

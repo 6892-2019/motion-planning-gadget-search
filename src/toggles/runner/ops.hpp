@@ -36,7 +36,8 @@ struct Finisher {
 bool acceptingClosure(automaton::WorkingAutomaton& connected, unsigned int locations);
 void connect(const automaton::AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProvenance>& finisher);
 Finisher<CombineProvenance> do_combine(tsl::hopscotch_map<std::uint64_t, std::vector<std::byte>, farmhash_hash> map,
-		const std::vector<std::uint64_t>& left_gids, const std::vector<std::uint64_t>& right_gids, unsigned int precision);
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& left_gids,
+		const std::vector<std::uint64_t>& right_gids, unsigned int precision);
 
 #endif /* OPS_HPP */
 
