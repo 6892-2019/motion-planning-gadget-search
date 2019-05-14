@@ -3,7 +3,6 @@
 #include "canonicalize.hpp"
 #include "ops.hpp"
 #include "provenance.hpp"
-#include "../database.hpp"
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
 #include "stringutils.hpp"
@@ -17,7 +16,6 @@
 #include "farmhash/farmhash.h"
 #include "lmdb++.h"
 #include <yaml-cpp/yaml.h>
-//#include <pqxx/pqxx>
 #include <cstdio>
 
 using namespace automaton;
@@ -989,7 +987,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 
 
 
-int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -llmdb -lyaml-cpp'}
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-llmdb -lyaml-cpp'}
 	std::string_view mode = "unknown-mode";
 	std::string_view db_path = "/bad-db-path-arg", input_file = "-", output_file = "-";
 	vector<std::string_view> positionals;

@@ -8,7 +8,6 @@
 #ifndef TOGGLES_SHARED_HPP
 #define TOGGLES_SHARED_HPP
 
-#include "database.hpp"
 #include <msgpack.hpp>
 #include <lmdb++.h>
 
