@@ -71,6 +71,48 @@ TEST_CASE("IntervalsTest_MaximalIntervals08") {
 
 
 
+TEST_CASE("IntervalsTest_IntervalAccumulator00") {
+	initializer_list<int> inputs = {};
+	initializer_list<pair<int, int>> expected = {};
+	interval_accumulator<int> accum(256);
+	for (int i : inputs)
+		accum(i);
+	auto actual = std::move(accum).finish();
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("IntervalsTest_IntervalAccumulator01") {
+	initializer_list<int> inputs = {5, 6, 1, 2};
+	initializer_list<pair<int, int>> expected = {{1, 3}, {5, 7}};
+	interval_accumulator<int> accum(2);
+	for (int i : inputs)
+		accum(i);
+	auto actual = std::move(accum).finish();
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("IntervalsTest_IntervalAccumulator02") {
+	initializer_list<int> inputs = {1, 2, 1, 2};
+	initializer_list<pair<int, int>> expected = {{1, 3}};
+	interval_accumulator<int> accum(2);
+	for (int i : inputs)
+		accum(i);
+	auto actual = std::move(accum).finish();
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("IntervalsTest_IntervalAccumulator03") {
+	initializer_list<int> inputs = {2, 3, 1, 4};
+	initializer_list<pair<int, int>> expected = {{1, 5}};
+	interval_accumulator<int> accum(2);
+	for (int i : inputs)
+		accum(i);
+	auto actual = std::move(accum).finish();
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+
+
 TEST_CASE("IntervalsTest_IntervalIntersection00") {
 	initializer_list<pair<int, int>> left = {};
 	initializer_list<pair<int, int>> right = {};

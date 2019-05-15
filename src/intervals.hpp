@@ -49,6 +49,7 @@ template<typename It1,
 				typename std::iterator_traits<It1>::value_type::second_type
 		>::type>
 std::vector<std::pair<T, T>> interval_coalesce(It1 left, It1 left_end) {
+	assert(std::is_sorted(left, left_end));
 	if (left == left_end)
 		return {};
 	std::vector<std::pair<T, T>> ret;
@@ -92,6 +93,7 @@ public:
 	//interval_coalesce if I ever write one.
 	std::vector<std::pair<T, T>> finish() && {
 		drain_buffer();
+		std::sort(accum.begin(), accum.end());
 		auto ret = interval_coalesce(accum.cbegin(), accum.cend());
 		accum.clear();
 		return ret;
