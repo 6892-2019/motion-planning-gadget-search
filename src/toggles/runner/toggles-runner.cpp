@@ -17,6 +17,9 @@
 #include "lmdb++.h"
 #include <yaml-cpp/yaml.h>
 #include <cstdio>
+#include <ctime>
+#include <fmt/time.h>
+#include <sys/random.h>
 
 using namespace automaton;
 using std::uint64_t;
@@ -32,6 +35,18 @@ using namespace std::literals::string_view_literals;
 
 //forward declaration:
 void write_output(const void* data, size_t size);
+
+template<typename T>
+T get_random_integer() {
+	T ret;
+	ssize_t rc = getrandom(&ret, sizeof(ret), 0);
+	if (rc != sizeof(ret)) {
+		auto savederrno = errno;
+		throw std::runtime_error(fmt::format("getrandom failed: asked for {} bytes ({}), got {}: {} ({})",
+				sizeof(ret), typeid(ret).name(), rc, strerror(savederrno), savederrno));
+	}
+	return ret;
+}
 
 
 
@@ -931,7 +946,27 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		close_edges = lmdb::dbi::open(txn, "edges-close", MDB_CREATE | MDB_INTEGERKEY);
 		lmdb::dbi::open(txn, "edges-combine", MDB_CREATE | MDB_INTEGERKEY);
 
-		//TODO: driver's work-tracking things? or leave those for the driver?
+		lmdb::dbi meta = lmdb::dbi::open(txn, "meta", MDB_CREATE);
+		if (meta.size(txn) == 0) {
+			//for ensuring checkpoints match the DB they were created against
+			uint64_t uid = get_random_integer<uint64_t>();
+			meta.put(txn, "id_bytes", lmdb::to_sv(uid));
+			meta.put(txn, "id", fmt::to_string(uid));
+
+			std::array<char, 64> hostname;
+			std::memset(hostname.data(), 0, hostname.size());
+			if (gethostname(hostname.data(), hostname.size()))
+				throw std::logic_error("problem getting hostname");
+			//gethostname is awkward -- let's be safe
+			hostname.back() = 0;
+			meta.put(txn, "creator_hostname", std::string_view(hostname.data()));
+
+			std::time_t now = std::time(nullptr);
+			meta.put(txn, "creation_time_bytes", lmdb::to_sv(now));
+			meta.put(txn, "creation_time", fmt::to_string(now));
+			meta.put(txn, "creation_timestamp", fmt::format("{:%F %T %Z}", *std::localtime(&now)));
+		}
+
 		txn.commit();
 	}
 
