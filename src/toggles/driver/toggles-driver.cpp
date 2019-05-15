@@ -5,6 +5,7 @@
 #include "stringutils.hpp"
 #include "ioutils.hpp"
 #include "stopwatch.hpp"
+#include "lmdb++.h"
 #define BOOST_ASIO_SEPARATE_COMPILATION
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -1555,14 +1556,10 @@ public:
 	}
 };
 
-int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -l:libboost_system.a'}
-	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
-			db_port = "5432", db_name = "togglesearch";
-	unsigned int num_connections = 1;
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -l:libboost_system.a -llmdb'}
+	std::string_view db_path, checkpoint_db_path;
+	unsigned int num_db_threads = 1;
 	std::vector<std::string> worker_addrs; //or @foo for response files
-	//TODO: we might want a directory for making per-generation checkpoints
-	//instead of just checkpointing on suspends
-	std::string_view resume_checkpoint, suspend_checkpoint = "";
 	bool multiplayer = false;
 	std::vector<std::string_view> gid_specs;
 	unsigned int precision = 8;
@@ -1574,24 +1571,14 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			= runtime_opts.close_task_batch_threshold = runtime_opts.mirror_task_batch_threshold
 			= std::numeric_limits<std::size_t>::max();
 	for (int i = 1; i < argc; ++i) {
-		if (argv[i] == "--db-user"sv)
-			db_user = argv[++i];
-		else if (argv[i] == "--db-pass"sv)
-			db_pass = argv[++i];
-		else if (argv[i] == "--db-host"sv)
-			db_host = argv[++i];
-		else if (argv[i] == "--db-port"sv)
-			db_port = argv[++i];
-		else if (argv[i] == "--db-name"sv)
-			db_name = argv[++i];
-		else if (argv[i] == "--db-connections"sv)
-			num_connections = to_uint(argv[++i]);
+		if (argv[i] == "--db-path"sv)
+			db_path = argv[++i];
+		else if (argv[i] == "--checkpoint-db-path"sv)
+			checkpoint_db_path = argv[++i];
+		else if (argv[i] == "--db-threads"sv)
+			num_db_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--worker"sv)
 			worker_addrs.emplace_back(argv[++i]);
-		else if (argv[i] == "--resume-checkpoint"sv)
-			resume_checkpoint = argv[++i];
-		else if (argv[i] == "--suspend-checkpoint"sv)
-			suspend_checkpoint = argv[++i];
 		else if (argv[i] == "--multiplayer"sv)
 			multiplayer = true;
 		else if (argv[i] == "--precision"sv)
@@ -1627,6 +1614,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			gid_specs.emplace_back(argv[i]);
 	}
 
+	if (db_path.empty()) {
+		fmt::print("ERROR: must specify --db-path\n");
+		return 1;
+	}
+
+	//TODO: if the batch task thresholds are all 0, it's fine to have no workers
 	if (worker_addrs.empty()) {
 		fmt::print("ERROR: no worker address arguments given, exiting\n");
 		return 1;
@@ -1642,18 +1635,61 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	GadgetSet spec = parse_gid_specs(gid_specs);
 	fmt::print("Gadget spec: {}\n", format_gadget_set(spec));
 
-	ConnectionPool pool(format_connect_string(db_user, db_pass, db_host, db_port, db_name), num_connections);
-	pool.register_setup("normal", prepare_statements);
+	lmdb::env data_env = lmdb::env::create();
+	data_env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	data_env.set_max_dbs(64);
+	data_env.open(std::string(db_path).c_str()); //TODO: flags?
+	uint64_t database_id = 0;
+	{
+		lmdb::txn txn = lmdb::txn::begin(data_env, nullptr, MDB_RDONLY);
+		lmdb::dbi meta = lmdb::dbi::open(txn, "meta");
+		std::string_view id_target;
+		if (!meta.get(txn, "id_bytes", id_target)) {
+			fmt::print("ERROR: database {} doesn't have an id?\n", db_path);
+			return 1;
+		}
+		database_id = lmdb::from_sv<uint64_t>(id_target);
+		txn.commit();
+	}
 
 	std::optional<Search> search; //just for lazy init
-	if (!resume_checkpoint.empty()) {
-		simple_buffer buf = read_buffer(std::string(resume_checkpoint));
-		search.emplace(msgpack::unpack(static_cast<char*>(buf.data()), buf.size()).get().as<Search::Serialized>(), runtime_opts);
+	if (!checkpoint_db_path.empty()) {
+		lmdb::env checkpoint_env = lmdb::env::create(MDB_NOSUBDIR);
+		data_env.set_mapsize(5UL * 1024 * 1024 * 1024);
+		data_env.set_max_dbs(1);
+		data_env.open(std::string(checkpoint_db_path).c_str()); //TODO: flags?
+		lmdb::txn txn = lmdb::txn::begin(checkpoint_env);
+		lmdb::dbi checkpoint_root = lmdb::dbi::open(txn, nullptr);
+		std::string_view id_target;
+		if (checkpoint_root.get(txn, "parent_id_bytes", id_target)) {
+			uint64_t parent_id = lmdb::from_sv<uint64_t>(id_target);
+			if (parent_id != database_id) {
+				fmt::print("ERROR: checkpoint database {} is from id {}, but parent {} has id {}\n",
+						checkpoint_db_path, parent_id, db_path, database_id);
+				return 1;
+			}
+			txn.commit();
+			search.emplace(std::move(checkpoint_env), runtime_opts);
+		} else {
+			if (checkpoint_root.size(txn) != 0) {
+				fmt::print("ERROR: checkpoint database {} doesn't have parent id, but also isn't empty\n", checkpoint_db_path);
+				return 1;
+			}
+			checkpoint_root.put(txn, "parent_id_bytes", lmdb::to_sv(database_id));
+			checkpoint_root.put(txn, "parent_id", fmt::to_string(database_id));
+			txn.commit();
+			//run the normal ctor, but also give it the environment
+			search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
+					precision, multiplayer, std::move(checkpoint_env), runtime_opts);
+		}
 	} else
+		//no checkpoint environment available
 		search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
 			precision, multiplayer, runtime_opts);
 
 	if (!search->execute(pool, &manager)) {
+		//TODO: if we have a checkpoint database, we're going to take checkpoints
+		//continuously, not just when suspending, so this logic is unnecessary
 		if (suspend_checkpoint.empty())
 			fmt::print(stderr, "ERROR: would suspend, but --suspend-checkpoint not passed\n");
 		else {
