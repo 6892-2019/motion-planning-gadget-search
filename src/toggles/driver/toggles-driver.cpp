@@ -2,6 +2,7 @@
 #include "../database.hpp"
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
+#include "intervals.hpp"
 #include "stringutils.hpp"
 #include "ioutils.hpp"
 #include "stopwatch.hpp"
@@ -915,169 +916,159 @@ void write_combine_batch_tasks(pqxx::connection& conn, CombineBatcher batcher, u
 }
 
 
+template<typename T>
+vector<T>& unmarshal_reinterpret(vector<T>& dest, lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
+	std::string_view value;
+	if (!db.get(txn, key, value))
+		throw std::runtime_error("key \"{}\" not found", key);
+	if ((value.size() == 0 && !allow_empty) || value.size() % sizeof(T) != 0)
+		throw std::logic_error(fmt::format("key {} has value length {} (not a multiple of {}) {}",
+				key, value.size(), sizeof(T), typeid(T).name()));
+	const T* first = reinterpret_cast<const T*>(value.data());
+	const T* last = first + value.size() / sizeof(T);
+	dest.assign(first, last);
+	return dest;
+}
+template<typename T>
+vector<T> unmarshal_reinterpret(lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
+	vector<T> dest;
+	unmarshal_reinterpret(dest, db, txn, key, allow_empty);
+	return dest;
+}
+
+template<typename T>
+T unmarshal_from_string(lmdb::dbi& db, lmdb::txn& txn, std::string_view key) {
+	std::string_view value;
+	if (!db.get(txn, key, value))
+		throw std::runtime_error("key \"{}\" not found", key);
+	//TODO: from_string will throw on a parse problem, but we'll lose which key had the problem
+	return from_string(value);
+}
+
+void marshal_nullseparated(lmdb::dbi& db, lmdb::txn& txn, std::string_view key, const vector<std::string>& data) {
+	//We could use MDB_RESERVE here, but I am assuming this is uncommon code...
+	for (const std::string& x : data)
+		assert(x.find('\0') == std::string::npos);
+	std::string value = join(data, "\0");
+	if (!db.put(txn, key, value))
+		//put only returns false if we passed MDB_NOOVERWRITE and the key existed
+		throw std::logic_error("can't happen: put threw for key {}", key);
+}
+
+void unmarshal_nullseparated(vector<std::string>& data, lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
+	std::string_view value;
+	if (!db.get(txn, key, value))
+		throw std::runtime_error("key \"{}\" not found", key);
+	if (value.empty() && !allow_empty)
+		throw std::runtime_error("key \"{}\" was empty", key);
+	split(data, value, '\0');
+}
+
+
+
 class SearchState {
 public:
-	class Serialized;
-	SearchState() : subgen_start_(0), prev_subgen_start_(0) {}
-	SearchState(const Serialized& s) : closed_(s.closed.begin(), s.closed.end()),
-			curgen_(s.curgen), subgen_start_(s.subgen_start), prev_subgen_start_(s.prev_subgen_start) {
-		if (prev_subgen_start_ > subgen_start_ || subgen_start_ > curgen_.size())
-			throw std::runtime_error(fmt::format("prev_subgen_start_ {} subgen_start_ {} curgen_.size() {} while restoring",
-					prev_subgen_start_, subgen_start_, curgen_.size()));
+	SearchState() {}
+	static SearchState resume(lmdb::env& checkpoint_env, lmdb::txn& txn, lmdb::dbi& main_db) {
+		SearchState s;
+		unmarshal_reinterpret(s.closed_, main_db, txn, "state.closed", true);
+		unmarshal_reinterpret(s.curgen_, main_db, txn, "state.curgen", true);
+		unmarshal_reinterpret(s.subgen_, main_db, txn, "state.subgen", true);
+		unmarshal_reinterpret(s.prev_subgen_, main_db, txn, "state.prev_subgen", true);
+		return s;
 	}
-	SearchState(Serialized&& s) : closed_(s.closed.begin(), s.closed.end()),
-			curgen_(std::move(s.curgen)), subgen_start_(s.subgen_start), prev_subgen_start_(s.prev_subgen_start) {
-		if (prev_subgen_start_ > subgen_start_ || subgen_start_ > curgen_.size())
-			throw std::runtime_error(fmt::format("prev_subgen_start_ {} subgen_start_ {} curgen_.size() {} while restoring",
-					prev_subgen_start_, subgen_start_, curgen_.size()));
+	void operator()(uint64_t id) {
+		std::array<pair<uint64_t, uint64_t>, 1> singleton = {{id, id+1}};
+		subgen_ = interval_union(subgen_.begin(), subgen_.end(), singleton.cbegin(), singleton.cend());
 	}
-	bool operator()(uint64_t id) {
-		if (closed_.insert(id).second) {
-			curgen_.push_back(id);
-			return true;
-		}
-		return false;
+	void operator()(const vector<pair<uint64_t, uint64_t>>& ids) {
+		//Add to the subgen those ids we haven't put in closed_.
+		vector<pair<uint64_t, uint64_t>> novel = interval_difference(
+				ids.begin(), ids.end(), closed_.cbegin(), closed_.cend());
+		subgen_ = interval_union(subgen_.begin(), subgen_.end(), novel.begin(), novel.end());
 	}
-	bool operator()(const vector<uint64_t>& ids) {
-		bool modified = false;
-		for (uint64_t x : ids)
-			modified |= (*this)(x);
-		return modified;
-	}
-	bool operator()(vector<uint64_t>&& ids_rref) {
+	void operator()(vector<pair<uint64_t, uint64_t>>&& ids_rref) {
 		//Enforce it actually moves so it gets deallocated promptly.
-		vector<uint64_t> ids(std::move(ids_rref));
-		bool modified = false;
-		for (uint64_t x : ids)
-			modified |= (*this)(x);
-		return modified;
+		vector<pair<uint64_t, uint64_t>> ids(std::move(ids_rref));
+		//Now it's an lvalue so we can just delegate.
+		//TODO: implement modifying interval_ functions so we can reuse its storage
+		this->operator()(ids);
 	}
 	std::size_t subgeneration_size() const {
-		return curgen_.size() - subgen_start_;
+		return interval_size(subgen_);
 	}
 	std::size_t generation_size() const {
-		return curgen_.size();
+		return interval_size(curgen_) + subgeneration_size();
 	}
 	std::size_t closed_size() const {
-		return closed_.size();
+		return interval_size(closed_) + subgeneration_size();
 	}
+	//TODO: to avoid repeated size calculations when reporting, and to report
+	//the number of intervals in each group, we might want to return a stats
+	//structure instead.  (could also return average interval size, etc.)
 	/**
 	 * Gives access to the current subgeneration.  Do not append to the state
 	 * while iterating this view.
 	 * @return an iterator range spanning the current subgeneration
 	 */
-	auto subgeneration_view() const {
-		return make_range_for_pair(subgeneration_begin(), subgeneration_end());
+	const vector<pair<uint64_t, uint64_t>>& subgeneration() const {
+		return subgen_;
 	}
-	vector<uint64_t>::iterator subgeneration_begin() {
-		return curgen_.begin() + subgen_start_;
-	}
-	vector<uint64_t>::iterator subgeneration_end() {
-		return curgen_.end();
-	}
-	vector<uint64_t>::const_iterator subgeneration_begin() const {
-		return curgen_.cbegin() + subgen_start_;
-	}
-	vector<uint64_t>::const_iterator subgeneration_end() const {
-		return curgen_.cend();
-	}
-	vector<uint64_t>::iterator prev_subgeneration_begin() {
-		return curgen_.begin() + prev_subgen_start_;
-	}
-	vector<uint64_t>::iterator prev_subgeneration_end() {
-		return subgeneration_begin();
-	}
-	vector<uint64_t>::const_iterator prev_subgeneration_begin() const {
-		return curgen_.cbegin() + prev_subgen_start_;
-	}
-	vector<uint64_t>::const_iterator prev_subgeneration_end() const {
-		return subgeneration_begin();
+	const vector<pair<uint64_t, uint64_t>>& prev_subgeneration() const {
+		return prev_subgen_;
 	}
 	/**
 	 * Erases the ids in the given set from the current subgeneration.  They're
 	 * still in the closed set.
 	 */
-	void erase_from_subgeneration(tsl::hopscotch_set<uint64_t, farmhash_hash>& to_be_erased) {
-		curgen_.erase(std::remove_if(curgen_.begin()+subgen_start_, curgen_.end(),
-				[&](uint64_t i){return to_be_erased.count(i);}), curgen_.end());
+	void erase_from_subgeneration(const vector<pair<uint64_t, uint64_t>>& to_be_erased) {
+		//Everything we're erasing should be in subgen_ already.
+		assert(interval_intersection(subgen_.cbegin(), subgen.cend(), to_be_erased.cbegin(), to_be_erased.cend()) == to_be_erased);
+		//Erase it, but record the removed elements in the tenured closed set.
+		closed_ = interval_union(closed_.begin(), closed_.end(), to_be_erased.cbegin(), to_be_erased.cend());
+		subgen_ = interval_difference(subgen_.begin(), subgen_.end(), to_be_erased.begin(), to_be_erased.end());
 	}
 	/**
 	 * Begin a new generation.
 	 * @return the previous generation
 	 */
-	vector<uint64_t> flip_generation() {
-		vector<uint64_t> prev = std::move(curgen_);
+	vector<pair<uint64_t, uint64_t>> flip_generation() {
+		curgen_ = interval_union(curgen_.begin(), curgen_.end(), subgen_.begin(), subgen.end());
+		vector<pair<uint64_t, uint64_t>> prev = std::move(curgen_);
 		curgen_.clear(); //make moved-from vector suitable for insertion again
-		prev_subgen_start_ = subgen_start_ = 0;
+		subgen_.clear();
 		return prev;
 	}
 	/**
 	 * Begin a new subgeneration.
 	 */
 	void flip_subgeneration() {
-		prev_subgen_start_ = subgen_start_;
-		subgen_start_ = curgen_.size();
+		closed_ = interval_union(closed_.begin(), closed_.end(), subgen_.cbegin(), subgen.cend());
+		curgen_ = interval_union(curgen_.begin(), curgen_.end(), subgen_.cbegin(), subgen.cend());
+		prev_subgen_ = std::move(subgen_);
+		subgen_.clear();
 	}
 
-	/**
-	 * Serialization proxy for SearchState.  The vectors are sorted (curgen's
-	 * parts separately) so the on-disk representation is deterministic, at the
-	 * cost of making the resumed state not exactly the same as the suspended
-	 * state (in which they were not sorted).
-	 *
-	 * TODO: consider delta-compressing the vectors.  (may help to break curgen
-	 * into two parts rather than deal with the discontinuity in sorting)
-	 * TODO: Serialized maybe should have constructors taking SearchState&& and
-	 * const SearchState&
-	 */
-	struct Serialized {
-		vector<uint64_t> closed;
-		vector<uint64_t> curgen;
-		std::size_t subgen_start, prev_subgen_start;
-		void canonicalize() {
-			std::sort(closed.begin(), closed.end());
-			std::sort(curgen.begin(), curgen.begin()+prev_subgen_start);
-			std::sort(curgen.begin()+prev_subgen_start, curgen.begin()+subgen_start);
-			std::sort(curgen.begin()+subgen_start, curgen.end());
-		}
-		MSGPACK_DEFINE_ARRAY(closed, curgen, subgen_start, prev_subgen_start)
-	};
-	Serialized serialized() const & {
-		Serialized s;
-		s.closed.assign(closed_.begin(), closed_.end());
-		s.curgen = curgen_;
-		s.subgen_start = subgen_start_;
-		s.prev_subgen_start = prev_subgen_start_;
-		s.canonicalize();
-		return s;
-	}
-	Serialized serialized() && {
-		Serialized s;
-		//can't just move from the set, unfortunately.
-		s.closed.assign(closed_.begin(), closed_.end());
-		//TODO: figure out how to free closed_'s memory (no shrink_to_fit(), rehash(0) will iterate the map)
-		s.curgen = std::move(curgen_);
-		s.subgen_start = subgen_start_;
-		s.prev_subgen_start = prev_subgen_start_;
-		s.canonicalize();
-		return s;
-	}
 private:
 	/**
-	 * The set of all gadget ids encountered so far, including those in the
-	 * current generation.
+	 * The set of all gadget ids encountered so far, divided into a "tenured"
+	 * closed set and the current subgeneration (exclusively).  Ids are added
+	 * to subgen_ in operator() and promoted from subgen_ to closed_ in
+	 * erase_from_subgeneration and flip_subgeneration.
+	 *
+	 * A generation is all gadgets since the previous combine; a subgeneration
+	 * is all gadgets discovered since the previous connect.
 	 */
-	tsl::hopscotch_set<uint64_t, farmhash_hash> closed_;
+	vector<pair<uint64_t, uint64_t>> closed_, subgen_;
 	/**
-	 * The current generation: gadgets discovered since the previous combine.
+	 * The current generation, except those in subgen_.  Only updated when flipping.
 	 */
-	vector<uint64_t> curgen_;
+	vector<pair<uint64_t, uint64_t>> curgen_;
 	/**
-	 * The start index of the current subgeneration: gadgets discovered since
-	 * the previous connect.
+	 * The previous subgeneration.  This is included in curgen_.  Updated upon
+	 * flipping.
 	 */
-	std::size_t subgen_start_;
-	std::size_t prev_subgen_start_;
+	vector<pair<uint64_t, uint64_t>> prev_subgen_;
 };
 
 /**
@@ -1153,21 +1144,44 @@ private:
 		stop,
 	};
 
+	//for the convenience of resume()
+	Search(lmdb::env&& database, RuntimeOptions runtime_opts) :
+			database_(std::move(database)), runtime_opts_(runtime_opts) {}
+
 public:
-	class Serialized;
 	Search(vector<std::string>&& cmdline_specs, GadgetSet&& source_specs,
-			unsigned int precision, bool multiplayer, RuntimeOptions runtime_opts) :
+			unsigned int precision, bool multiplayer, RuntimeOptions runtime_opts,
+			lmdb::env&& database, std::optional<lmdb::env>&& checkpoint) :
 			generation_(0), subgeneration_(0), phase_(Phase::collect_initial),
 			cmdline_specs_(std::move(cmdline_specs)),
 			source_specs_(std::move(source_specs)), precision_(precision), multiplayer_(multiplayer),
-			conn_pool_(nullptr), workers_(nullptr), runtime_opts_(runtime_opts),
-			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
-	Search(Serialized&& s, RuntimeOptions runtime_opts) : state_(std::move(s.state)), combine_rights_(std::move(s.combine_rights)),
-			unary_needs_(std::move(s.unary_needs)), combine_needs_(std::move(s.combine_needs)),
-			generation_(s.generation), subgeneration_(s.subgeneration), phase_{s.phase},
-			cmdline_specs_(std::move(s.cmdline_specs)), source_specs_(std::move(s.source_specs)),
-			precision_(s.precision), multiplayer_(s.multiplayer), conn_pool_(nullptr), workers_(nullptr), runtime_opts_(runtime_opts),
-			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
+			database_(std::move(database)), workers_(nullptr), checkpoint_(std::move(checkpoint)),
+			runtime_opts_(runtime_opts), generation_stopwatch_(Stopwatch::process()),
+			subgeneration_stopwatch_(Stopwatch::process()) {}
+	static Search resume(lmdb::env&& checkpoint, lmdb::env&& database, RuntimeOptions runtime_opts) {
+		Search s(std::move(database, runtime_opts));
+		{
+			auto txn = lmdb::txn::begin(checkpoint, nullptr, MDB_RDONLY);
+			lmdb::dbi root = lmdb::dbi::open(txn, nullptr);
+			s.state_ = SearchState::resume(checkpoint, txn, root);
+			unmarshal_reinterpret(s.combine_rights_, root, txn, "combine_rights", true);
+			unmarshal_reinterpret(s.unary_needs_, root, txn, "unary_needs", true);
+			throw std::logic_error("TODO: unmarshal combine_needs_"); //we're going to change combine_needs_ soon anyway, implement this later
+			s.generation_ = unmarshal_from_string<unsigned int>(root, txn, "generation");
+			s.subgeneration_ = unmarshal_from_string<unsigned int>(root, txn, "subgeneration");
+			//using the string name of the enum would be more flexible...
+			s.phase_ = Phase{unmarshal_from_string<unsigned int>(root, txn, "phase")};
+			unmarshal_nullseparated(s.cmdline_specs_, root, txn, "cmdline_specs", true);
+			unmarshal_reinterpret(s.source_specs_.ids, root, txn, "source_specs.ids", true);
+			unmarshal_reinterpret(s.source_specs_.ranges, root, txn, "source_specs.ranges", true);
+			unmarshal_nullseparated(s.source_specs_.names, root, txn, "source_specs.names", true);
+			s.precision_ = unmarshal_from_string<unsigned int>(root, txn, "precision");
+			s.multiplayer_ = bool(unmarshal_from_string<unsigned int>(root, txn, "multiplayer"));
+			txn.commit();
+		}
+		*s.checkpoint_ = std::move(checkpoint);
+		return s;
+	}
 
 	/**
 	 * @return true if the search completed; false if we should write a checkpoint
@@ -1486,74 +1500,14 @@ private:
 	//These are provided at runtime and not stored with the checkpoint.  They
 	//could be passed around through all functions, but are instead here for
 	//convenience.
-	ConnectionPool* conn_pool_;
+	lmdb::env database_;
+	std::optional<lmdb::dbi> checkpoint_;
 	WorkerManager* workers_; //may be nullptr if no worker args given (must write tasks)
 
 	RuntimeOptions runtime_opts_;
 
 	//Timings from these aren't particularly useful when operating in batch mode.
 	Stopwatch generation_stopwatch_, subgeneration_stopwatch_;
-public:
-	struct Serialized {
-		SearchState::Serialized state;
-		vector<uint64_t> combine_rights;
-		vector<uint64_t> unary_needs;
-		vector<pair<vector<uint64_t>, vector<uint64_t>>> combine_needs;
-		unsigned int generation;
-		unsigned int subgeneration;
-		//MSGPACK_ADD_ENUM doesn't work for private enums
-		std::underlying_type_t<Phase> phase;
-		vector<std::string> cmdline_specs;
-		GadgetSet source_specs;
-		unsigned int precision;
-		bool multiplayer;
-		Serialized() = default; //for msgpack
-		Serialized(const Search& s) : state(s.state_.serialized()), combine_rights(s.combine_rights_),
-				unary_needs(s.unary_needs_), combine_needs(s.combine_needs_),
-				generation(s.generation_), subgeneration(s.subgeneration_),
-				phase(static_cast<std::underlying_type_t<Phase>>(s.phase_)),
-				cmdline_specs(s.cmdline_specs_), source_specs(s.source_specs_), precision(s.precision_),
-				multiplayer(s.multiplayer_) {
-			canonicalize();
-		}
-		Serialized(Search&& s) : state(std::move(s.state_).serialized()), combine_rights(std::move(s.combine_rights_)),
-				unary_needs(std::move(s.unary_needs_)), combine_needs(std::move(s.combine_needs_)),
-				generation(s.generation_), subgeneration(s.subgeneration_),
-				phase(static_cast<std::underlying_type_t<Phase>>(s.phase_)),
-				cmdline_specs(std::move(s.cmdline_specs_)), source_specs(std::move(s.source_specs_)),
-				precision(s.precision_), multiplayer(s.multiplayer_) {
-			canonicalize();
-		}
-
-		//We're not really worried about format-ABI issues because the state can
-		//be regenerated from the database, so we can use msgpack's packing
-		//rather than writing our own versionable packing.
-		MSGPACK_DEFINE_ARRAY(state, combine_rights, unary_needs, combine_needs,
-				generation, subgeneration, phase, cmdline_specs, source_specs,
-				precision, multiplayer)
-	private:
-		void canonicalize() {
-			//TODO: I think these could all be asserts, but they're cheap enough
-			assert(std::is_sorted(combine_rights.begin(), combine_rights.end()));
-			if (!std::is_sorted(unary_needs.begin(), unary_needs.end()))
-				std::sort(unary_needs.begin(), unary_needs.end());
-			for (auto& p : combine_needs) {
-				if (!std::is_sorted(p.first.begin(), p.first.end()))
-					std::sort(p.first.begin(), p.first.end());
-				if (!std::is_sorted(p.second.begin(), p.second.end()))
-					std::sort(p.second.begin(), p.second.end());
-			}
-			if (!std::is_sorted(combine_needs.begin(), combine_needs.end()))
-				std::sort(combine_needs.begin(), combine_needs.end());
-			//let cmdline_specs, source_specs keep their original order
-		}
-	};
-	Serialized serialize() const & {
-		return {*this};
-	}
-	Serialized serialize() && {
-		return {std::move(*this)};
-	}
 };
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -l:libboost_system.a -llmdb'}
@@ -1680,12 +1634,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			txn.commit();
 			//run the normal ctor, but also give it the environment
 			search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
-					precision, multiplayer, std::move(checkpoint_env), runtime_opts);
+					precision, multiplayer, runtime_opts, std::move(data_env), std::move(checkpoint_env));
 		}
 	} else
 		//no checkpoint environment available
 		search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
-			precision, multiplayer, runtime_opts);
+			precision, multiplayer, runtime_opts, std::move(data_env), std::nullopt);
 
 	if (!search->execute(pool, &manager)) {
 		//TODO: if we have a checkpoint database, we're going to take checkpoints
