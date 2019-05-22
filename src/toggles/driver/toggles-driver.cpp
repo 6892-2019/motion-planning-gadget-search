@@ -23,16 +23,6 @@ using namespace std::literals::string_view_literals;
 namespace asio = boost::asio;
 using asio::ip::tcp;
 
-std::string build_filter_connectable_ids_query(std::size_t count) {
-	vector<std::string> things;
-	things.reserve(count);
-	for (std::size_t i = 1; i <= count; ++i)
-		things.push_back(fmt::format("(${}::int8)", i));
-	return "select * from (values " +
-			join(things, ", ") +
-			") as maybe(id) join gadgets using (id) where locations >= 4";
-}
-
 std::string build_get_mirrors_query(std::size_t count) {
 	vector<std::string> things;
 	things.reserve(count);
@@ -160,50 +150,11 @@ const std::pair<std::size_t, std::string_view> get_connects_prepared[] = {
 	{500, "get_connects_500"sv},
 };
 
-void prepare_statements(pqxx::connection& conn) {
-	for (const auto& p : follow_close_edges_prepared)
-		conn.prepare(std::string(p.second), build_follow_close_edges_query(p.first));
-	for (const auto& p : get_mirrors_prepared)
-		conn.prepare(std::string(p.second), build_get_mirrors_query(p.first));
-	for (const auto& p : filter_connect_prepared)
-		conn.prepare(std::string(p.second), build_filter_connectable_ids_query(p.first));
-	for (const auto& p : get_connects_prepared)
-		conn.prepare(std::string(p.second), build_get_connects_query(p.first));
-}
 
 vector<std::pair<std::size_t, std::string>> required_combines_prepared;
 const unsigned int required_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
 vector<std::pair<std::size_t, std::string>> get_combines_prepared;
 const unsigned int get_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
-
-void prepare_combine_statements(ConnectionPool* pool, std::size_t right_count, unsigned int precision) {
-	if (!required_combines_prepared.empty()) {
-		assert(!get_combines_prepared.empty());
-		return;
-	}
-
-	std::vector<std::tuple<std::string, std::size_t, std::size_t, unsigned int>> build_required_combines_data;
-	for (unsigned int left_count : required_combines_prepared_batch_sizes) {
-		std::string name = fmt::format("required_combines_{}", left_count);
-		build_required_combines_data.emplace_back(name, left_count, right_count, precision);
-		required_combines_prepared.emplace_back(left_count, std::move(name));
-	}
-
-	std::vector<std::tuple<std::string, std::size_t, std::size_t>> build_get_combines_data;
-	for (unsigned int batch_size : get_combines_prepared_batch_sizes) {
-		std::size_t left_count = std::max<std::size_t>(batch_size / right_count, 1);
-		std::string name = fmt::format("get_combines_{}", left_count);
-		build_get_combines_data.emplace_back(name, left_count, right_count);
-		get_combines_prepared.emplace_back(left_count, std::move(name));
-	}
-
-	pool->register_setup("combine", [=](pqxx::connection& conn) {
-		for (const auto& x : build_required_combines_data)
-			conn.prepare(std::get<0>(x), build_required_combines_query(std::get<1>(x), std::get<2>(x), std::get<3>(x)));
-		for (const auto& x : build_get_combines_data)
-			conn.prepare(std::get<0>(x), build_get_combines_query(std::get<1>(x), std::get<2>(x)));
-	});
-}
 
 
 vector<uint64_t> id_to_id_db_op0(pqxx::connection& conn,
@@ -285,18 +236,6 @@ vector<pair<uint64_t, uint64_t>> get_all_completion_ranges(pqxx::connection& con
 	}, 10, reporting_name);
 }
 
-vector<uint64_t> filter_ids_needing_close(ConnectionPool& pool,
-		const vector<uint64_t>::iterator ids_begin,
-		const vector<uint64_t>::iterator ids_end) {
-	std::sort(ids_begin, ids_end);
-	ConnectionLease conn = pool.checkout();
-	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(*conn, "completed_closes");
-	//The result is the range [ids_begin, needy_end).  It would be nice to find
-	//a way to use it without copying, but we'll need unary_needs_ for other
-	//purposes anyway, so...
-	return {ids_begin, partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend())};
-}
-
 pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> follow_close_edges0(pqxx::connection& conn,
 		const vector<uint64_t>::const_iterator ids_begin, const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
@@ -362,18 +301,6 @@ vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> foll
 	return std::move(results);
 }
 
-vector<uint64_t> filter_ids_needing_mirror(ConnectionPool& pool,
-		const vector<uint64_t>::iterator ids_begin,
-		const vector<uint64_t>::iterator ids_end) {
-	std::sort(ids_begin, ids_end);
-	ConnectionLease conn = pool.checkout();
-	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(*conn, "completed_mirrors");
-	//The result is the range [ids_begin, needy_end).  It would be nice to find
-	//a way to use it without copying, but we'll need unary_needs_ for other
-	//purposes anyway, so...
-	return {ids_begin, partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend())};
-}
-
 vector<vector<uint64_t>> get_mirrors(ConnectionPool& pool, const vector<uint64_t>::const_iterator ids_begin,
 		const vector<uint64_t>::const_iterator ids_end) {
 	return retry_db_operation([&]() {
@@ -381,31 +308,6 @@ vector<vector<uint64_t>> get_mirrors(ConnectionPool& pool, const vector<uint64_t
 				std::begin(get_mirrors_prepared), std::end(get_mirrors_prepared),
 				&build_get_mirrors_query);
 	}, 10, "get_mirrors");
-}
-
-vector<uint64_t> filter_ids_needing_connect(ConnectionPool& pool,
-		const vector<uint64_t>::iterator ids_begin,
-		const vector<uint64_t>::iterator ids_end) {
-	std::sort(ids_begin, ids_end);
-	ConnectionLease lease = pool.checkout();
-	vector<pair<uint64_t, uint64_t>> ranges = get_all_completion_ranges(*lease, "completed_connects");
-	pool.checkin(std::move(lease));
-	vector<uint64_t>::iterator new_end = partition_on_range_exclusion(ids_begin, ids_end, ranges.cbegin(), ranges.cend());
-
-	//Also filter out any gadgets too small to connect.
-	vector<vector<uint64_t>> results = retry_db_operation([&]() {
-		return id_to_id_db_op(pool, ids_begin, new_end,
-				std::begin(filter_connect_prepared), std::end(filter_connect_prepared),
-				&build_filter_connectable_ids_query);
-	}, 10, "filter_ids_needing_connect, filtering connectable ids");
-
-	std::size_t total_size = 0;
-	for (const vector<uint64_t>& r : results)
-		total_size += r.size();
-	results[0].reserve(total_size);
-	for (std::size_t i = 1; i < results.size(); ++i)
-		results[0].insert(results[0].end(), results[i].begin(), results[i].end());
-	return std::move(results[0]);
 }
 
 vector<vector<uint64_t>> get_connects(ConnectionPool& pool, const vector<uint64_t>::const_iterator ids_begin,
@@ -1186,8 +1088,8 @@ public:
 	/**
 	 * @return true if the search completed; false if we should write a checkpoint
 	 */
-	bool execute(ConnectionPool& pool, WorkerManager* workers) {
-		conn_pool_ = &pool;
+	bool execute(WorkerManager* workers) {
+		open_subdatabases();
 		workers_ = workers;
 
 		Control control = Control::proceed;
@@ -1211,7 +1113,6 @@ public:
 			}
 		}
 
-		conn_pool_ = nullptr;
 		workers_ = nullptr;
 		return control == Control::stop;
 	}
@@ -1220,8 +1121,7 @@ private:
 	Control collect_initial() {
 		generation_stopwatch_.reset();
 		Stopwatch stopwatch = Stopwatch::process();
-		ConnectionLease conn = conn_pool_->checkout();
-		vector<uint64_t> initial = collect_initial_gadget_set(*conn, source_specs_);
+		vector<uint64_t> initial = collect_initial_gadget_set(database_, source_specs_);
 		fmt::print("Collected {} initial gadgets in {}ms\n", initial.size(), stopwatch.elapsed().millis());
 		state_(std::move(initial));
 		phase_ = Phase::discover_needs_close;
@@ -1243,7 +1143,7 @@ private:
 	}
 
 	Control discover_needs_combine() {
-		prepare_combine_statements(conn_pool_, combine_rights_.size(), precision_);
+		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
 		combine_needs_ = find_required_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
 		std::size_t needy_lefts = 0, needy_pairs = 0;
@@ -1283,7 +1183,7 @@ private:
 	}
 
 	Control follow_combine() {
-		prepare_combine_statements(conn_pool_, combine_rights_.size(), precision_);
+		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
 		vector<vector<uint64_t>> combines = get_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
 		std::size_t total_size = 0;
@@ -1306,7 +1206,7 @@ private:
 			phase_ = Phase::discover_needs_mirror;
 			return Control::proceed;
 		}
-		filter_unary(filter_ids_needing_close, state_.subgeneration_begin(), state_.subgeneration_end(), "close");
+		filter_unary("close", state_.subgeneration(), state_.subgeneration_end());
 		phase_ = Phase::compute_close;
 		return Control::proceed;
 	}
@@ -1349,7 +1249,7 @@ private:
 	}
 
 	Control discover_needs_mirror() {
-		filter_unary(filter_ids_needing_mirror, state_.subgeneration_begin(), state_.subgeneration_end(), "mirror");
+		filter_unary("mirror", state_.subgeneration(), state_.subgeneration_end());
 		phase_ = Phase::compute_mirror;
 		return Control::proceed;
 	}
@@ -1411,7 +1311,11 @@ private:
 	}
 
 	Control discover_needs_connect() {
-		filter_unary(filter_ids_needing_connect, state_.prev_subgeneration_begin(), state_.prev_subgeneration_end(), "connect");
+		filter_unary("connect", state_.prev_subgeneration());
+		//We used to filter out gadgets with < 4 locations here, but for now
+		//we'll defer that to task-writing time or to the runner so we don't
+		//have to touch the gadget data.  (It wouldn't be done in filter_unary
+		//anyway now that we aren't emitting SQL.)
 		phase_ = Phase::compute_connect;
 		return Control::proceed;
 	}
@@ -1435,17 +1339,13 @@ private:
 		return Control::proceed;
 	}
 
-	template<class FilterFunc, class Iter>
-	void filter_unary(FilterFunc filter_func, Iter first, Iter last, std::string_view log_name) {
+	void filter_unary(std::string_view completions_key, const vector<pair<uint64_t, uint64_t>>& candidates) {
 		Stopwatch stopwatch = Stopwatch::process();
 		if (!unary_needs_.empty())
-			throw std::logic_error(fmt::format("called filter_unary for {} but unary_needs_ not empty\n", log_name));
-		unary_needs_ = filter_func(*conn_pool_, first, last);
+			throw std::logic_error(fmt::format("called filter_unary for {} but unary_needs_ not empty\n", completions_key));
+		unary_needs_ = filter_completion(database_, completions_, completions_key, candidates);
 		fmt::print("Found {} of {} gadgets needing {} in {}\n",
-				unary_needs_.size(), std::distance(first, last), log_name, stopwatch.elapsed().hms());
-		//Sorting here means tasks will contain consecutive ids more often,
-		//reducing fragmentation in the completion tables.
-		std::sort(unary_needs_.begin(), unary_needs_.end());
+				interval_size(unary_needs_), candidates.size(), completions_key, stopwatch.elapsed().hms());
 	}
 
 	Control operate_unary(std::string_view operation_name, std::string_view log_name,
@@ -1480,10 +1380,44 @@ private:
 			state_(std::move(x));
 	}
 
+	void open_subdatabases() {
+		if (gadget_hashtable_.handle() != std::numeric_limits<MDB_dbi>::max())
+			return; //already initialized
+		//These databases should all exist if the database was initialized
+		//properly, so we use a read-only transaction.
+		auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
+		gadget_hashtable_ = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index_ = lmdb::dbi::open(txn, "gadget_index");
+		edges_connect_ = lmdb::dbi::open(txn, "edges-connect");
+		edges_close_ = lmdb::dbi::open(txn, "edges-close");
+		edges_mirror_ = lmdb::dbi::open(txn, "edges-mirror");
+		completions_ = lmdb::dbi::open(txn, "completions");
+		txn.commit();
+	}
+
+	void open_combine_subdatabases() {
+		if (!edges_combine_.empty()) return;
+		//We speculatively use a read-only transaction in the hope these
+		//databases already exist; otherwise we take the write lock and create them.
+		try {
+			auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
+			for (uint64_t g : combine_rights_)
+				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", g).c_str()));
+			txn.commit();
+		} catch (lmdb::not_found_error&) {
+			auto txn = lmdb::txn::begin(database_);
+			for (uint64_t g : combine_rights_)
+				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", g).c_str(),
+						MDB_CREATE | MDB_INTEGERKEY));
+			txn.commit();
+		} //let other errors propagate
+		assert(std::is_sorted(edges_combine_.begin(), edges_combine_.end()));
+	}
+
 
 	SearchState state_;
 	vector<uint64_t> combine_rights_;
-	vector<uint64_t> unary_needs_; //also holds combine lefts during combine phases
+	vector<pair<uint64_t, uint64_t>> unary_needs_; //also holds combine lefts during combine phases
 	//first element is a list of rights, second is a list of lefts (it's backwards)
 	vector<pair<vector<uint64_t>, vector<uint64_t>>> combine_needs_;
 	unsigned int generation_;
@@ -1497,11 +1431,12 @@ private:
 	unsigned int precision_;
 	bool multiplayer_;
 
-	//These are provided at runtime and not stored with the checkpoint.  They
-	//could be passed around through all functions, but are instead here for
-	//convenience.
+	//Things below here are not saved in the checkpoint.  They could be passed
+	//around most everywhere, but are saved here for convenience.
 	lmdb::env database_;
-	std::optional<lmdb::dbi> checkpoint_;
+	lmdb::dbi gadget_hashtable_, gadget_index_, edges_connect_, edges_close_, edges_mirror_, completions_;
+	vector<pair<uint64_t, lmdb::dbi>> edges_combine_; //sorted
+	std::optional<lmdb::env> checkpoint_;
 	WorkerManager* workers_; //may be nullptr if no worker args given (must write tasks)
 
 	RuntimeOptions runtime_opts_;
