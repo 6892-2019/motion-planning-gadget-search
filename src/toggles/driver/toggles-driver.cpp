@@ -23,45 +23,6 @@ using namespace std::literals::string_view_literals;
 namespace asio = boost::asio;
 using asio::ip::tcp;
 
-std::string build_get_mirrors_query(std::size_t count) {
-	vector<std::string> things;
-	things.reserve(count);
-	for (std::size_t i = 1; i <= count; ++i)
-		things.push_back(fmt::format("${}::int8", i));
-	std::string parameters = join(things, ", ");
-	return "select b from mirror_edges where a in (" +
-			parameters +
-			")\n" +
-			"union all\n" +
-			"select a from mirror_edges where b in (" +
-			parameters +
-			")";
-}
-
-std::string build_follow_close_edges_query(std::size_t count) {
-	vector<std::string> things;
-	things.reserve(count);
-	for (std::size_t i = 1; i <= count; ++i)
-		things.push_back(fmt::format("${}::int8", i));
-	//TODO: Some other queries ask the database to deduplicate the results for
-	//us, but in this case we need the inputs as well as the outputs.  But we
-	//don't care which input corresponds to which output; we just need the two
-	//sets.  Can we have the database dedup the outputs but preserve all inputs?
-	return "select input1, output1 from close_edges where input1 in (" +
-			join(things, ", ") +
-			")";
-}
-
-std::string build_get_connects_query(std::size_t count) {
-	vector<std::string> things;
-	things.reserve(count);
-	for (std::size_t i = 1; i <= count; ++i)
-		things.push_back(fmt::format("${}::int8", i));
-	return "select output1 from connect_edges where input1 in (" +
-			join(things, ", ") +
-			") group by output1"; //group by is apparently faster than select distinct
-}
-
 std::string build_required_combines_query(std::size_t left_count, std::size_t right_count, unsigned int precision) {
 	vector<std::string> things;
 	things.reserve(std::max(left_count, right_count));
@@ -100,62 +61,8 @@ std::string build_required_combines_query(std::size_t left_count, std::size_t ri
 //			" group by lefts.lid) as parent(lid, rights) group by rights";
 }
 
-std::string build_get_combines_query(std::size_t left_count, std::size_t right_count) {
-	vector<std::string> things;
-	things.reserve(std::max(left_count, right_count));
-	for (std::size_t i = 1; i <= left_count; ++i)
-		things.push_back(fmt::format("(${}::int8)", i));
-	std::string left_params = join(things, ", ");
-	things.clear();
-	for (std::size_t i = left_count + 1; i <= left_count + right_count; ++i)
-		things.push_back(fmt::format("(${}::int8)", i));
-	//Joining against the values lists is slower here.
-	return "select output1 from combine_edges where input1 in (\n" +
-			left_params +
-			"\n) and input2 in (\n" +
-			join(things, ", ") +
-			"\n) group by output1"; //group by is apparently faster than select distinct
-}
-
-const std::pair<std::size_t, std::string_view> follow_close_edges_prepared[] = {
-	{50000, "follow_close_50000"sv},
-	{25000, "follow_close_25000"sv},
-	{10000, "follow_close_10000"sv},
-	{5000, "follow_close_5000"sv},
-	{1000, "follow_close_1000"sv},
-	{500, "follow_close_500"sv},
-};
-const std::pair<std::size_t, std::string_view> get_mirrors_prepared[] = {
-	{50000, "get_mirrors_50000"sv},
-	{25000, "get_mirrors_25000"sv},
-	{10000, "get_mirrors_10000"sv},
-	{5000, "get_mirrors_5000"sv},
-	{1000, "get_mirrors_1000"sv},
-	{500, "get_mirrors_500"sv},
-};
-const std::pair<std::size_t, std::string_view> filter_connect_prepared[] = {
-	{50000, "filter_connect_50000"sv},
-	{25000, "filter_connect_25000"sv},
-	{10000, "filter_connect_10000"sv},
-	{5000, "filter_connect_5000"sv},
-	{1000, "filter_connect_1000"sv},
-	{500, "filter_connect_500"sv},
-};
-const std::pair<std::size_t, std::string_view> get_connects_prepared[] = {
-	{50000, "get_connects_50000"sv},
-	{25000, "get_connects_25000"sv},
-	{10000, "get_connects_10000"sv},
-	{5000, "get_connects_5000"sv},
-	{1000, "get_connects_1000"sv},
-	{500, "get_connects_500"sv},
-};
-
-
 vector<std::pair<std::size_t, std::string>> required_combines_prepared;
 const unsigned int required_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
-vector<std::pair<std::size_t, std::string>> get_combines_prepared;
-const unsigned int get_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
-
 
 vector<uint64_t> id_to_id_db_op0(pqxx::connection& conn,
 		const vector<uint64_t>::const_iterator ids_begin,
@@ -220,103 +127,39 @@ vector<vector<uint64_t>> id_to_id_db_op(ConnectionPool& pool,
 	return std::move(results);
 }
 
-vector<pair<uint64_t, uint64_t>> get_all_completion_ranges(pqxx::connection& conn, std::string_view tablename) {
-	std::string query = fmt::format("select lower(r), upper(r) from {}", tablename);
-	std::string reporting_name = fmt::format("get_all_completion_ranges {}", tablename);
-	return retry_db_operation([&]() {
-		vector<pair<uint64_t, uint64_t>> ranges;
-		ro_transaction trans(conn);
-		pqxx::result res = trans.exec(query);
-		for (const pqxx::row& r : res)
-			ranges.emplace_back(r[0].as<uint64_t>(), r[1].as<uint64_t>());
-		trans.commit();
+//Copied from toggles-shared because we need to record close edge inputs and I
+//don't see a good way to templatize them together.  (constexpr if and a bool template param?)
+template<class Edge>
+pair<vector<pair<uint64_t, uint64_t>>, vector<pair<uint64_t, uint64_t>>> follow_edges_with_inputs(
+		lmdb::env& env, lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources) {
+	interval_accumulator<uint64_t> input_accum(256), output_accum(256);
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	lmdb::cursor cur = lmdb::cursor::open(txn, edge_db);
+	for (const pair<uint64_t, uint64_t>& p : sources) {
+		std::string_view key = lmdb::to_sv(p.first), value;
+		if (!cur.get(key, value, MDB_SET_RANGE))
+			break; //reached end of database
+		while (lmdb::from_sv<uint64_t>(key) < p.second) {
+			//If we have to replace this pointer-based code for alignment etc.,
+			//we can instead template this function on sizeof(Edge), relying on
+			//'output' being the first member.  (Or maybe still template on
+			//Edge, but use sizeof/offsetof to achieve the same.)
+			if (value.size() == 0 || value.size() % sizeof(Edge) != 0)
+				throw std::logic_error(fmt::format("edge data of type {} has value length {} (not a multiple of {})",
+						//We want the dbi's name here, but I don't see how to get it.
+						//The message won't distinguish close and mirror.
+						typeid(Edge).name(), value.size(), sizeof(Edge)));
+			const Edge* first = reinterpret_cast<const Edge*>(value.data());
+			const Edge* last = first + value.size() / sizeof(Edge);
+			while (first != last)
+				output_accum(first++->output);
+			input_accum(lmdb::from_sv<uint64_t>(key));
 
-		std::sort(ranges.begin(), ranges.end());
-		return std::move(ranges);
-	}, 10, reporting_name);
-}
-
-pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>> follow_close_edges0(pqxx::connection& conn,
-		const vector<uint64_t>::const_iterator ids_begin, const vector<uint64_t>::const_iterator ids_end) {
-	return retry_db_operation([&]() {
-		ro_transaction trans(conn);
-		//inputs aren't duplicated, but quickly removing them from the SearchState requires having them in a set
-		tsl::hopscotch_set<uint64_t, farmhash_hash> inputs;
-		//outputs might be duplicated, but we'll dedup when adding them to the SearchState.
-		vector<uint64_t> outputs;
-		vector<uint64_t>::const_iterator cur = ids_begin;
-		for (const auto& p : follow_close_edges_prepared) {
-			while (numeric_cast<std::size_t>(std::distance(cur, ids_end)) >= p.first) {
-				pqxx::result rows = trans.exec_prepared(std::string(p.second),
-						pqxx::prepare::make_dynamic_params(cur, cur + p.first));
-				for (const auto& r : rows) {
-					inputs.insert(r[0].as<uint64_t>());
-					outputs.push_back(r[1].as<uint64_t>());
-				}
-				cur += p.first;
-			}
+			if (!cur.get(key, value, MDB_NEXT)) break;
 		}
-		if (cur != ids_end) {
-			pqxx::result rows = trans.exec_params(build_follow_close_edges_query(std::distance(cur, ids_end)),
-					pqxx::prepare::make_dynamic_params(cur, ids_end));
-			for (const auto& r : rows) {
-				inputs.insert(r[0].as<uint64_t>());
-				outputs.push_back(r[1].as<uint64_t>());
-			}
-		}
-		trans.commit();
-		return std::make_pair(std::move(inputs), std::move(outputs));
-	}, 10, "follow_close_edges");
-}
-
-vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> follow_close_edges(ConnectionPool& pool,
-		const vector<uint64_t>::const_iterator ids_begin, const vector<uint64_t>::const_iterator ids_end) {
-	std::size_t total_size = numeric_cast<std::size_t>(std::distance(ids_begin, ids_end));
-	std::size_t max_threads = total_size /
-			std::max_element(std::begin(follow_close_edges_prepared), std::end(follow_close_edges_prepared),
-			[](const auto& a, const auto& b) {
-				return std::get<0>(a) < std::get<0>(b);
-			})->first;
-	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
-	if (max_threads <= 1) {
-		ConnectionLease lease = pool.checkout();
-		vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> results;
-		results.push_back(follow_close_edges0(*lease, ids_begin, ids_end));
-		return std::move(results);
 	}
-
-	std::size_t batch_size = (total_size + (max_threads - 1)) / max_threads;
-	vector<std::future<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>>> futures;
-	for (std::size_t i = 0; i < total_size; i += batch_size) {
-		auto first = ids_begin + i, last = ids_begin + std::min(i+batch_size, total_size);
-		futures.push_back(std::async(std::launch::async, [&pool, first, last]() {
-			ConnectionLease lease = pool.checkout();
-			return follow_close_edges0(*lease, first, last);
-		}));
-	}
-
-	vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> results;
-	for (std::size_t i = 0; i < futures.size(); ++i)
-		results.push_back(futures[i].get());
-	return std::move(results);
-}
-
-vector<vector<uint64_t>> get_mirrors(ConnectionPool& pool, const vector<uint64_t>::const_iterator ids_begin,
-		const vector<uint64_t>::const_iterator ids_end) {
-	return retry_db_operation([&]() {
-		return id_to_id_db_op(pool, ids_begin, ids_end,
-				std::begin(get_mirrors_prepared), std::end(get_mirrors_prepared),
-				&build_get_mirrors_query);
-	}, 10, "get_mirrors");
-}
-
-vector<vector<uint64_t>> get_connects(ConnectionPool& pool, const vector<uint64_t>::const_iterator ids_begin,
-		const vector<uint64_t>::const_iterator ids_end) {
-	return retry_db_operation([&]() {
-		return id_to_id_db_op(pool, ids_begin, ids_end,
-				std::begin(get_connects_prepared), std::end(get_connects_prepared),
-				&build_get_connects_query);
-	}, 10, "get_connects");
+	txn.commit();
+	return {std::move(input_accum).finish(), std::move(output_accum).finish()};
 }
 
 //struct vector_hash {
@@ -442,65 +285,6 @@ vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines(Connecti
 	}
 	sort_and_deduplicate(result);
 	return std::move(result);
-}
-
-vector<uint64_t> get_combines0(pqxx::connection& conn,
-		std::vector<uint64_t>::const_iterator left_ids_first, std::vector<uint64_t>::const_iterator left_ids_last,
-		const std::vector<uint64_t>& right_ids, unsigned int precision) {
-	return retry_db_operation([&]() {
-		ro_transaction trans(conn);
-		vector<uint64_t> result;
-		vector<uint64_t>::const_iterator cur = left_ids_first;
-		for (const auto& p : get_combines_prepared) {
-			while (numeric_cast<std::size_t>(std::distance(cur, left_ids_last)) >= p.first) {
-				pqxx::result rows = trans.exec_prepared(std::string(p.second),
-						pqxx::prepare::make_dynamic_params(cur, cur+p.first),
-						pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
-				for (const auto& r : rows)
-					result.push_back(r[0].as<uint64_t>());
-				cur += p.first;
-			}
-		}
-		std::size_t epilogue_size = numeric_cast<std::size_t>(std::distance(cur, left_ids_last));
-		if (epilogue_size) {
-			pqxx::result rows = trans.exec_params(build_get_combines_query(epilogue_size, right_ids.size()),
-					pqxx::prepare::make_dynamic_params(cur, left_ids_last),
-					pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
-			for (const auto& r : rows)
-				result.push_back(r[0].as<uint64_t>());
-		}
-		trans.commit();
-		return result;
-	}, 10, "get_combines0");
-}
-
-vector<vector<uint64_t>> get_combines(ConnectionPool& pool, const std::vector<uint64_t>& left_ids,
-		const std::vector<uint64_t>& right_ids, const unsigned int precision) {
-	std::size_t max_threads = left_ids.size() /
-			//insure against changing the batch sizes somehow
-			*std::max_element(std::begin(get_combines_prepared_batch_sizes), std::end(get_combines_prepared_batch_sizes));
-	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
-	if (max_threads <= 1) {
-		ConnectionLease lease = pool.checkout();
-		vector<vector<uint64_t>> results;
-		results.push_back(get_combines0(*lease, left_ids.cbegin(), left_ids.cend(), right_ids, precision));
-		return std::move(results);
-	}
-
-	std::size_t batch_size = (left_ids.size() + (max_threads - 1)) / max_threads;
-	vector<std::future<vector<uint64_t>>> futures;
-	for (std::size_t i = 0; i < left_ids.size(); i += batch_size) {
-		auto first = left_ids.cbegin()+i, last = left_ids.cbegin() + std::min(i+batch_size, left_ids.size());
-		futures.push_back(std::async(std::launch::async, [&pool, first, last, &right_ids, precision]() {
-			ConnectionLease lease = pool.checkout();
-			return get_combines0(*lease, first, last, right_ids, precision);
-		}));
-	}
-
-	vector<vector<uint64_t>> results;
-	for (std::size_t i = 0; i < futures.size(); ++i)
-		results.push_back(futures[i].get());
-	return std::move(results);
 }
 
 struct WorkGenerator {
@@ -1185,13 +969,25 @@ private:
 	Control follow_combine() {
 		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
-		vector<vector<uint64_t>> combines = get_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
-		std::size_t total_size = 0;
-		for (const vector<uint64_t>& x : combines)
-			total_size += x.size();
-		fmt::print("Followed combine edges to {} gadgets in {}\n", total_size, stopwatch.elapsed().hms());
-		for (vector<uint64_t>& x : combines)
-			state_(std::move(x));
+
+		vector<vector<pair<uint64_t, uint64_t>>> incoming;
+		for (const auto& p : edges_combine_)
+			incoming.push_back(follow_edges<CombineEdge>(database_, p.second, unary_needs_));
+		//binary merge tree
+		//TODO: move this to intervals.hpp as multiway union?  but we also want
+		//fork-join-ish stuff here and that won't generalize well
+		while (incoming.size() > 1) {
+			for (std::size_t i = 0; i < incoming.size()-1; ++i) {
+				incoming[i] = interval_union(incoming[i].begin(), incoming[i].end(), incoming[i+1].begin(), incoming[i+1].end());
+				incoming[i+1].clear();
+			}
+			incoming.erase(std::partition(incoming.begin(), incoming.end(), [](const auto& x){return !x.empty();}), incoming.end());
+		}
+		//We might have found nothing; ensure incoming.front() always exists.
+		if (incoming.empty())
+			incoming.push_back();
+		fmt::print("Followed combine edges to {} gadgets in {}\n", interval_size(incoming.front()), stopwatch.elapsed().hms());
+		state_(std::move(incoming.front()));
 
 		unary_needs_.clear();
 		unary_needs_.shrink_to_fit();
@@ -1227,23 +1023,13 @@ private:
 	Control follow_close() {
 		assert(!multiplayer_);
 		Stopwatch stopwatch = Stopwatch::process();
-		vector<pair<tsl::hopscotch_set<uint64_t, farmhash_hash>, vector<uint64_t>>> close_edges
-				= follow_close_edges(*conn_pool_, state_.subgeneration_begin(), state_.subgeneration_end());
-		std::size_t source_size = 0, target_size = 0;
-		for (const auto& p : close_edges) {
-			source_size += p.first.size();
-			target_size += p.second.size();
-		}
+		pair<vector<pair<uint64_t, uint64_t>>, vector<pair<uint64_t, uint64_t>>> close_edges =
+				follow_edges_with_inputs<SimpleEdge>(database_, edges_close_, state_.subgeneration());
 		fmt::print("Followed close edges from {} gadgets to {} gadgets in {}\n",
-				source_size, target_size, stopwatch.elapsed().hms());
+				interval_size(close_edges.first), interval_size(close_edges.second), stopwatch.elapsed().hms());
 
-		//erase_from_subgeneration scans the subgeneration, so we want to merge the sets.
-		tsl::hopscotch_set<uint64_t, farmhash_hash> source_set = std::move(close_edges[0].first);
-		for (std::size_t i = 1; i < close_edges.size(); ++i)
-			source_set.insert(close_edges[i].first.begin(), close_edges[i].first.end());
-		state_.erase_from_subgeneration(source_set);
-		for (auto& p : close_edges)
-			state_(std::move(p.second));
+		state_.erase_from_subgeneration(std::move(close_edges.first));
+		state_(std::move(close_edges.second));
 		phase_ = Phase::discover_needs_mirror;
 		return Control::proceed;
 	}
@@ -1267,7 +1053,7 @@ private:
 	}
 
 	Control follow_mirror() {
-		follow_unary_simple(get_mirrors, state_.subgeneration_begin(), state_.subgeneration_end(), "mirror");
+		follow_unary_simple(&follow_edges<SimpleEdge>, edges_mirror_, state_.subgeneration(), "mirror");
 
 		std::string_view step_type = subgeneration_ == 0 ? "combine"sv : "connect"sv;
 		Stopwatch::Result elapsed = subgeneration_stopwatch_.elapsed();
@@ -1333,8 +1119,7 @@ private:
 	}
 
 	Control follow_connect() {
-		follow_unary_simple(get_connects, state_.prev_subgeneration_begin(), state_.prev_subgeneration_end(), "connect");
-
+		follow_unary_simple(&follow_edges<ConnectEdge>, edges_connect_, state_.prev_subgeneration(), "connect");
 		phase_ = Phase::discover_needs_close;
 		return Control::proceed;
 	}
@@ -1368,16 +1153,13 @@ private:
 		}
 	}
 
-	template<class FilterFunc, class Iter>
-	void follow_unary_simple(FilterFunc follow_func, Iter first, Iter last, std::string_view log_name) {
+	//We call this with either follow_edges<ConnectEdge> or follow_edges<SimpleEdge>.
+	using FollowEdgeFunc = decltype(&follow_edges<SimpleEdge>);
+	void follow_unary_simple(FollowEdgeFunc follow_func, lmdb::dbi& edge_db, const vector<pair<uint64_t, uint64_t>>& intervals, std::string_view log_name) {
 		Stopwatch stopwatch = Stopwatch::process();
-		vector<vector<uint64_t>> ids = follow_func(*conn_pool_, first, last);
-		std::size_t total_size = 0;
-		for (const vector<uint64_t>& x : ids)
-			total_size += x.size();
-		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, total_size, stopwatch.elapsed().hms());
-		for (vector<uint64_t>& x : ids)
-			state_(std::move(x));
+		vector<pair<uint64_t, uint64_t>> targets = follow_func(database_, edge_db, intervals);
+		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, interval_size(targets), stopwatch.elapsed().hms());
+		state_(std::move(targets));
 	}
 
 	void open_subdatabases() {
