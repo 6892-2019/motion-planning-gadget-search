@@ -231,12 +231,17 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
 		lmdb::env& env, lmdb::dbi& completions, std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto ret = filter_completion(env, txn, completions, kind, intervals);
+	txn.commit();
+	return ret;
+}
+std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
+		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
 	auto comp_range = get_completions_key(env, txn, completions, kind);
 	if (!comp_range.first)
 		return intervals;
-	auto ret = interval_difference(intervals.begin(), intervals.end(), comp_range.first, comp_range.second);
-	txn.commit();
-	return ret;
+	return interval_difference(intervals.begin(), intervals.end(), comp_range.first, comp_range.second);
 }
 
 std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_completion(

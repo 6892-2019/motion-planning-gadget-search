@@ -6,6 +6,7 @@
 #include "stringutils.hpp"
 #include "ioutils.hpp"
 #include "stopwatch.hpp"
+#include "tsl/ordered_map.h"
 #include "lmdb++.h"
 #define BOOST_ASIO_SEPARATE_COMPILATION
 #include <boost/asio/io_context.hpp>
@@ -22,110 +23,6 @@ using std::uint64_t;
 using namespace std::literals::string_view_literals;
 namespace asio = boost::asio;
 using asio::ip::tcp;
-
-std::string build_required_combines_query(std::size_t left_count, std::size_t right_count, unsigned int precision) {
-	vector<std::string> things;
-	things.reserve(std::max(left_count, right_count));
-	for (std::size_t i = 1; i <= left_count; ++i)
-		things.push_back(fmt::format("(${}::int8)", i));
-	std::string left_params = join(things, ", ");
-	things.clear();
-	for (std::size_t i = left_count + 1; i <= left_count + right_count; ++i)
-		things.push_back(fmt::format("(${}::int8)", i));
-	return "with lefts (lid) as (values\n" +
-			left_params +
-			"\n), rights (rid) as (values\n" +
-			join(things, ", ") +
-			"\n)\n" +
-			"select array_agg(lid), right_ids from (\n"+
-			"  select lefts.lid, array(select rid from rights where\n" +
-			"    not exists (select 1 from combine_edges where\n" +
-			"      input1 = lid and input2 = rid limit 1)\n" +
-			"    and\n" +
-			//can't select a sum because we might combine a gadget against itself
-			"    (select locations from gadgets where id = lid) + (select locations from gadgets where id = rid)\n" +
-			fmt::format("    <= {}\n", precision) +
-			"  order by rid\n"
-			") from lefts) as parent(lid, right_ids) where cardinality(right_ids) > 0 group by right_ids";
-	//The aggregation below is "nicer" but slightly slower than the above query.
-	//(This query doesn't have the empty array check.)
-//	return "select array_agg(lid), rights from\n"
-//			"(select lefts.lid, array_agg(rights.rid order by rights.rid) from\n"
-//			"(values " + left_params + ") as lefts(lid) join\n"
-//			"(values " + join(things, ", ") + ") as rights(rid)\n"
-//			"on\n"
-//			"not exists (\n"
-//			"select 1 from combine_edges where input1 = lid and input2 = rid limit 1\n"
-//		    ") and (select locations from gadgets where id = lid limit 1) + (select locations from gadgets where id = rid limit 1) <= " +
-//			std::to_string(precision) +
-//			" group by lefts.lid) as parent(lid, rights) group by rights";
-}
-
-vector<std::pair<std::size_t, std::string>> required_combines_prepared;
-const unsigned int required_combines_prepared_batch_sizes[] = {50000, 25000, 10000, 5000, 1000, 500};
-
-vector<uint64_t> id_to_id_db_op0(pqxx::connection& conn,
-		const vector<uint64_t>::const_iterator ids_begin,
-		const vector<uint64_t>::const_iterator ids_end,
-		const std::pair<std::size_t, std::string_view>* prepared_begin,
-		const std::pair<std::size_t, std::string_view>* prepared_end,
-		std::string(*query_func)(std::size_t)) {
-	ro_transaction trans(conn);
-	vector<uint64_t> result;
-	vector<uint64_t>::const_iterator cur = ids_begin;
-	for (const auto& p : make_range_for_pair(prepared_begin, prepared_end)) {
-		while (numeric_cast<std::size_t>(std::distance(cur, ids_end)) >= p.first) {
-			pqxx::result rows = trans.exec_prepared(std::string(p.second),
-					pqxx::prepare::make_dynamic_params(cur, cur + p.first));
-			for (const auto& r : rows)
-				result.push_back(r[0].as<uint64_t>());
-			cur += p.first;
-		}
-	}
-	if (cur != ids_end) {
-		pqxx::result rows = trans.exec_params(query_func(std::distance(cur, ids_end)),
-				pqxx::prepare::make_dynamic_params(cur, ids_end));
-		for (const auto& r : rows)
-			result.push_back(r[0].as<uint64_t>());
-	}
-	trans.commit();
-	return result;
-}
-
-vector<vector<uint64_t>> id_to_id_db_op(ConnectionPool& pool,
-		const vector<uint64_t>::const_iterator ids_begin,
-		const vector<uint64_t>::const_iterator ids_end,
-		const std::pair<std::size_t, std::string_view>* prepared_begin,
-		const std::pair<std::size_t, std::string_view>* prepared_end,
-		std::string(*query_func)(std::size_t)) {
-	std::size_t total_size = numeric_cast<std::size_t>(std::distance(ids_begin, ids_end));
-	std::size_t max_threads = total_size /
-			std::max_element(prepared_begin, prepared_end, [](const auto& a, const auto& b) {
-				return std::get<0>(a) < std::get<0>(b);
-			})->first;
-	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
-	if (max_threads <= 1) {
-		ConnectionLease lease = pool.checkout();
-		vector<vector<uint64_t>> results;
-		results.push_back(id_to_id_db_op0(*lease, ids_begin, ids_end, prepared_begin, prepared_end, query_func));
-		return std::move(results);
-	}
-
-	std::size_t batch_size = (total_size + (max_threads - 1)) / max_threads;
-	vector<std::future<vector<uint64_t>>> futures;
-	for (std::size_t i = 0; i < total_size; i += batch_size) {
-		auto first = ids_begin + i, last = ids_begin + std::min(i+batch_size, total_size);
-		futures.push_back(std::async(std::launch::async, [&pool, first, last, prepared_begin, prepared_end, query_func]() {
-			ConnectionLease lease = pool.checkout();
-			return id_to_id_db_op0(*lease, first, last, prepared_begin, prepared_end, query_func);
-		}));
-	}
-
-	vector<vector<uint64_t>> results;
-	for (std::size_t i = 0; i < futures.size(); ++i)
-		results.push_back(futures[i].get());
-	return std::move(results);
-}
 
 //Copied from toggles-shared because we need to record close edge inputs and I
 //don't see a good way to templatize them together.  (constexpr if and a bool template param?)
@@ -196,95 +93,76 @@ void sort_and_deduplicate(vector<pair<vector<uint64_t>, vector<uint64_t>>>& reco
 
 /**
  * Finds required combines.
- * @return pairs of right ids and left ids needing to be combined against them (i.e., backwards)
+ * @return pairs of sets of right ids and the intervals of left ids needing to
+ * be combined against them (i.e., backwards)
  */
-vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines0(pqxx::connection& conn,
-		std::vector<uint64_t>::const_iterator left_ids_first, std::vector<uint64_t>::const_iterator left_ids_last,
-		const std::vector<uint64_t>& right_ids, unsigned int precision) {
-	vector<pair<vector<uint64_t>, vector<uint64_t>>> result = retry_db_operation([&]() {
-		ro_transaction trans(conn);
-		vector<pair<vector<uint64_t>, vector<uint64_t>>> records;
-		std::pair<pqxx::array_parser::juncture, std::string> array_element;
-		auto process_rows = [&](const pqxx::result& rows) {
-			for (const auto& r : rows) {
-				vector<uint64_t> lefts, rights;
-				{
-					pqxx::array_parser parser = r[0].as_array();
-					while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
-						if (array_element.first == pqxx::array_parser::string_value)
-							lefts.push_back(to_uint64(array_element.second));
-				}
-				{
-					pqxx::array_parser parser = r[1].as_array();
-					while ((array_element = parser.get_next()).first != pqxx::array_parser::done)
-						if (array_element.first == pqxx::array_parser::string_value)
-							rights.push_back(to_uint64(array_element.second));
-				}
-				assert(!lefts.empty());
-				assert(!rights.empty());
-				assert(std::is_sorted(rights.begin(), rights.end()));
-				records.emplace_back(std::move(rights), std::move(lefts));
-			}
-		};
+vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>> find_required_combines(
+		lmdb::env& env, lmdb::dbi& completions,
+		const vector<pair<uint64_t, uint64_t>>& candidates, const vector<uint64_t>& combine_rights) {
+	vector<pair<uint64_t, vector<pair<uint64_t, uint64_t>>>> intervals;
+	std::size_t event_count = 0;
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		for (uint64_t r : combine_rights) {
+			intervals.emplace_back(r, filter_completion(env, txn, completions, fmt::format("combine-{}", r), candidates));
+			event_count += 2*intervals.back().second.size(); //not interval_size
+		}
+		txn.commit();
+	}
 
-		vector<uint64_t>::const_iterator cur = left_ids_first;
-		for (const auto& p : required_combines_prepared) {
-			while (numeric_cast<std::size_t>(std::distance(cur, left_ids_last)) >= p.first) {
-				pqxx::result rows = trans.exec_prepared(std::string(p.second),
-						pqxx::prepare::make_dynamic_params(cur, cur+p.first),
-						pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
-				process_rows(rows);
-				cur += p.first;
+	//TODO: this is probably worth lifting to intervals.hpp, at least for testing's sake
+	//This is a sweep-line-based multiway group intersection to group intervals
+	//having the same set of combine rights.  Each combine right is "active" or
+	//"inactive", changing state at interval endpoints.  At each event point,
+	//the current interval is committed with the current active set, then the
+	//active set is updated.
+	vector<uint64_t> active;
+	active.reserve(intervals.size());
+	//(event point, true = becoming active, false = becoming inactive, the combine right)
+	vector<std::tuple<uint64_t, bool, uint64_t>> events;
+	events.reserve(event_count);
+	for (const pair<uint64_t, vector<pair<uint64_t, uint64_t>>>& i : intervals)
+		for (const pair<uint64_t, uint64_t>& j : i.second) {
+			events.emplace_back(j.first, true, i.first);
+			events.emplace_back(j.second, false, i.first);
+		}
+	std::sort(events.begin(), events.end(), std::greater()); //reversed sort for pop_back()
+	//The previous event point.  Initializing to 0 is safe because the active
+	//set starts empty, so we won't emit a spurious interval.  Similarly, a loop
+	//epilogue is unnecessary because the active set is empty at the end.
+	uint64_t cur = 0;
+	//vector_ordered_map
+	tsl::ordered_map<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>, farmhash_hash,
+			std::equal_to<vector<uint64_t>>, std::allocator<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>,
+			std::vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>> result;
+	while (!events.empty()) {
+		uint64_t event_point = std::get<0>(events.back());
+		if (!active.empty()) {
+			//We don't retain sorted order during insertions and removals, so we
+			//need to sort here.  (If most event points only occur for one list
+			//of intervals, maintaining order might be faster.)
+			std::sort(active.begin(), active.end());
+			result[active].emplace_back(cur, event_point);
+		}
+		cur = event_point;
+
+		//Process all events at this point.
+		while (std::get<0>(events.back()) == event_point) {
+			std::tuple<uint64_t, bool, uint64_t> e = events.back();
+			events.pop_back();
+			if (std::get<1>(e)) {
+				assert(std::find(active.begin(), active.end(), std::get<2>(e)) == active.end());
+				active.push_back(std::get<2>(e));
+			} else {
+				auto it = std::find(active.begin(), active.end(), std::get<2>(e));
+				assert(it != active.end());
+				std::iter_swap(it, active.end()-1);
+				active.pop_back();
 			}
 		}
-		std::size_t epilogue_size = numeric_cast<std::size_t>(std::distance(cur, left_ids_last));
-		if (epilogue_size) {
-			pqxx::result rows = trans.exec_params(build_required_combines_query(epilogue_size, right_ids.size(), precision),
-					pqxx::prepare::make_dynamic_params(cur, left_ids_last),
-					pqxx::prepare::make_dynamic_params(right_ids.begin(), right_ids.end()));
-			process_rows(rows);
-		}
-		trans.commit();
-		return records;
-	}, 10, "find_required_combines");
-
-	//Because we (may have) made multiple queries, we may have duplicates.
-	sort_and_deduplicate(result);
-	return std::move(result);
-}
-
-vector<pair<vector<uint64_t>, vector<uint64_t>>> find_required_combines(ConnectionPool& pool,
-		const std::vector<uint64_t>& left_ids,
-		const std::vector<uint64_t>& right_ids, const unsigned int precision) {
-	std::size_t max_threads = left_ids.size() /
-			//insure against changing the batch sizes somehow
-			*std::max_element(std::begin(required_combines_prepared_batch_sizes), std::end(required_combines_prepared_batch_sizes));
-	max_threads = std::min<std::size_t>(max_threads, pool.capacity());
-	if (max_threads <= 1) {
-		ConnectionLease lease = pool.checkout();
-		return find_required_combines0(*lease, left_ids.cbegin(), left_ids.cend(), right_ids, precision);
 	}
-
-	//We give a near-equal division, so each thread will have "straggling" queries.
-	//We could try to give most threads more full batches and leave one thread
-	//with less, but irregularly-shaped, work.
-	std::size_t batch_size = (left_ids.size() + (max_threads - 1)) / max_threads;
-	vector<std::future<vector<pair<vector<uint64_t>, vector<uint64_t>>>>> futures;
-	for (std::size_t i = 0; i < left_ids.size(); i += batch_size) {
-		auto first = left_ids.cbegin()+i, last = left_ids.cbegin() + std::min(i+batch_size, left_ids.size());
-		futures.push_back(std::async(std::launch::async, [&pool, first, last, &right_ids, precision]() {
-			ConnectionLease lease = pool.checkout();
-			return find_required_combines0(*lease, first, last, right_ids, precision);
-		}));
-	}
-
-	vector<pair<vector<uint64_t>, vector<uint64_t>>> result = futures.front().get();
-	for (std::size_t i = 1; i < futures.size(); ++i) {
-		vector<pair<vector<uint64_t>, vector<uint64_t>>> more = futures[i].get();
-		result.insert(result.end(), std::move_iterator(more.begin()), std::move_iterator(more.end()));
-	}
-	sort_and_deduplicate(result);
-	return std::move(result);
+	//TODO: assert pairwise intersections are empty and overall union is the original interval list
+	return std::move(result).values_container();
 }
 
 struct WorkGenerator {
@@ -929,11 +807,12 @@ private:
 	Control discover_needs_combine() {
 		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
-		combine_needs_ = find_required_combines(*conn_pool_, unary_needs_, combine_rights_, precision_);
+		combine_needs_ = find_required_combines(database_, completions_, unary_needs_, combine_rights_);
 		std::size_t needy_lefts = 0, needy_pairs = 0;
-		for (const pair<vector<uint64_t>, vector<uint64_t>>& p : combine_needs_) {
-			needy_lefts += p.second.size();
-			needy_pairs += p.second.size() * p.first.size();
+		for (const pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>& p : combine_needs_) {
+			std::size_t is = interval_size(p.second);
+			needy_lefts += is;
+			needy_pairs += is * p.first.size();
 		}
 		fmt::print("Found {} of {} lefts needing combine ({} total pairs) in {}\n",
 				needy_lefts, unary_needs_.size(), needy_pairs, stopwatch.elapsed().hms());
@@ -1072,7 +951,7 @@ private:
 		//choose the set of combine rights, but this matches how the old
 		//generational search worked.
 		if (generation_ == 0 && subgeneration_ == 0) {
-			combine_rights_.assign(state_.subgeneration_begin(), state_.subgeneration_end());
+			combine_rights_.assign(state_.subgeneration().begin(), state_.subgeneration().end());
 			std::sort(combine_rights_.begin(), combine_rights_.end());
 			fmt::print("Combine rights ({}):", combine_rights_.size());
 			for (uint64_t id : combine_rights_)
@@ -1081,7 +960,7 @@ private:
 		}
 
 		state_.flip_subgeneration();
-		if (state_.prev_subgeneration_begin() == state_.prev_subgeneration_end()) {
+		if (state_.prev_subgeneration().empty()) {
 			Stopwatch::Result elapsed = generation_stopwatch_.elapsed();
 			fmt::print("Finished generation {} in {}; curgen size {}, closed size {}, max resident {:.2f} GiB (+{:.2f})\n",
 					generation_, elapsed.hms(), state_.generation_size(), state_.closed_size(),
@@ -1201,7 +1080,7 @@ private:
 	vector<uint64_t> combine_rights_;
 	vector<pair<uint64_t, uint64_t>> unary_needs_; //also holds combine lefts during combine phases
 	//first element is a list of rights, second is a list of lefts (it's backwards)
-	vector<pair<vector<uint64_t>, vector<uint64_t>>> combine_needs_;
+	vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>> combine_needs_;
 	unsigned int generation_;
 	unsigned int subgeneration_;
 	Phase phase_;

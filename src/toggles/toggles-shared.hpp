@@ -63,6 +63,9 @@ std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_t
 std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
 		lmdb::env& env, lmdb::dbi& completions, std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals);
+std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
+		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals);
 std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_completion(
 		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals);
