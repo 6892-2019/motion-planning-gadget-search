@@ -116,6 +116,46 @@ private:
 };
 
 
+/**
+ * Returns a list of interval lists each having interval_size equal to the given
+ * chunk size (except the last chunk, which may be shorter).
+ *
+ * TODO: We'd like this to be a generator rather than allocating a bunch of
+ * vectors.  That generator probably returns a const ref to a vector stored
+ * inside itself.
+ */
+template<typename It1,
+		typename T = typename std::common_type<
+				//should be using std::tuple_element here, I guess...
+				typename std::iterator_traits<It1>::value_type::first_type,
+				typename std::iterator_traits<It1>::value_type::second_type
+		>::type>
+std::vector<std::vector<std::pair<T, T>>> interval_chunk(It1 left, It1 left_end, std::size_t chunk_size) {
+	if (chunk_size == 0) throw std::logic_error("zero chunk size");
+	std::vector<std::vector<std::pair<T, T>>> ret;
+	std::vector<std::pair<T, T>> working;
+	std::size_t working_interval_size = 0;
+	while (left != left_end) {
+		std::pair<T, T> cur = *left++;
+		while (cur.first != cur.second) {
+			std::size_t needed = chunk_size - working_interval_size;
+			//TODO: numeric_cast silences the warning in the case we currently
+			//care about, but makes this function less general
+			T endpoint = std::min<T>(numeric_cast<T>(cur.first + needed), cur.second);
+			working.emplace_back(cur.first, endpoint);
+			working_interval_size += endpoint - cur.first;
+			cur.first = endpoint;
+			if (working_interval_size == chunk_size) {
+				ret.push_back(std::move(working));
+				working.clear();
+				working_interval_size = 0;
+			}
+		}
+	}
+	if (!working.empty()) //straggling chunk
+		ret.push_back(std::move(working));
+	return ret;
+}
 
 template<typename It1>
 std::size_t interval_size(It1 left, It1 left_end) {

@@ -344,3 +344,28 @@ TEST_CASE("IntervalsTest_IntervalCoalesceExhaustion") {
 		}
 	}
 }
+
+TEST_CASE("IntervalsTest_IntervalChunkExhaustion") {
+	//Chunks should have the chunk size (except the last), be ordered with
+	//respect to each other, and together constitute the full set.
+	vector<pair<int, int>> sum;
+	constexpr unsigned int limit = 1 << 8;
+	for (unsigned int left = 0; left < limit; ++left) {
+		auto leftbits = indices_of_set_bits(left);
+		auto leftranges = maximal_intervals(leftbits.cbegin(), leftbits.cend());
+		for (unsigned int chunk_size = 1; chunk_size < leftbits.size() + 1; ++chunk_size) {
+			auto chunks = interval_chunk(leftranges.cbegin(), leftranges.cend(), chunk_size);
+			sum.clear();
+			for (auto chit = chunks.begin(); chit != chunks.end(); ++chit) {
+				CHECK_UNARY(!chit->empty());
+				sum = interval_union(sum.cbegin(), sum.cend(), chit->cbegin(), chit->cend());
+				auto next = std::next(chit);
+				if (next != chunks.end()) {
+					CHECK_EQ(interval_size(chit->cbegin(), chit->cend()), chunk_size);
+					CHECK_LE(chit->back().second, next->front().first);
+				}
+			}
+			CHECK_EQ(sum, leftranges);
+		}
+	}
+}
