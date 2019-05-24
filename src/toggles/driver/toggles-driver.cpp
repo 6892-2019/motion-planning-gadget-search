@@ -331,38 +331,16 @@ void ping_all_workers(WorkerManager& manager) {
 	manager.run(&generator);
 }
 
-struct UnaryBatcher {
-	vector<uint64_t>::const_iterator head, last;
-	std::size_t size_;
-	UnaryBatcher(const vector<uint64_t>& vec, std::size_t batch_size) : head(vec.begin()), last(vec.end()), size_(batch_size) {}
-	explicit operator bool() const {return head != last;}
-	pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator> operator()() {
-		std::size_t actual_size = std::min(size_, static_cast<std::size_t>(last-head));
-		pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator> ret(head, head+actual_size);
-		head += actual_size;
-		return ret;
-	}
-	/**
-	 * @return the number of batches remaining
-	 */
-	std::size_t size() const {
-		return (std::distance(head, last) + (size_-1))/ size_; //round up
-	}
-};
-
-DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation, UnaryBatcher operands) {
+DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation,
+		const vector<vector<pair<uint64_t, uint64_t>>>& chunks) {
 	std::uint32_t seqno = 0;
-	//TODO: figure out how to pack a range without copying (probably a custom type with a pack method?)
-	vector<uint64_t> range;
 	DatabaseOperationStatistics overall_stats = {};
 	bool error_happened = false;
 	manager.run([&](simple_buffer& buffer) {
 		if (error_happened) return false; //stop generating work, but let existing issued work finish
-		if (!operands) return false;
-		range.clear();
-		auto iters = operands();
-		range.insert(range.end(), iters.first, iters.second);
-		pack_call(buffer, seqno++, operation, range);
+		if (!(seqno < chunks.size())) return false;
+		pack_call(buffer, seqno, operation, chunks[seqno]);
+		++seqno;
 		return true;
 	}, [&](simple_buffer& buffer) {
 		Response resp = unpack_response(buffer);
@@ -381,66 +359,38 @@ DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::stri
 	return overall_stats;
 }
 
-void write_unary_batch_tasks(pqxx::connection& conn, std::string_view operation, UnaryBatcher batcher, const std::string& directory) {
-	vector<uint64_t> fetches;
-	simple_buffer buffer;
-	for (std::uint32_t seqno = 0; batcher; ++seqno) {
-		auto batch = batcher();
-		fetches.assign(batch.first, batch.second);
-		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
-		pack_call(buffer, seqno, operation, gadget_data);
-		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
-		buffer.clear();
-	}
-}
+//void write_unary_batch_tasks(pqxx::connection& conn, std::string_view operation, UnaryBatcher batcher, const std::string& directory) {
+//	vector<uint64_t> fetches;
+//	simple_buffer buffer;
+//	for (std::uint32_t seqno = 0; batcher; ++seqno) {
+//		auto batch = batcher();
+//		fetches.assign(batch.first, batch.second);
+//		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
+//		pack_call(buffer, seqno, operation, gadget_data);
+//		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
+//		buffer.clear();
+//	}
+//}
 
-struct CombineBatcher {
-	//backwards input: rights first, lefts second
-	vector<pair<vector<uint64_t>, vector<uint64_t>>>::const_iterator head, last;
-	vector<uint64_t>::const_iterator subhead; //position in head->second
-	std::size_t size_;
-	CombineBatcher(const vector<pair<vector<uint64_t>, vector<uint64_t>>>& vec, std::size_t batch_size)
-			: head(vec.cbegin()), last(vec.cend()), subhead(), size_(batch_size) {
-		if (head != last) //can't initialize in mem-init-list due to this check
-			subhead = head->second.cbegin();
-	}
-	explicit operator bool() const {return head != last;}
-	//iterator range of lefts, pointer to vector of rights
-	pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*>
-	operator()() {
-		std::size_t lefts_size = std::max<std::size_t>(size_ / head->first.size(), 1);
-		lefts_size = std::min(lefts_size, static_cast<std::size_t>(head->second.cend() - subhead));
-		pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator> lefts(subhead, subhead + lefts_size);
-		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> ret(lefts, &head->first);
-		subhead += lefts_size;
-		if (subhead == head->second.cend()) {
-			++head;
-			if (head != last)
-				subhead = head->second.cbegin();
-		}
-		return ret;
-	}
-	std::size_t size() const {
-		//This is only approximate, but should be good enough for making batching decisions.
-		std::size_t s = 0;
-		for (auto i = head; i != last; ++i)
-			s += i->first.size() * i->second.size();
-		return (s + (size_-1)) / size_;
-	}
-};
-
-DatabaseOperationStatistics do_combine_operation(WorkerManager& manager, CombineBatcher operands, unsigned int precision) {
+DatabaseOperationStatistics do_combine_operation(WorkerManager& manager,
+		const vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>& operands,
+		std::size_t batch_size, unsigned int precision) {
+	assert(!operands.empty());
 	std::uint32_t seqno = 0;
-	vector<uint64_t> lefts; //TODO: pack iter-range without copying it first
+	std::size_t right_index = 0, left_index = 0;
+	vector<vector<pair<uint64_t, uint64_t>>> chunks;
 	DatabaseOperationStatistics overall_stats = {};
 	bool error_happened = false;
 	manager.run([&](simple_buffer& buffer) {
 		if (error_happened) return false; //stop generating work, but let existing issued work finish
-		if (!operands) return false;
-		lefts.clear();
-		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> batch = operands();
-		lefts.insert(lefts.end(), batch.first.first, batch.first.second);
-		pack_call(buffer, seqno++, "combine-db", lefts, *batch.second, precision);
+		if (!(right_index < operands.size())) return false;
+		if (!(left_index < chunks.size())) {
+			chunks = interval_chunk(operands[right_index].second.cbegin(), operands[right_index].second.cend(), batch_size);
+			left_index = 0;
+		}
+		pack_call(buffer, seqno++, "combine-db", chunks[left_index++], operands[right_index].first, precision);
+		if (!(left_index < chunks.size()))
+			++right_index;
 		return true;
 	}, [&](simple_buffer& buffer) {
 		Response resp = unpack_response(buffer);
@@ -459,25 +409,25 @@ DatabaseOperationStatistics do_combine_operation(WorkerManager& manager, Combine
 	return overall_stats;
 }
 
-void write_combine_batch_tasks(pqxx::connection& conn, CombineBatcher batcher, unsigned int precision, const std::string& directory) {
-	vector<uint64_t> fetches;
-	simple_buffer buffer;
-	for (std::uint32_t seqno = 0; batcher; ++seqno) {
-		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> batch = batcher();
-		fetches.clear();
-		fetches.insert(fetches.end(), batch.first.first, batch.first.second);
-		fetches.insert(fetches.end(), batch.second->begin(), batch.second->end());
-		//sort-unique is optional here because the database will effectively do it for us.
-		std::sort(fetches.begin(), fetches.end());
-		fetches.erase(std::unique(fetches.begin(), fetches.end()), fetches.end());
-		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
-
-		fetches.assign(batch.first.first, batch.first.second); //packing iterator-range would save this copy
-		pack_call(buffer, seqno, "batch-combine", gadget_data, fetches, *batch.second, precision);
-		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
-		buffer.clear();
-	}
-}
+//void write_combine_batch_tasks(pqxx::connection& conn, CombineBatcher batcher, unsigned int precision, const std::string& directory) {
+//	vector<uint64_t> fetches;
+//	simple_buffer buffer;
+//	for (std::uint32_t seqno = 0; batcher; ++seqno) {
+//		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> batch = batcher();
+//		fetches.clear();
+//		fetches.insert(fetches.end(), batch.first.first, batch.first.second);
+//		fetches.insert(fetches.end(), batch.second->begin(), batch.second->end());
+//		//sort-unique is optional here because the database will effectively do it for us.
+//		std::sort(fetches.begin(), fetches.end());
+//		fetches.erase(std::unique(fetches.begin(), fetches.end()), fetches.end());
+//		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
+//
+//		fetches.assign(batch.first.first, batch.first.second); //packing iterator-range would save this copy
+//		pack_call(buffer, seqno, "batch-combine", gadget_data, fetches, *batch.second, precision);
+//		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
+//		buffer.clear();
+//	}
+//}
 
 
 template<typename T>
@@ -808,12 +758,7 @@ private:
 		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
 		combine_needs_ = find_required_combines(database_, completions_, unary_needs_, combine_rights_);
-		std::size_t needy_lefts = 0, needy_pairs = 0;
-		for (const pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>& p : combine_needs_) {
-			std::size_t is = interval_size(p.second);
-			needy_lefts += is;
-			needy_pairs += is * p.first.size();
-		}
+		auto [needy_lefts, needy_pairs] = combine_needs_sizes();
 		fmt::print("Found {} of {} lefts needing combine ({} total pairs) in {}\n",
 				needy_lefts, unary_needs_.size(), needy_pairs, stopwatch.elapsed().hms());
 
@@ -824,21 +769,22 @@ private:
 	Control compute_combine() {
 		if (combine_needs_.size()) {
 			Stopwatch stopwatch = Stopwatch::process();
-			CombineBatcher batcher(combine_needs_, runtime_opts_.combine_pairs_per_task);
-			if (batcher.size() < runtime_opts_.combine_task_batch_threshold) {
-				DatabaseOperationStatistics stats = do_combine_operation(*workers_, std::move(batcher), precision_);
+			auto [needy_lefts, needy_pairs] = combine_needs_sizes();
+			if (needy_pairs / runtime_opts_.combine_pairs_per_task < runtime_opts_.combine_task_batch_threshold) {
+				DatabaseOperationStatistics stats = do_combine_operation(*workers_, combine_needs_, precision_);
 				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
-				std::size_t task_count = batcher.size();
-				ConnectionLease conn = conn_pool_->checkout();
-				write_combine_batch_tasks(*conn, std::move(batcher), precision_,
-						runtime_opts_.batch_task_directory);
-				//We could try a special resume state that only rechecks combine_needs_.
-				combine_needs_.clear();
-				fmt::print("wrote {} combine tasks in {}\n", task_count, stopwatch.elapsed().hms());
-				phase_ = Phase::discover_needs_combine;
-				return Control::suspend;
+				throw std::logic_error("TODO: reimplement writing combine tasks");
+//				std::size_t task_count = batcher.size();
+//				ConnectionLease conn = conn_pool_->checkout();
+//				write_combine_batch_tasks(*conn, std::move(batcher), precision_,
+//						runtime_opts_.batch_task_directory);
+//				//We could try a special resume state that only rechecks combine_needs_.
+//				combine_needs_.clear();
+//				fmt::print("wrote {} combine tasks in {}\n", task_count, stopwatch.elapsed().hms());
+//				phase_ = Phase::discover_needs_combine;
+//				return Control::suspend;
 			}
 		}
 		phase_ = Phase::follow_combine;
@@ -1015,20 +961,22 @@ private:
 	Control operate_unary(std::string_view operation_name, std::string_view log_name,
 			std::size_t gadgets_per_task, std::size_t batch_threshold) {
 		Stopwatch stopwatch = Stopwatch::process();
-		UnaryBatcher batcher(unary_needs_, gadgets_per_task);
-		if (batcher.size() < batch_threshold) {
+		//TODO: this doesn't account for unconnectable gadgets
+		auto chunks = interval_chunk(unary_needs_.cbegin(), unary_needs_.cend(), gadget_per_task);
+		if (chunks.size() < batch_threshold) {
 			std::string operation_cmd = fmt::format("{}-db", operation_name);
-			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_cmd, batcher);
+			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_cmd, chunks);
 			fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 					log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			return Control::proceed;
 		} else {
-			std::size_t task_count = batcher.size();
-			std::string operation_cmd = fmt::format("batch-{}", operation_name);
-			ConnectionLease conn = conn_pool_->checkout();
-			write_unary_batch_tasks(*conn, operation_cmd, batcher, runtime_opts_.batch_task_directory);
-			fmt::print("wrote {} {} tasks in {}\n", task_count, log_name, stopwatch.elapsed().hms());
-			return Control::suspend;
+			throw std::logic_error("TODO reimplement writing unary tasks");
+//			std::size_t task_count = batcher.size();
+//			std::string operation_cmd = fmt::format("batch-{}", operation_name);
+//			ConnectionLease conn = conn_pool_->checkout();
+//			write_unary_batch_tasks(*conn, operation_cmd, batcher, runtime_opts_.batch_task_directory);
+//			fmt::print("wrote {} {} tasks in {}\n", task_count, log_name, stopwatch.elapsed().hms());
+//			return Control::suspend;
 		}
 	}
 
@@ -1039,6 +987,22 @@ private:
 		vector<pair<uint64_t, uint64_t>> targets = follow_func(database_, edge_db, intervals);
 		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, interval_size(targets), stopwatch.elapsed().hms());
 		state_(std::move(targets));
+	}
+
+	/**
+	 * Computes two different size metrics for combine_needs.  The first element
+	 * in the pair is the total number of left gadgets to be combined; the
+	 * second element is the number of (left, right) pairs that will be
+	 * evaluated.
+	 */
+	pair<std::size_t, std::size_t> combine_needs_sizes() const {
+		std::size_t needy_lefts = 0, needy_pairs = 0;
+		for (const pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>& p : combine_needs_) {
+			std::size_t is = interval_size(p.second.cbegin(), p.second.cend());
+			needy_lefts += is;
+			needy_pairs += is * p.first.size();
+		}
+		return {needy_lefts, needy_pairs};
 	}
 
 	void open_subdatabases() {
