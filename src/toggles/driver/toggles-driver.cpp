@@ -1,5 +1,4 @@
 #include "precompiled.hpp"
-#include "../database.hpp"
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
 #include "intervals.hpp"
@@ -1072,7 +1071,7 @@ private:
 	Stopwatch generation_stopwatch_, subgeneration_stopwatch_;
 };
 
-int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq -l:libboost_system.a -llmdb'}
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-l:libboost_system.a -llmdb'}
 	std::string_view db_path, checkpoint_db_path;
 	unsigned int num_db_threads = 1;
 	std::vector<std::string> worker_addrs; //or @foo for response files
