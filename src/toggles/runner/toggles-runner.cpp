@@ -333,7 +333,8 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 		auto txn = lmdb::txn::begin(env);
 		{
 			lmdb::cursor cur = lmdb::cursor::open(txn, edges_it->second);
-			boost::container::static_vector<CombineEdge, 16> buf;
+			//We could use static_vector with 512 here (16 splice * 16 rotation * 2 connect locations).
+			vector<CombineEdge> buf;
 			for (std::size_t i = 0; i < prov.size();) {
 				buf.clear();
 				//Find the block sharing the same input1.
