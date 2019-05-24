@@ -39,6 +39,26 @@ auto maximal_intervals(ForwardIterator first, ForwardIterator last) -> std::vect
 	return intervals;
 }
 
+template<typename ForwardIterator,
+		typename T = typename std::common_type<
+				//should be using std::tuple_element here, I guess...
+				typename std::iterator_traits<ForwardIterator>::value_type::first_type,
+				typename std::iterator_traits<ForwardIterator>::value_type::second_type
+		>::type>
+std::vector<T> interval_inflate(ForwardIterator first, ForwardIterator last) {
+	std::vector<T> ret;
+	if (first == last)
+		return ret;
+
+	//could ret.reserve(interval_size(first, last)) at the cost of another iteration
+	while (first != last) {
+		for (auto i = first->first; i != first->second; ++i)
+			ret.push_back(i);
+		++first;
+	}
+	return ret;
+}
+
 
 //TODO: should be easy enough to make this modify in-place (like std::unique),
 //though we could still have interval_coalesce_copy if useful

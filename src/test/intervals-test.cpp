@@ -369,3 +369,14 @@ TEST_CASE("IntervalsTest_IntervalChunkExhaustion") {
 		}
 	}
 }
+
+TEST_CASE("IntervalsTest_IntervalInflateExhaustion") {
+	constexpr unsigned int limit = 1 << 8;
+	for (unsigned int left = 0; left < limit; ++left) {
+		auto leftbits = indices_of_set_bits(left);
+		auto leftranges = maximal_intervals(leftbits.cbegin(), leftbits.cend());
+		auto actual = interval_inflate(leftranges.begin(), leftranges.end());
+		CHECK_EQ(actual, leftbits);
+		CHECK_UNARY(std::is_sorted(actual.cbegin(), actual.cend()));
+	}
+}
