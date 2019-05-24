@@ -184,6 +184,13 @@ std::size_t interval_size(It1 left, It1 left_end) {
 		size += i->second - i-> first;
 	return size;
 }
+template<typename Iterable>
+auto interval_size(const Iterable& iterable)
+		//This expression SFINAE doesn't check the value_type is tuple-ish, but this is good enough for now.
+		-> decltype(std::begin(std::declval<Iterable>()), void(), static_cast<std::size_t>(0)) {
+	using std::begin, std::end;
+	return interval_size(begin(iterable), end(iterable));
+}
 
 template<typename It1, typename It2,
 		typename T = typename std::common_type<
