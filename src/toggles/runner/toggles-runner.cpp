@@ -944,7 +944,8 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 
 		mirror_edges = lmdb::dbi::open(txn, "edges-mirror", MDB_CREATE | MDB_INTEGERKEY);
 		close_edges = lmdb::dbi::open(txn, "edges-close", MDB_CREATE | MDB_INTEGERKEY);
-		lmdb::dbi::open(txn, "edges-combine", MDB_CREATE | MDB_INTEGERKEY);
+		lmdb::dbi::open(txn, "edges-connect", MDB_CREATE | MDB_INTEGERKEY);
+		//edges-combine-{} are generated on demand by the driver
 
 		lmdb::dbi meta = lmdb::dbi::open(txn, "meta", MDB_CREATE);
 		if (meta.size(txn) == 0) {
