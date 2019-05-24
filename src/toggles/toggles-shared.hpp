@@ -19,6 +19,9 @@ struct farmhash_hash {
 	uint64_t operator()(const std::vector<std::byte>& x) const noexcept {
 		return farmhash::Hash(reinterpret_cast<const char*>(x.data()), x.size());
 	}
+	uint64_t operator()(const std::vector<unsigned long>& x) const noexcept {
+		return farmhash::Hash(reinterpret_cast<const char*>(x.data()), x.size());
+	}
 };
 
 

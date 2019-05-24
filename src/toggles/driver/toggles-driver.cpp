@@ -126,7 +126,7 @@ vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>> find_required_c
 			events.emplace_back(j.first, true, i.first);
 			events.emplace_back(j.second, false, i.first);
 		}
-	std::sort(events.begin(), events.end(), std::greater()); //reversed sort for pop_back()
+	std::sort(events.begin(), events.end(), std::greater<>()); //reversed sort for pop_back()
 	//The previous event point.  Initializing to 0 is safe because the active
 	//set starts empty, so we won't emit a spurious interval.  Similarly, a loop
 	//epilogue is unnecessary because the active set is empty at the end.
@@ -434,7 +434,7 @@ template<typename T>
 vector<T>& unmarshal_reinterpret(vector<T>& dest, lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
 	std::string_view value;
 	if (!db.get(txn, key, value))
-		throw std::runtime_error("key \"{}\" not found", key);
+		throw std::runtime_error(fmt::format("key \"{}\" not found", key));
 	if ((value.size() == 0 && !allow_empty) || value.size() % sizeof(T) != 0)
 		throw std::logic_error(fmt::format("key {} has value length {} (not a multiple of {}) {}",
 				key, value.size(), sizeof(T), typeid(T).name()));
@@ -454,9 +454,9 @@ template<typename T>
 T unmarshal_from_string(lmdb::dbi& db, lmdb::txn& txn, std::string_view key) {
 	std::string_view value;
 	if (!db.get(txn, key, value))
-		throw std::runtime_error("key \"{}\" not found", key);
+		throw std::runtime_error(fmt::format("key \"{}\" not found", key));
 	//TODO: from_string will throw on a parse problem, but we'll lose which key had the problem
-	return from_string(value);
+	return from_string<T>(value);
 }
 
 void marshal_nullseparated(lmdb::dbi& db, lmdb::txn& txn, std::string_view key, const vector<std::string>& data) {
@@ -466,15 +466,15 @@ void marshal_nullseparated(lmdb::dbi& db, lmdb::txn& txn, std::string_view key, 
 	std::string value = join(data, "\0");
 	if (!db.put(txn, key, value))
 		//put only returns false if we passed MDB_NOOVERWRITE and the key existed
-		throw std::logic_error("can't happen: put threw for key {}", key);
+		throw std::logic_error(fmt::format("can't happen: put threw for key {}", key));
 }
 
 void unmarshal_nullseparated(vector<std::string>& data, lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
 	std::string_view value;
 	if (!db.get(txn, key, value))
-		throw std::runtime_error("key \"{}\" not found", key);
+		throw std::runtime_error(fmt::format("key \"{}\" not found", key));
 	if (value.empty() && !allow_empty)
-		throw std::runtime_error("key \"{}\" was empty", key);
+		throw std::runtime_error(fmt::format("key \"{}\" was empty", key));
 	split(data, value, '\0');
 }
 
@@ -492,7 +492,7 @@ public:
 		return s;
 	}
 	void operator()(uint64_t id) {
-		std::array<pair<uint64_t, uint64_t>, 1> singleton = {{id, id+1}};
+		std::array<pair<uint64_t, uint64_t>, 1> singleton = {{{id, id+1}}};
 		subgen_ = interval_union(subgen_.begin(), subgen_.end(), singleton.cbegin(), singleton.cend());
 	}
 	void operator()(const vector<pair<uint64_t, uint64_t>>& ids) {
@@ -537,7 +537,7 @@ public:
 	 */
 	void erase_from_subgeneration(const vector<pair<uint64_t, uint64_t>>& to_be_erased) {
 		//Everything we're erasing should be in subgen_ already.
-		assert(interval_intersection(subgen_.cbegin(), subgen.cend(), to_be_erased.cbegin(), to_be_erased.cend()) == to_be_erased);
+		assert(interval_intersection(subgen_.cbegin(), subgen_.cend(), to_be_erased.cbegin(), to_be_erased.cend()) == to_be_erased);
 		//Erase it, but record the removed elements in the tenured closed set.
 		closed_ = interval_union(closed_.begin(), closed_.end(), to_be_erased.cbegin(), to_be_erased.cend());
 		subgen_ = interval_difference(subgen_.begin(), subgen_.end(), to_be_erased.begin(), to_be_erased.end());
@@ -547,7 +547,7 @@ public:
 	 * @return the previous generation
 	 */
 	vector<pair<uint64_t, uint64_t>> flip_generation() {
-		curgen_ = interval_union(curgen_.begin(), curgen_.end(), subgen_.begin(), subgen.end());
+		curgen_ = interval_union(curgen_.begin(), curgen_.end(), subgen_.begin(), subgen_.end());
 		vector<pair<uint64_t, uint64_t>> prev = std::move(curgen_);
 		curgen_.clear(); //make moved-from vector suitable for insertion again
 		subgen_.clear();
@@ -557,8 +557,8 @@ public:
 	 * Begin a new subgeneration.
 	 */
 	void flip_subgeneration() {
-		closed_ = interval_union(closed_.begin(), closed_.end(), subgen_.cbegin(), subgen.cend());
-		curgen_ = interval_union(curgen_.begin(), curgen_.end(), subgen_.cbegin(), subgen.cend());
+		closed_ = interval_union(closed_.begin(), closed_.end(), subgen_.cbegin(), subgen_.cend());
+		curgen_ = interval_union(curgen_.begin(), curgen_.end(), subgen_.cbegin(), subgen_.cend());
 		prev_subgen_ = std::move(subgen_);
 		subgen_.clear();
 	}
@@ -620,7 +620,7 @@ private:
 	 * previous subgeneration was empty, and with the first combine replaced by
 	 * collecting the initial gadget set.
 	 */
-	enum class Phase {
+	enum class Phase : unsigned int {
 		collect_initial,
 
 		begin_generation,
@@ -660,7 +660,8 @@ private:
 
 	//for the convenience of resume()
 	Search(lmdb::env&& database, RuntimeOptions runtime_opts) :
-			database_(std::move(database)), runtime_opts_(runtime_opts) {}
+			database_(std::move(database)), runtime_opts_(runtime_opts),
+			generation_stopwatch_(Stopwatch::process()), subgeneration_stopwatch_(Stopwatch::process()) {}
 
 public:
 	Search(vector<std::string>&& cmdline_specs, GadgetSet&& source_specs,
@@ -669,11 +670,11 @@ public:
 			generation_(0), subgeneration_(0), phase_(Phase::collect_initial),
 			cmdline_specs_(std::move(cmdline_specs)),
 			source_specs_(std::move(source_specs)), precision_(precision), multiplayer_(multiplayer),
-			database_(std::move(database)), workers_(nullptr), checkpoint_(std::move(checkpoint)),
+			database_(std::move(database)), checkpoint_(std::move(checkpoint)), workers_(nullptr),
 			runtime_opts_(runtime_opts), generation_stopwatch_(Stopwatch::process()),
 			subgeneration_stopwatch_(Stopwatch::process()) {}
 	static Search resume(lmdb::env&& checkpoint, lmdb::env&& database, RuntimeOptions runtime_opts) {
-		Search s(std::move(database, runtime_opts));
+		Search s(std::move(database), runtime_opts);
 		{
 			auto txn = lmdb::txn::begin(checkpoint, nullptr, MDB_RDONLY);
 			lmdb::dbi root = lmdb::dbi::open(txn, nullptr);
@@ -735,7 +736,7 @@ private:
 		Stopwatch stopwatch = Stopwatch::process();
 		vector<uint64_t> initial = collect_initial_gadget_set(database_, source_specs_);
 		fmt::print("Collected {} initial gadgets in {}ms\n", initial.size(), stopwatch.elapsed().millis());
-		state_(std::move(initial));
+		state_(maximal_intervals(initial.begin(), initial.end()));
 		phase_ = Phase::discover_needs_close;
 		return Control::proceed;
 	}
@@ -771,7 +772,8 @@ private:
 			Stopwatch stopwatch = Stopwatch::process();
 			auto [needy_lefts, needy_pairs] = combine_needs_sizes();
 			if (needy_pairs / runtime_opts_.combine_pairs_per_task < runtime_opts_.combine_task_batch_threshold) {
-				DatabaseOperationStatistics stats = do_combine_operation(*workers_, combine_needs_, precision_);
+				DatabaseOperationStatistics stats = do_combine_operation(*workers_, combine_needs_,
+						runtime_opts_.combine_pairs_per_task, precision_);
 				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
@@ -796,7 +798,7 @@ private:
 		Stopwatch stopwatch = Stopwatch::process();
 
 		vector<vector<pair<uint64_t, uint64_t>>> incoming;
-		for (const auto& p : edges_combine_)
+		for (auto& p : edges_combine_)
 			incoming.push_back(follow_edges<CombineEdge>(database_, p.second, unary_needs_));
 		//binary merge tree
 		//TODO: move this to intervals.hpp as multiway union?  but we also want
@@ -810,7 +812,7 @@ private:
 		}
 		//We might have found nothing; ensure incoming.front() always exists.
 		if (incoming.empty())
-			incoming.push_back();
+			incoming.push_back({});
 		fmt::print("Followed combine edges to {} gadgets in {}\n", interval_size(incoming.front()), stopwatch.elapsed().hms());
 		state_(std::move(incoming.front()));
 
@@ -827,7 +829,7 @@ private:
 			phase_ = Phase::discover_needs_mirror;
 			return Control::proceed;
 		}
-		filter_unary("close", state_.subgeneration(), state_.subgeneration_end());
+		filter_unary("close", state_.subgeneration());
 		phase_ = Phase::compute_close;
 		return Control::proceed;
 	}
@@ -860,7 +862,7 @@ private:
 	}
 
 	Control discover_needs_mirror() {
-		filter_unary("mirror", state_.subgeneration(), state_.subgeneration_end());
+		filter_unary("mirror", state_.subgeneration());
 		phase_ = Phase::compute_mirror;
 		return Control::proceed;
 	}
@@ -897,8 +899,8 @@ private:
 		//choose the set of combine rights, but this matches how the old
 		//generational search worked.
 		if (generation_ == 0 && subgeneration_ == 0) {
-			combine_rights_.assign(state_.subgeneration().begin(), state_.subgeneration().end());
-			std::sort(combine_rights_.begin(), combine_rights_.end());
+			combine_rights_ = interval_inflate(state_.subgeneration().begin(), state_.subgeneration().end());
+			assert(std::is_sorted(combine_rights_.begin(), combine_rights_.end()));
 			fmt::print("Combine rights ({}):", combine_rights_.size());
 			for (uint64_t id : combine_rights_)
 				fmt::print(" {}", id);
@@ -962,7 +964,7 @@ private:
 			std::size_t gadgets_per_task, std::size_t batch_threshold) {
 		Stopwatch stopwatch = Stopwatch::process();
 		//TODO: this doesn't account for unconnectable gadgets
-		auto chunks = interval_chunk(unary_needs_.cbegin(), unary_needs_.cend(), gadget_per_task);
+		auto chunks = interval_chunk(unary_needs_.cbegin(), unary_needs_.cend(), gadgets_per_task);
 		if (chunks.size() < batch_threshold) {
 			std::string operation_cmd = fmt::format("{}-db", operation_name);
 			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_cmd, chunks);
@@ -998,7 +1000,7 @@ private:
 	pair<std::size_t, std::size_t> combine_needs_sizes() const {
 		std::size_t needy_lefts = 0, needy_pairs = 0;
 		for (const pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>& p : combine_needs_) {
-			std::size_t is = interval_size(p.second.cbegin(), p.second.cend());
+			std::size_t is = interval_size(p.second);
 			needy_lefts += is;
 			needy_pairs += is * p.first.size();
 		}
@@ -1183,7 +1185,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				return 1;
 			}
 			txn.commit();
-			search.emplace(std::move(checkpoint_env), runtime_opts);
+			search = Search::resume(std::move(checkpoint_env), std::move(data_env), runtime_opts);
 		} else {
 			if (checkpoint_root.size(txn) != 0) {
 				fmt::print("ERROR: checkpoint database {} doesn't have parent id, but also isn't empty\n", checkpoint_db_path);
@@ -1201,16 +1203,16 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
 			precision, multiplayer, runtime_opts, std::move(data_env), std::nullopt);
 
-	if (!search->execute(pool, &manager)) {
+	if (!search->execute(&manager)) {
 		//TODO: if we have a checkpoint database, we're going to take checkpoints
 		//continuously, not just when suspending, so this logic is unnecessary
-		if (suspend_checkpoint.empty())
-			fmt::print(stderr, "ERROR: would suspend, but --suspend-checkpoint not passed\n");
-		else {
-			simple_buffer buf;
-			msgpack::pack(buf, std::move(*search).serialize());
-			write_buffer(buf, std::string(suspend_checkpoint));
-		}
+//		if (suspend_checkpoint.empty())
+//			fmt::print(stderr, "ERROR: would suspend, but --suspend-checkpoint not passed\n");
+//		else {
+//			simple_buffer buf;
+//			msgpack::pack(buf, std::move(*search).serialize());
+//			write_buffer(buf, std::string(suspend_checkpoint));
+//		}
 	}
 
 	return 0;
