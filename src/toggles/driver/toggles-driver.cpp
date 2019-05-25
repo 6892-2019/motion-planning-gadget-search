@@ -348,8 +348,8 @@ DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::stri
 			error_happened = true;
 		} else {
 			DatabaseOperationStatistics stats = resp.result_as<DatabaseOperationStatistics>();
-			fmt::print("task {} completed: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
-					resp.seq(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			fmt::print("task {} completed: {} skipped, {} pruned, {} known, {} new, {} edges\n",
+					resp.seq(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			overall_stats += stats;
 		}
 	});
@@ -398,8 +398,8 @@ DatabaseOperationStatistics do_combine_operation(WorkerManager& manager,
 			error_happened = true;
 		} else {
 			DatabaseOperationStatistics stats = resp.result_as<DatabaseOperationStatistics>();
-			fmt::print("task {} completed: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
-					resp.seq(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			fmt::print("task {} completed: {} skipped, {} pruned, {} known, {} new, {} edges\n",
+					resp.seq(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			overall_stats += stats;
 		}
 	});
@@ -773,8 +773,8 @@ private:
 			if (needy_pairs / runtime_opts_.combine_pairs_per_task < runtime_opts_.combine_task_batch_threshold) {
 				DatabaseOperationStatistics stats = do_combine_operation(*workers_, combine_needs_,
 						runtime_opts_.combine_pairs_per_task, precision_);
-				fmt::print("Combine operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
-						stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+				fmt::print("Combine operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+						stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
 				throw std::logic_error("TODO: reimplement writing combine tasks");
 //				std::size_t task_count = batcher.size();
@@ -967,8 +967,8 @@ private:
 		if (chunks.size() < batch_threshold) {
 			std::string operation_cmd = fmt::format("{}-db", operation_name);
 			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_cmd, chunks);
-			fmt::print("{} operation completed in {}: {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
-					log_name, stopwatch.elapsed().hms(), stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			fmt::print("{} operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
+					log_name, stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			return Control::proceed;
 		} else {
 			throw std::logic_error("TODO reimplement writing unary tasks");

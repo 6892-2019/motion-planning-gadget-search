@@ -26,15 +26,16 @@ struct farmhash_hash {
 
 
 struct DatabaseOperationStatistics {
-	std::size_t pruned_locally, pruned_database, novel_gadgets, edges;
+	std::size_t skipped, pruned_locally, pruned_database, novel_gadgets, edges;
 	DatabaseOperationStatistics& operator+=(const DatabaseOperationStatistics& o) {
+		skipped += o.skipped;
 		pruned_locally += o.pruned_locally;
 		pruned_database += o.pruned_database;
 		novel_gadgets += o.novel_gadgets;
 		edges += o.edges;
 		return *this;
 	}
-	MSGPACK_DEFINE(pruned_locally, pruned_database, novel_gadgets, edges)
+	MSGPACK_DEFINE(skipped, pruned_locally, pruned_database, novel_gadgets, edges)
 };
 
 struct GadgetSet {

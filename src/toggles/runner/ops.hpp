@@ -15,7 +15,7 @@ struct Finisher {
 	tsl::ordered_set<std::vector<std::byte>, farmhash_hash, std::equal_to<std::vector<std::byte>>,
 			std::allocator<std::vector<std::byte>>, std::vector<std::vector<std::byte>>> rows_;
 	std::vector<Provenance> prov_;
-	std::size_t pruned_ = 0;
+	std::size_t pruned_ = 0, skipped_ = 0;
 	bool operator()(automaton::WorkingAutomaton&& a, Provenance prov) {
 		//TODO: calling active_alphabet_size again here is wasteful, should pass it in instead
 		prov.canonicalizePermutation = numeric_cast<std::uint8_t>(canonicalize(a, a.active_alphabet_size(), false));
@@ -30,6 +30,9 @@ struct Finisher {
 		prov.output1 = numeric_cast<decltype(prov.output1)>(std::distance(rows_.begin(), pair.first));
 		prov_.push_back(std::move(prov));
 		return pair.second;
+	}
+	void skip() {
+		++skipped_;
 	}
 };
 

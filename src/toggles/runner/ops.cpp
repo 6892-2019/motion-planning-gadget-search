@@ -144,9 +144,10 @@ void connect(const Automaton<N>& a, std::uint64_t input1, Finisher<ConnectProven
 void connect(const AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProvenance>& finisher) {
 	auto alpha = a.alphabet_size();
 	if (alpha < 4) {
-		//We should ignore these at the database level.
-		fmt::print(stderr, "ignoring connect for gadget {} with alphabet size {} (no results possible)\n",
-				input1, alpha);
+		//If we start filtering in the driver again, we should re-enable this warning.
+//		fmt::print(stderr, "ignoring connect for gadget {} with alphabet size {} (no results possible)\n",
+//				input1, alpha);
+		finisher.skip();
 		return;
 	}
 	switch (alpha) {
@@ -300,8 +301,10 @@ Finisher<CombineProvenance> do_combine0(const tsl::hopscotch_map<std::uint64_t, 
 			auto leftLocations = pla->active_alphabet_size();
 			for (auto ri : xrange(right_gids.size())) {
 				if (leftLocations + right_locations[ri] > Precision) {
-					fmt::print(stderr, "WARNING: skipping combine between {} ({} locations) and {} ({} locations) which exceeds precision {}\n",
-							l, leftLocations, right_gids[ri], right_locations[ri], Precision);
+					//If we start filtering in the driver again, we should re-enable this warning.
+//					fmt::print(stderr, "WARNING: skipping combine between {} ({} locations) and {} ({} locations) which exceeds precision {}\n",
+//							l, leftLocations, right_gids[ri], right_locations[ri], Precision);
+					finisher.skip();
 					continue;
 				}
 				prov.input2 = right_gids[ri];

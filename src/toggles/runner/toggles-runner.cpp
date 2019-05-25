@@ -291,16 +291,18 @@ static std::string g_database_path;
 
 DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, vector<pair<uint64_t, lmdb::dbi>>& edge_tables, lmdb::dbi& completions,
-		vector<vector<std::byte>>&& gadgets, vector<CombineProvenance>&& prov, std::size_t pruned) {
+		vector<vector<std::byte>>&& gadgets, vector<CombineProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
 	std::size_t survivor_size = gadgets.size();
 	std::size_t edge_count = prov.size();
 
 	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets));
 
-	//The loop control below assumes provs isn't empty.  It shouldn't be.
+	//The loop control below assumes provs isn't empty.  It can only be empty if
+	//we skipped all the pairs.
 	if (prov.empty()) {
-		fmt::print(stderr, "warning: skipping empty combine provs; there were {} gadgets\n", survivor_size);
-		return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+		if (survivor_size != 0 || skipped == 0)
+			fmt::print(stderr, "warning: skipping empty combine provs but there were {} gadgets; {} skipped\n", survivor_size, skipped);
+		return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 	}
 
 	//We group by input2, then by input1.  Because we combine against each right
@@ -373,7 +375,7 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 		txn.commit();
 	}
 
-	return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 }
 
 DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_intervals,
@@ -421,14 +423,14 @@ DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_
 	Finisher<CombineProvenance> outputs = do_combine(std::move(map),
 			std::move(left_intervals), std::move(right_gids), precision);
 	return commit_combine_result(env, gadget_hashtable, gadget_index, edge_tables, completions,
-			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_);
+			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
 
 DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
-		vector<ConnectProvenance>&& prov, std::size_t pruned) {
+		vector<ConnectProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
 	std::size_t survivor_size = gadgets.size();
 	std::size_t edge_count = prov.size();
 
@@ -478,7 +480,7 @@ DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gad
 	union_completion(env, txn, completions, "connect", input_intervals);
 	txn.commit();
 
-	return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 }
 
 DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
@@ -501,14 +503,14 @@ DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input
 	Finisher<ConnectProvenance> outputs = do_connect(std::move(inputs));
 	return commit_connect_result(env, gadget_hashtable, gadget_index, connect_edges, completions,
 			std::move(input_intervals), std::move(outputs.rows_).values_container(),
-			std::move(outputs.prov_), outputs.pruned_);
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
 DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
 		std::string_view completion_kind, bool idempotent,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
-		vector<SimpleProvenance>&& prov, std::size_t pruned) {
+		vector<SimpleProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
 	std::size_t survivor_size = gadgets.size();
 	std::size_t edge_count = prov.size();
 
@@ -554,15 +556,15 @@ DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadg
 	union_completion(env, txn, completions, completion_kind, input_intervals);
 	txn.commit();
 
-	return {pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 }
 
 DatabaseOperationStatistics commit_close_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& close_edges, lmdb::dbi& completions,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
-		vector<SimpleProvenance>&& prov, std::size_t pruned) {
+		vector<SimpleProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
 	return commit_simple_result(env, gadget_hashtable, gadget_index, close_edges, completions, "close", true,
-			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned);
+			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned, skipped);
 }
 
 //extracted for the benefit of sync_mode
@@ -574,7 +576,7 @@ DatabaseOperationStatistics do_close_db0(vector<pair<uint64_t, uint64_t>> input_
 	Finisher<SimpleProvenance> outputs = do_close(std::move(inputs));
 	return commit_close_result(env, gadget_hashtable, gadget_index, close_edges, completions,
 			std::move(input_intervals), std::move(outputs.rows_).values_container(),
-			std::move(outputs.prov_), outputs.pruned_);
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
 DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
@@ -597,9 +599,9 @@ DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_i
 DatabaseOperationStatistics commit_mirror_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges, lmdb::dbi& completions,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
-		vector<SimpleProvenance>&& prov, std::size_t pruned) {
+		vector<SimpleProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
 	return commit_simple_result(env, gadget_hashtable, gadget_index, mirror_edges, completions, "mirror", false,
-			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned);
+			std::move(input_intervals), std::move(gadgets), std::move(prov), pruned, skipped);
 }
 
 //TODO: There's a lot of duplication between close and mirror (and maybe also
@@ -614,7 +616,7 @@ DatabaseOperationStatistics do_mirror_db0(vector<pair<uint64_t, uint64_t>> input
 	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
 	return commit_mirror_result(env, gadget_hashtable, gadget_index, mirror_edges, completions,
 			std::move(input_intervals), std::move(outputs.rows_).values_container(),
-			std::move(outputs.prov_), outputs.pruned_);
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
 DatabaseOperationStatistics do_mirror_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
