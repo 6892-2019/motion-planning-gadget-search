@@ -760,7 +760,7 @@ private:
 		combine_needs_ = find_required_combines(database_, completions_, unary_needs_, combine_rights_);
 		auto [needy_lefts, needy_pairs] = combine_needs_sizes();
 		fmt::print("Found {} of {} lefts needing combine ({} total pairs) in {}\n",
-				needy_lefts, unary_needs_.size(), needy_pairs, stopwatch.elapsed().hms());
+				needy_lefts, interval_size(unary_needs_), needy_pairs, stopwatch.elapsed().hms());
 
 		phase_ = Phase::compute_combine;
 		return Control::proceed;
@@ -956,7 +956,7 @@ private:
 			throw std::logic_error(fmt::format("called filter_unary for {} but unary_needs_ not empty\n", completions_key));
 		unary_needs_ = filter_completion(database_, completions_, completions_key, candidates);
 		fmt::print("Found {} of {} gadgets needing {} in {}\n",
-				interval_size(unary_needs_), candidates.size(), completions_key, stopwatch.elapsed().hms());
+				interval_size(unary_needs_), interval_size(candidates), completions_key, stopwatch.elapsed().hms());
 	}
 
 	Control operate_unary(std::string_view operation_name, std::string_view log_name,
