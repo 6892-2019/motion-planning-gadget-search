@@ -312,10 +312,10 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 	//touching one edge table at a time).  This is more to simplify managing
 	//cursor lifetime than to keep transactions short, as we'll start another
 	//immediately and we can't do anything useful if we're suspended.
-	auto same_input2 = [](uint64_t input2, const CombineProvenance& p){return input2 <= p.input2;};
-	for (auto block_first = prov.begin(), block_end = std::upper_bound(block_first, prov.end(), block_first->input2, same_input2);
+	auto input2_sort = [](const CombineProvenance& a, const CombineProvenance& b){return a.input2 < b.input2;};
+	for (auto block_first = prov.begin(), block_end = std::lower_bound(block_first, prov.end(), *block_first, input2_sort);
 			block_first != prov.end();
-			block_first = block_end, block_end = std::upper_bound(block_first, prov.end(), block_first->input2, same_input2)) {
+			block_end = std::upper_bound(block_first, prov.end(), *block_first, input2_sort)) {
 		uint64_t input2 = block_first->input2;
 		auto edges_it = std::find_if(edge_tables.begin(), edge_tables.end(),
 				[input2](const auto& p){return p.first == input2;});
@@ -335,12 +335,12 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 			lmdb::cursor cur = lmdb::cursor::open(txn, edges_it->second);
 			//We could use static_vector with 512 here (16 splice * 16 rotation * 2 connect locations).
 			vector<CombineEdge> buf;
-			for (std::size_t i = 0; i < prov.size();) {
+			while (block_first != block_end) {
 				buf.clear();
 				//Find the block sharing the same input1.
-				std::size_t j = i;
-				while (j < prov.size() && prov[i].input1 == prov[j].input1) {
-					const CombineProvenance& p = prov[j];
+				auto subblock_end = block_first;
+				while (subblock_end != block_end && block_first->input1 == subblock_end->input1) {
+					const CombineProvenance& p = *subblock_end;
 					CombineEdge e;
 					e.output = selsert_result.local_to_global[p.output1];
 					e.splice = p.splice;
@@ -348,25 +348,25 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 					e.connectPoint = p.connectPoint;
 					e.canonicalizePermutation = p.canonicalizePermutation;
 					buf.push_back(e);
-					++j;
+					++subblock_end;
 				}
 				//For canonicalization purposes, sort the edges.  (We have to remap
 				//through local_to_global before we can do this.)
 				std::sort(buf.begin(), buf.end());
 				std::string_view value(reinterpret_cast<char*>(buf.data()), buf.size()*sizeof(CombineEdge));
-				if (!cur.put(lmdb::to_sv(prov[i].input1), value, MDB_NOOVERWRITE)) {
+				if (!cur.put(lmdb::to_sv(block_first->input1), value, MDB_NOOVERWRITE)) {
 					if (value.size() == 0 || value.size() % sizeof(CombineEdge) != 0)
 						throw std::logic_error(fmt::format("combine edge data for key {}/{} has value length {} (not a multiple of {})",
-								prov[i].input1, prov[i].input2, value.size(), sizeof(CombineEdge)));
+								block_first->input1, block_first->input2, value.size(), sizeof(CombineEdge)));
 					const CombineEdge* first = reinterpret_cast<const CombineEdge*>(value.data());
 					const CombineEdge* last = first + value.size() / sizeof(CombineEdge);
 					if (!std::equal(buf.cbegin(), buf.cend(), first, last))
 						throw std::logic_error(fmt::format("differing combine edges from {}/{}: {} and {}",
-								prov[i].input1, prov[i].input2, buf, make_range_for_pair(first, last)));
+								block_first->input1, block_first->input2, buf, make_range_for_pair(first, last)));
 					edge_count -= buf.size(); //don't count edges already present
 				}
-				comp_input1(prov[i].input1);
-				i = j;
+				comp_input1(block_first->input1);
+				block_first = subblock_end;
 			}
 		}
 		union_completion(env, txn, completions, completions_kind, std::move(comp_input1).finish());
