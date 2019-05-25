@@ -385,17 +385,26 @@ DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_
 	lmdb::dbi gadget_hashtable, gadget_index, completions;
 	vector<pair<uint64_t, lmdb::dbi>> edge_tables;
 	{
-		//This is a write txn because we may have to create edge databases.  It
-		//may be better to leave it up to the driver to create them for us.
-		//TODO: try with a read-only txn, take the lock only if not present
-		lmdb::txn txn = lmdb::txn::begin(env);
-		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-		completions = lmdb::dbi::open(txn, "completions");
-		for (uint64_t i : right_gids)
-			edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", i).c_str(),
-					MDB_CREATE | MDB_INTEGERKEY));
-		txn.commit();
+		//We may have to create edge databases, though usually the driver will
+		//create them for us, so try a read-only txn first.
+		try {
+			lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+			gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+			gadget_index = lmdb::dbi::open(txn, "gadget_index");
+			completions = lmdb::dbi::open(txn, "completions");
+			for (uint64_t i : right_gids)
+				edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", i).c_str()));
+			txn.commit();
+		} catch (lmdb::not_found_error&) {
+			lmdb::txn txn = lmdb::txn::begin(env);
+			gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+			gadget_index = lmdb::dbi::open(txn, "gadget_index");
+			completions = lmdb::dbi::open(txn, "completions");
+			for (uint64_t i : right_gids)
+				edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", i).c_str(),
+						MDB_CREATE | MDB_INTEGERKEY));
+			txn.commit();
+		}
 	}
 
 	if (!std::is_sorted(right_gids.begin(), right_gids.end()))
