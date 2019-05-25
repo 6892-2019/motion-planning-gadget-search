@@ -667,10 +667,10 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 
 //	{"canonicalize"sv, &handler_adapter<canonicalize_from_slls>},
 
-//	{"connect-db"sv, &handler_adapter<do_connect_db>},
-//	{"combine-db"sv, &handler_adapter<do_combine_db>},
-//	{"close-db"sv, &handler_adapter<do_close_db>},
-//	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
+	{"connect-db"sv, &handler_adapter<do_connect_db>},
+	{"combine-db"sv, &handler_adapter<do_combine_db>},
+	{"close-db"sv, &handler_adapter<do_close_db>},
+	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
 //
 //	{"batch-combine"sv, &handler_adapter<do_batch_combine>},
 //	{"batch-combine-commit"sv, &handler_adapter<do_batch_combine_commit>},
