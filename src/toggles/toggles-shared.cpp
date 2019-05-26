@@ -287,10 +287,10 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env
 			//'output' being the first member.  (Or maybe still template on
 			//Edge, but use sizeof/offsetof to achieve the same.)
 			if (value.size() == 0 || value.size() % sizeof(Edge) != 0)
-				throw std::logic_error(fmt::format("edge data of type {} has value length {} (not a multiple of {})",
+				throw std::logic_error(fmt::format("edge data of type {} for key {} has value length {} (not a multiple of {})",
 						//We want the dbi's name here, but I don't see how to get it.
 						//The message won't distinguish close and mirror.
-						typeid(Edge).name(), value.size(), sizeof(Edge)));
+						typeid(Edge).name(), key, value.size(), sizeof(Edge)));
 			const Edge* first = reinterpret_cast<const Edge*>(value.data());
 			const Edge* last = first + value.size() / sizeof(Edge);
 			while (first != last)
