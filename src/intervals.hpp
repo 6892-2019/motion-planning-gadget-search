@@ -12,6 +12,7 @@
 #include <utility>
 #include <cassert>
 #include <iterator>
+#include <algorithm>
 
 //having T as a second template argument lets the caller override the type
 //(e.g., wider or narrower) at the cost of also having to spell out the iterator type
@@ -190,6 +191,23 @@ auto interval_size(const Iterable& iterable)
 		-> decltype(std::begin(std::declval<Iterable>()), void(), static_cast<std::size_t>(0)) {
 	using std::begin, std::end;
 	return interval_size(begin(iterable), end(iterable));
+}
+
+template<typename It1, typename T>
+bool interval_contains(It1 left, It1 left_end, const T& element) {
+	//TODO: for large interval sets, use a branchless binary search
+	//I couldn't figure out how to express our predicate of interest with
+	//std::lower/upper_bound.  We inherently have a three-way comparison here
+	//(in some left interval, in this interval, in some right interval) and we
+	//terminate when the range to our left/right is empty.
+	return std::find_if(left, left_end, [&element](const std::pair<T, T>& x) {
+		return x.first <= element && element < x.second;
+	}) != left_end;
+}
+template<typename Iterable, typename T>
+bool interval_contains(const Iterable& iterable, const T& element) {
+	using std::begin, std::end;
+	return interval_contains(begin(iterable), end(iterable), element);
 }
 
 template<typename It1, typename It2,

@@ -380,3 +380,17 @@ TEST_CASE("IntervalsTest_IntervalInflateExhaustion") {
 		CHECK_UNARY(std::is_sorted(actual.cbegin(), actual.cend()));
 	}
 }
+
+TEST_CASE("IntervalsTest_IntervalContainsExhaustion") {
+	constexpr int element_limit = 8;
+	constexpr unsigned int limit = 1 << element_limit;
+	for (unsigned int left = 0; left < limit; ++left) {
+		auto leftbits = indices_of_set_bits(left);
+		auto leftranges = maximal_intervals(leftbits.cbegin(), leftbits.cend());
+		//deliberately try two cases never in the ranges
+		for (int test = -1; test <= element_limit; ++test) {
+//			fmt::print("{} {}\n", leftranges, test);
+			CHECK_EQ(interval_contains(leftranges, test), std::binary_search(leftbits.cbegin(), leftbits.cend(), test));
+		}
+	}
+}
