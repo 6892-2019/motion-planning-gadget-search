@@ -620,8 +620,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 						discovered.begin(), discovered.end());
 				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
 						discovered.cbegin(), discovered.cend());
-				awaiting_connect = std::move(discovered);
 			}
+			awaiting_connect = std::move(discovered); //i.e., if empty, clear
 		} else if (!awaiting_combine.empty()) {
 			vector<pair<uint64_t, uint64_t>> awaiting_combine_next;
 			for (pair<uint64_t, lmdb::dbi>& right : edges_combine) {
