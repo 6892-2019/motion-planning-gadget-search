@@ -617,10 +617,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				record_closed(discovered);
 				awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
 						discovered.begin(), discovered.end());
-				awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
-						discovered.cbegin(), discovered.cend());
 				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
 						discovered.cbegin(), discovered.cend());
+				awaiting_connect = std::move(discovered);
 			}
 		} else if (!awaiting_combine.empty()) {
 			vector<pair<uint64_t, uint64_t>> awaiting_combine_next;
