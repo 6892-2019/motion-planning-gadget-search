@@ -465,7 +465,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		edges_connect = lmdb::dbi::open(txn, "edges-connect");
 		edges_close = lmdb::dbi::open(txn, "edges-close");
 		edges_mirror = lmdb::dbi::open(txn, "edges-mirror");
-		edges_mirror = lmdb::dbi::open(txn, "completions");
+		completions = lmdb::dbi::open(txn, "completions");
 		txn.commit();
 	}
 
