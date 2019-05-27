@@ -425,6 +425,7 @@ vector<pair<uint64_t, uint64_t>> find_all_combine_rights(lmdb::env& env) {
 	while (key.compare(0, edges_combine_prefix.size(), edges_combine_prefix) == 0) {
 		key.remove_prefix(edges_combine_prefix.size());
 		accum(from_string<uint64_t>(key));
+		if (!cur.get(key, MDB_NEXT)) break;
 	}
 	txn.commit();
 	return std::move(accum).finish();
