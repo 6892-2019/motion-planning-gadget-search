@@ -652,7 +652,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			throw std::logic_error("can't happen: nothing to do?");
 		txn.commit();
 		if (!prov.empty()) {
-			std::sort(prov.begin(), prov.end());
+			std::sort(prov.back().begin(), prov.back().end());
 			prov.emplace_back();
 		}
 	}
