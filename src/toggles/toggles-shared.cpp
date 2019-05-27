@@ -275,31 +275,10 @@ template<class Edge>
 std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env,
 		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources) {
 	interval_accumulator<uint64_t> accum(256);
-	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-	lmdb::cursor cur = lmdb::cursor::open(txn, edge_db);
-	for (const pair<uint64_t, uint64_t>& p : sources) {
-		std::string_view key = lmdb::to_sv(p.first), value;
-		if (!cur.get(key, value, MDB_SET_RANGE))
-			break; //reached end of database
-		while (lmdb::from_sv<uint64_t>(key) < p.second) {
-			//If we have to replace this pointer-based code for alignment etc.,
-			//we can instead template this function on sizeof(Edge), relying on
-			//'output' being the first member.  (Or maybe still template on
-			//Edge, but use sizeof/offsetof to achieve the same.)
-			if (value.size() == 0 || value.size() % sizeof(Edge) != 0)
-				throw std::logic_error(fmt::format("edge data of type {} for key {} has value length {} (not a multiple of {})",
-						//We want the dbi's name here, but I don't see how to get it.
-						//The message won't distinguish close and mirror.
-						typeid(Edge).name(), key, value.size(), sizeof(Edge)));
-			const Edge* first = reinterpret_cast<const Edge*>(value.data());
-			const Edge* last = first + value.size() / sizeof(Edge);
-			while (first != last)
-				accum(first++->output);
-
-			if (!cur.get(key, value, MDB_NEXT)) break;
-		}
-	}
-	txn.commit();
+	visit_edges<Edge>(env, edge_db, sources, [&](uint64_t, const Edge& e) {
+		accum(e.output);
+		return VisitEdgeResult::proceed;
+	});
 	return std::move(accum).finish();
 }
 
