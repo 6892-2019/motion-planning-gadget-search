@@ -371,7 +371,7 @@ TargetStuff target_stuff(lmdb::env& env) {
 						key, value.size(), sizeof(uint64_t)));
 			const uint64_t* first = reinterpret_cast<const uint64_t*>(value.data());
 			const uint64_t* last = first + value.size() / sizeof(uint64_t);
-			for (const uint64_t* e = first; e != last; ++first)
+			for (const uint64_t* e = first; e != last; ++e)
 				inv_names[*e].push_back(std::string(key));
 		} while (cur.get(key, value, MDB_NEXT));
 	}
