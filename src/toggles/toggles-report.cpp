@@ -331,6 +331,8 @@ void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges
 				for (uint64_t i : inputs)
 					frontier.push_back(i);
 			}
+			std::sort(frontier.begin(), frontier.end());
+			frontier.erase(std::unique(frontier.begin(), frontier.end()), frontier.end());
 		}
 	}
 }
