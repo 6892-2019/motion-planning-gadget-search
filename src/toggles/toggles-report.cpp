@@ -318,7 +318,7 @@ void fill_cache(lmdb::env& env, vector<pair<uint64_t, lmdb::dbi>>& combine_edges
 					edges.push_back(AnyProv::close(p.input(), *e));
 				}
 				for (const SkinnyProv& p : mirror_batch) {
-					std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, close_edges, p.input(), p.output());
+					std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, mirror_edges, p.input(), p.output());
 					if (!e)
 						throw std::logic_error(fmt::format("no mirror edge for {}/{}", p.input(), p.output()));
 					edges.push_back(AnyProv::mirror(p.input(), *e));
