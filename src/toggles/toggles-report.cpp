@@ -386,8 +386,8 @@ TargetStuff target_stuff(lmdb::env& env) {
 	for (uint64_t i : stable_iteration)
 		visit_edges<SimpleEdge>(txn, close_edges, i, [&](uint64_t input, const SimpleEdge& e) {
 			assert(input == i);
-			if (!edge_cache.count(i))
-				edge_cache.insert_or_assign(i, AnyProv::close(i, e));
+			if (!edge_cache.count(e.output))
+				edge_cache.insert_or_assign(e.output, AnyProv::close(i, e));
 			return VisitEdgeResult::proceed;
 		});
 
@@ -398,8 +398,8 @@ TargetStuff target_stuff(lmdb::env& env) {
 	for (uint64_t i : stable_iteration)
 		visit_edges<SimpleEdge>(txn, mirror_edges, i, [&](uint64_t input, const SimpleEdge& e) {
 			assert(input == i);
-			if (!edge_cache.count(i))
-				edge_cache.insert_or_assign(i, AnyProv::mirror(i, e));
+			if (!edge_cache.count(e.output))
+				edge_cache.insert_or_assign(e.output, AnyProv::mirror(i, e));
 			return VisitEdgeResult::proceed;
 		});
 
