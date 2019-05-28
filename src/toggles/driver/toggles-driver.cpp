@@ -1150,9 +1150,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	std::optional<Search> search; //just for lazy init
 	if (!checkpoint_db_path.empty()) {
 		lmdb::env checkpoint_env = lmdb::env::create(MDB_NOSUBDIR);
-		data_env.set_mapsize(5UL * 1024 * 1024 * 1024);
-		data_env.set_max_dbs(1);
-		data_env.open(std::string(checkpoint_db_path).c_str()); //TODO: flags?
+		checkpoint_env.set_mapsize(5UL * 1024 * 1024 * 1024);
+		checkpoint_env.set_max_dbs(1);
+		checkpoint_env.open(std::string(checkpoint_db_path).c_str()); //TODO: flags?
 		lmdb::txn txn = lmdb::txn::begin(checkpoint_env);
 		lmdb::dbi checkpoint_root = lmdb::dbi::open(txn, nullptr);
 		std::string_view id_target;
