@@ -1133,7 +1133,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	lmdb::env data_env = lmdb::env::create();
 	data_env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	data_env.set_max_dbs(64);
-	data_env.open(std::string(db_path).c_str()); //TODO: flags?
+	data_env.open(std::string(db_path).c_str(), MDB_NORDAHEAD); //TODO: flags?
 	uint64_t database_id = 0;
 	{
 		lmdb::txn txn = lmdb::txn::begin(data_env, nullptr, MDB_RDONLY);
