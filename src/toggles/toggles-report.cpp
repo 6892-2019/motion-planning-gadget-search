@@ -246,7 +246,7 @@ std::optional<Edge> search_for_edge(lmdb::txn& txn, lmdb::dbi& edges, uint64_t i
 	return ret;
 }
 
-void fill_cache(lmdb::env& env, vector<pair<uint64_t, lmdb::dbi>>& combine_edges,
+void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges,
 		lmdb::dbi& connect_edges, lmdb::dbi& close_edges, lmdb::dbi& mirror_edges,
 		const vector<pair<uint64_t, uint64_t>>& roots, const vector<vector<SkinnyProv>>& prov,
 		EdgeCache& edge_cache) {
@@ -288,42 +288,38 @@ void fill_cache(lmdb::env& env, vector<pair<uint64_t, lmdb::dbi>>& combine_edges
 
 		if (combine_batch.empty() || connect_batch.empty() || close_batch.empty() || mirror_batch.empty()) {
 			vector<AnyProv> edges;
-			{
-				auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-				for (const SkinnyProv& p : combine_batch) {
-					//We have to search all the combine databases.
-					std::optional<CombineEdge> e;
-					uint64_t input2 = 0;
-					for (pair<uint64_t, lmdb::dbi>& db : combine_edges) {
-						e = search_for_edge<CombineEdge>(txn, db.second, p.input(), p.output());
-						if (e) {
-							input2 = db.first;
-							break;
-						}
+			for (const SkinnyProv& p : combine_batch) {
+				//We have to search all the combine databases.
+				std::optional<CombineEdge> e;
+				uint64_t input2 = 0;
+				for (pair<uint64_t, lmdb::dbi>& db : combine_edges) {
+					e = search_for_edge<CombineEdge>(txn, db.second, p.input(), p.output());
+					if (e) {
+						input2 = db.first;
+						break;
 					}
-					if (!e)
-						throw std::logic_error(fmt::format("no combine edge for {}/{}", p.input(), p.output()));
-					edges.push_back(AnyProv::combine(p.input(), input2, *e));
 				}
-				for (const SkinnyProv& p : connect_batch) {
-					std::optional<ConnectEdge> e = search_for_edge<ConnectEdge>(txn, connect_edges, p.input(), p.output());
-					if (!e)
-						throw std::logic_error(fmt::format("no connect edge for {}/{}", p.input(), p.output()));
-					edges.push_back(AnyProv::connect(p.input(), *e));
-				}
-				for (const SkinnyProv& p : close_batch) {
-					std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, close_edges, p.input(), p.output());
-					if (!e)
-						throw std::logic_error(fmt::format("no close edge for {}/{}", p.input(), p.output()));
-					edges.push_back(AnyProv::close(p.input(), *e));
-				}
-				for (const SkinnyProv& p : mirror_batch) {
-					std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, mirror_edges, p.input(), p.output());
-					if (!e)
-						throw std::logic_error(fmt::format("no mirror edge for {}/{}", p.input(), p.output()));
-					edges.push_back(AnyProv::mirror(p.input(), *e));
-				}
-				txn.commit();
+				if (!e)
+					throw std::logic_error(fmt::format("no combine edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::combine(p.input(), input2, *e));
+			}
+			for (const SkinnyProv& p : connect_batch) {
+				std::optional<ConnectEdge> e = search_for_edge<ConnectEdge>(txn, connect_edges, p.input(), p.output());
+				if (!e)
+					throw std::logic_error(fmt::format("no connect edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::connect(p.input(), *e));
+			}
+			for (const SkinnyProv& p : close_batch) {
+				std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, close_edges, p.input(), p.output());
+				if (!e)
+					throw std::logic_error(fmt::format("no close edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::close(p.input(), *e));
+			}
+			for (const SkinnyProv& p : mirror_batch) {
+				std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, mirror_edges, p.input(), p.output());
+				if (!e)
+					throw std::logic_error(fmt::format("no mirror edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::mirror(p.input(), *e));
 			}
 
 			for (const AnyProv& p : edges) {
@@ -513,14 +509,14 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		}
 	};
 
-	auto record_closed = [&](const vector<pair<uint64_t, uint64_t>>& discovered) {
+	auto record_closed = [&](lmdb::txn& txn, const vector<pair<uint64_t, uint64_t>>& discovered) {
 		closed = interval_union(closed.begin(), closed.end(), discovered.cbegin(), discovered.cend());
 
 		vector<pair<uint64_t, uint64_t>> found = interval_intersection(
 				target.intervals.cbegin(), target.intervals.cend(), discovered.cbegin(), discovered.cend());
 		if (!found.empty()) {
 			std::sort(prov.back().begin(), prov.back().end());
-			fill_cache(env, edges_combine, edges_connect, edges_close, edges_mirror, found, prov, edge_cache);
+			fill_cache(txn, edges_combine, edges_connect, edges_close, edges_mirror, found, prov, edge_cache);
 			for (const pair<uint64_t, uint64_t>& p : found)
 				for (uint64_t root = p.first; root < p.second; ++root) {
 					fmt::print("Target trace:\n");
@@ -552,7 +548,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				std::sort(novel.begin(), novel.end());
 				vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
 				if (!discovered.empty()) { //avoid copying if nothing found (especially for close)
-					record_closed(discovered);
+					record_closed(txn, discovered);
 					//Outputs of close get mirrored, so put them in closemirror immediately.
 					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
 							discovered.begin(), discovered.end());
@@ -577,7 +573,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			std::sort(novel.begin(), novel.end());
 			vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
 			if (!discovered.empty()) { //avoid copying if nothing found (should be uncommon for mirror...)
-				record_closed(discovered);
+				record_closed(txn, discovered);
 				awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
 						discovered.cbegin(), discovered.cend());
 				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
@@ -615,7 +611,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			std::sort(novel.begin(), novel.end());
 			vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
 			if (!discovered.empty()) {
-				record_closed(discovered);
+				record_closed(txn, discovered);
 				awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
 						discovered.begin(), discovered.end());
 				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
@@ -638,7 +634,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				std::sort(novel.begin(), novel.end());
 				vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
 				if (!discovered.empty()) {
-					record_closed(discovered);
+					record_closed(txn, discovered);
 					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
 							discovered.begin(), discovered.end());
 					awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
