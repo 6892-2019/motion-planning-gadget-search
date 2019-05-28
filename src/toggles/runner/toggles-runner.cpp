@@ -987,9 +987,12 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 	//Punning a bit on this vector: in the map, it's indices into canonicals,
 	//but we're about to remap it to gadget ids.
 	std::deque<pair<std::string, std::vector<uint64_t>>> sorted_names = std::move(naming).values_container();
-	for (auto& p : sorted_names)
+	for (auto& p : sorted_names) {
 		for (std::size_t i = 0; i < p.second.size(); ++i)
 			p.second[i] = selsert_result.local_to_global[p.second[i]];
+		std::sort(p.second.begin(), p.second.end());
+		p.second.erase(std::unique(p.second.begin(), p.second.end()), p.second.end());
+	}
 	//TODO: this compare-tupleish-by-nth-element also appears in the driver,
 	//and is probably worth elevating to a named utility function/lambda.
 	std::sort(sorted_names.begin(), sorted_names.end(), [](const auto& a, const auto& b) {
