@@ -195,14 +195,20 @@ auto interval_size(const Iterable& iterable)
 
 template<typename It1, typename T>
 bool interval_contains(It1 left, It1 left_end, const T& element) {
-	//TODO: for large interval sets, use a branchless binary search
-	//I couldn't figure out how to express our predicate of interest with
-	//std::lower/upper_bound.  We inherently have a three-way comparison here
-	//(in some left interval, in this interval, in some right interval) and we
-	//terminate when the range to our left/right is empty.
-	return std::find_if(left, left_end, [&element](const std::pair<T, T>& x) {
-		return x.first <= element && element < x.second;
-	}) != left_end;
+	if (left == left_end) return false;
+	//Branchless binary search based on Listing 2 from
+	//Array Layouts for Comparison-Based Searching by Khuong and Morin
+	//which is itself based on Knuth.  We did take a branch just to check for
+	//the empty range (hopefully that's predictable).  This also assumes
+	//random-access iterators, but should be adaptable.
+	It1 base = left;
+	std::size_t n = std::distance(left, left_end);
+	while (n > 1) {
+		std::size_t half = n / 2;
+		base = element < base[half].first ? base : base+half;
+		n -= half;
+	}
+	return ((base->first <= element) & (element < base->second));
 }
 template<typename Iterable, typename T>
 bool interval_contains(const Iterable& iterable, const T& element) {

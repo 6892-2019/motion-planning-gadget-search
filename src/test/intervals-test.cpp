@@ -382,7 +382,7 @@ TEST_CASE("IntervalsTest_IntervalInflateExhaustion") {
 }
 
 TEST_CASE("IntervalsTest_IntervalContainsExhaustion") {
-	constexpr int element_limit = 8;
+	constexpr int element_limit = 16;
 	constexpr unsigned int limit = 1 << element_limit;
 	for (unsigned int left = 0; left < limit; ++left) {
 		auto leftbits = indices_of_set_bits(left);
