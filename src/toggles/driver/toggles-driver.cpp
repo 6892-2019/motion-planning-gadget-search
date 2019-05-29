@@ -29,12 +29,6 @@ pair<vector<pair<uint64_t, uint64_t>>, vector<pair<uint64_t, uint64_t>>> follow_
 	return {std::move(input_accum).finish(), std::move(output_accum).finish()};
 }
 
-//struct vector_hash {
-//	std::size_t operator()(const std::vector<uint64_t>& v) const {
-//		return farmhash::Hash(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(v.front()));
-//	}
-//};
-
 void sort_and_deduplicate(vector<pair<vector<uint64_t>, vector<uint64_t>>>& records) {
 	if (records.empty()) return;
 
