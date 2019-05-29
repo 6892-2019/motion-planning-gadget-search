@@ -496,7 +496,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	for (uint64_t i : source_ids)
 		edge_cache.try_emplace(i, AnyProv::source(i));
 	closed = maximal_intervals(source_ids.begin(), source_ids.end());
-	awaiting_closemirror = closed;
+	awaiting_closemirror = awaiting_connect = awaiting_combine = closed;
 
 	auto print_trace = [&target](const vector<AnyProv>& trace) {
 		for (const AnyProv& p : trace) {
