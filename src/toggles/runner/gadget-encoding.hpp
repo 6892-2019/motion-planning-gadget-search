@@ -65,6 +65,8 @@ std::unique_ptr<automaton::Automaton<N>> decode(const std::vector<std::byte>& en
 	return unique_cast<automaton::Automaton<N>>(decode(encoded_gadget, N));
 }
 
+std::pair<std::vector<GadgetEdge>, std::vector<GadgetEdge>> decode_to_slls(const std::byte* encoded_gadget, std::size_t length);
+
 std::vector<std::byte> encode(const automaton::WorkingAutomaton& a);
 
 //If we bring back PageHolder etc., we'd use this to encode into a page.

@@ -207,6 +207,19 @@ std::size_t write_compressed(const std::vector<GadgetEdge>& edges, const EdgeCod
 	return size;
 }
 
+template<class EdgeCoder>
+std::vector<GadgetEdge> read_compressed(PackReader& reader, unsigned int count, const EdgeCoder& coder) {
+	std::vector<GadgetEdge> ret;
+	std::uint64_t previous = 0;
+	for (unsigned int i = 0; i < count; ++i) {
+		std::uint64_t cur = reader.readVarint();
+		cur += previous;
+		ret.push_back(coder.decode(cur));
+		previous = cur;
+	}
+	return ret;
+}
+
 template<bool directed, class EdgeCoder>
 void read_compressed(PackReader& reader, unsigned int count, const EdgeCoder& coder, GadgetBuilder& builder) {
 	std::uint64_t previous = 0;
@@ -396,6 +409,20 @@ std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gad
 	assert(reader.tell() == encoded_gadget + length);
 	assert(!reader.overflow());
 	return builder.build();
+}
+
+std::pair<std::vector<GadgetEdge>, std::vector<GadgetEdge>> decode_to_slls(const std::byte* encoded_gadget, std::size_t length) {
+	auto&& [stats, edgelist_begin] = detail::stats(encoded_gadget);
+	detail::edge_coder coder(stats.locations, stats.states);
+	//This length calculation (and the function's length parameter) is just for
+	//error checking.  We know how many edges to read, just not how many bytes
+	//they were encoded with.
+	PackReader reader(edgelist_begin, encoded_gadget + length);
+	std::vector<GadgetEdge> uedges = read_compressed(reader, stats.undirected_edges, coder);
+	std::vector<GadgetEdge> dedges = read_compressed(reader, stats.directed_edges, coder);
+	assert(reader.tell() == encoded_gadget + length);
+	assert(!reader.overflow());
+	return {std::move(uedges), std::move(dedges)};
 }
 
 } //namespace encoding
