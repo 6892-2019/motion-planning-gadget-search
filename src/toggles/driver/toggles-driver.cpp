@@ -127,34 +127,6 @@ void ping_all_workers(WorkerManager& manager) {
 	manager.run(&generator);
 }
 
-DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation,
-		const vector<vector<pair<uint64_t, uint64_t>>>& chunks) {
-	std::uint32_t seqno = 0;
-	DatabaseOperationStatistics overall_stats = {};
-	bool error_happened = false;
-	manager.run([&](simple_buffer& buffer) {
-		if (error_happened) return false; //stop generating work, but let existing issued work finish
-		if (!(seqno < chunks.size())) return false;
-		pack_call(buffer, seqno, operation, chunks[seqno]);
-		++seqno;
-		return true;
-	}, [&](simple_buffer& buffer) {
-		Response resp = unpack_response(buffer);
-		if (!resp) {
-			fmt::print("ERROR: task {} failed: {}\n", resp.seq(), resp.error_as());
-			error_happened = true;
-		} else {
-			DatabaseOperationStatistics stats = resp.result_as<DatabaseOperationStatistics>();
-			fmt::print("task {} completed: {} skipped, {} pruned, {} known, {} new, {} edges\n",
-					resp.seq(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
-			overall_stats += stats;
-		}
-	});
-	if (error_happened)
-		throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
-	return overall_stats;
-}
-
 //void write_unary_batch_tasks(pqxx::connection& conn, std::string_view operation, UnaryBatcher batcher, const std::string& directory) {
 //	vector<uint64_t> fetches;
 //	simple_buffer buffer;
@@ -167,43 +139,6 @@ DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::stri
 //		buffer.clear();
 //	}
 //}
-
-DatabaseOperationStatistics do_combine_operation(WorkerManager& manager,
-		const vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>& operands,
-		std::size_t batch_size, unsigned int precision) {
-	assert(!operands.empty());
-	std::uint32_t seqno = 0;
-	std::size_t right_index = 0, left_index = 0;
-	vector<vector<pair<uint64_t, uint64_t>>> chunks;
-	DatabaseOperationStatistics overall_stats = {};
-	bool error_happened = false;
-	manager.run([&](simple_buffer& buffer) {
-		if (error_happened) return false; //stop generating work, but let existing issued work finish
-		if (!(right_index < operands.size())) return false;
-		if (!(left_index < chunks.size())) {
-			chunks = interval_chunk(operands[right_index].second.cbegin(), operands[right_index].second.cend(), batch_size);
-			left_index = 0;
-		}
-		pack_call(buffer, seqno++, "combine-db", chunks[left_index++], operands[right_index].first, precision);
-		if (!(left_index < chunks.size()))
-			++right_index;
-		return true;
-	}, [&](simple_buffer& buffer) {
-		Response resp = unpack_response(buffer);
-		if (!resp) {
-			fmt::print("ERROR: task {} failed: {}\n", resp.seq(), resp.error_as());
-			error_happened = true;
-		} else {
-			DatabaseOperationStatistics stats = resp.result_as<DatabaseOperationStatistics>();
-			fmt::print("task {} completed: {} skipped, {} pruned, {} known, {} new, {} edges\n",
-					resp.seq(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
-			overall_stats += stats;
-		}
-	});
-	if (error_happened)
-		throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
-	return overall_stats;
-}
 
 //void write_combine_batch_tasks(pqxx::connection& conn, CombineBatcher batcher, unsigned int precision, const std::string& directory) {
 //	vector<uint64_t> fetches;
@@ -785,6 +720,88 @@ private:
 		vector<pair<uint64_t, uint64_t>> targets = follow_func(database_, edge_db, intervals);
 		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, interval_size(targets), stopwatch.elapsed().hms());
 		state_(std::move(targets));
+	}
+
+	DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation,
+			const vector<vector<pair<uint64_t, uint64_t>>>& chunks) {
+		std::uint32_t seqno = 0;
+		DatabaseOperationStatistics overall_stats = {};
+		bool error_happened = false;
+		manager.run([&](simple_buffer& buffer) {
+			if (error_happened) return false; //stop generating work, but let existing issued work finish
+			if (!(seqno < chunks.size())) return false;
+			pack_call(buffer, seqno, operation, chunks[seqno]);
+			++seqno;
+			return true;
+		}, [&](simple_buffer& buffer) {
+			error_happened |= process_operation_response(buffer, overall_stats);
+		});
+		if (error_happened)
+			throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
+		return overall_stats;
+	}
+
+	DatabaseOperationStatistics do_combine_operation(WorkerManager& manager,
+			const vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>& operands,
+			std::size_t batch_size, unsigned int precision) {
+		assert(!operands.empty());
+		std::uint32_t seqno = 0;
+		std::size_t right_index = 0, left_index = 0;
+		vector<vector<pair<uint64_t, uint64_t>>> chunks;
+		DatabaseOperationStatistics overall_stats = {};
+		bool error_happened = false;
+		manager.run([&](simple_buffer& buffer) {
+			if (error_happened) return false; //stop generating work, but let existing issued work finish
+			if (!(right_index < operands.size())) return false;
+			if (!(left_index < chunks.size())) {
+				chunks = interval_chunk(operands[right_index].second.cbegin(), operands[right_index].second.cend(), batch_size);
+				left_index = 0;
+			}
+			pack_call(buffer, seqno++, "combine-db", chunks[left_index++], operands[right_index].first, precision);
+			if (!(left_index < chunks.size()))
+				++right_index;
+			return true;
+		}, [&](simple_buffer& buffer) {
+			error_happened |= process_operation_response(buffer, overall_stats);
+		});
+		if (error_happened)
+			throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
+		return overall_stats;
+	}
+
+	/**
+	 * Process an RPC response from a worker.
+	 * @return true iff an error occurred
+	 */
+	bool process_operation_response(simple_buffer& buffer, DatabaseOperationStatistics& overall_stats) {
+		std::optional<Response> resp; //just for lazy init because Response isn't default-constructible
+		try {
+			resp = unpack_response(buffer);
+		} catch (msgpack::insufficient_bytes&) {
+			//lmdbxx doesn't wrap this one; do it ourselves
+			int dead_count = -1;
+			int rc = mdb_reader_check(database_, &dead_count);
+			//Indicates the process died without sending us a response (we tried
+			//to unpack an empty/truncated response).  Due to shortcomings in
+			//the RPC interface, we can't even say which task it was that failed
+			//on us.  (maybe with a better exception type?)
+			fmt::print("ERROR: a task failed without response; cleaned up {} database readers\n", dead_count);
+			if (rc != MDB_SUCCESS)
+				lmdb::error::raise("mdb_reader_check", rc);
+			return true;
+		}
+
+		assert(resp);
+		if (!*resp) {
+			fmt::print("ERROR: task {} failed: {}\n", resp->seq(), resp->error_as());
+			return true;
+		} else {
+			DatabaseOperationStatistics stats = resp->result_as<DatabaseOperationStatistics>();
+			fmt::print("task {} completed: {} skipped, {} pruned, {} known, {} new, {} edges\n",
+					resp->seq(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			overall_stats += stats;
+		}
+		return false;
 	}
 
 	/**
