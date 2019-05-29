@@ -22,7 +22,7 @@ using std::unique_ptr;
 using std::string_view;
 using namespace std::literals::string_view_literals;
 
-//defined elsewhere (toggles-runner.cpp at time of writing)
+//defined elsewhere (msgpack-mode.cpp at time of writing)
 DatabaseOperationStatistics do_close_db0(vector<pair<uint64_t, uint64_t>> input_intervals,
 		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, lmdb::dbi& close_edges,
 		lmdb::dbi& completions);

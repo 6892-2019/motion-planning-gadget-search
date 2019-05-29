@@ -39,6 +39,7 @@
         <df name="runner">
           <in>canonicalize.cpp</in>
           <in>gadget-encoding.cpp</in>
+          <in>msgpack-mode.cpp</in>
           <in>ops.cpp</in>
           <in>provenance.hpp</in>
           <in>selsert-gadget-by-data.cpp</in>
@@ -304,6 +305,11 @@
             flavor2="0">
       </item>
       <item path="src/toggles/runner/gadget-encoding.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/msgpack-mode.cpp"
             ex="false"
             tool="1"
             flavor2="0">
