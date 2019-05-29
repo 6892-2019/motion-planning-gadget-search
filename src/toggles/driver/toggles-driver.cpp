@@ -29,32 +29,6 @@ pair<vector<pair<uint64_t, uint64_t>>, vector<pair<uint64_t, uint64_t>>> follow_
 	return {std::move(input_accum).finish(), std::move(output_accum).finish()};
 }
 
-void sort_and_deduplicate(vector<pair<vector<uint64_t>, vector<uint64_t>>>& records) {
-	if (records.empty()) return;
-
-	std::sort(records.begin(), records.end(), [](const auto& a, const auto& b) {
-		return std::get<0>(a) < std::get<0>(b);
-	});
-
-	using iter = vector<pair<vector<uint64_t>, vector<uint64_t>>>::iterator;
-	iter head = records.begin(), last_committed = records.begin();
-	while (++head != records.end())
-		if (head->first == last_committed->first) {
-			last_committed->second.insert(last_committed->second.end(),
-					//If we generalize this to arbitrary types for algoutils,
-					//this should be a move_iterator.
-					head->second.begin(), head->second.end());
-			//These'll be deallocated later, of course, but as we're growing the
-			//survivors we should free these eagerly.
-			head->second.clear();
-			head->second.shrink_to_fit();
-		} else if (++last_committed != head) //commit, and avoid moving last_committed onto itself
-			*last_committed = std::move(*head);
-	++last_committed;
-
-	records.erase(last_committed, records.end());
-}
-
 /**
  * Finds required combines.
  * @return pairs of sets of right ids and the intervals of left ids needing to
