@@ -42,6 +42,7 @@
           <in>canonicalize.cpp</in>
           <in>dump-gadget-mode.cpp</in>
           <in>gadget-encoding.cpp</in>
+          <in>incoming-edges-mode.cpp</in>
           <in>msgpack-mode.cpp</in>
           <in>ops.cpp</in>
           <in>provenance.hpp</in>
@@ -50,6 +51,7 @@
           <in>sync.cpp</in>
           <in>toggles-runner.cpp</in>
         </df>
+        <in>anyprov.hpp</in>
         <in>gadgets.yaml</in>
         <in>rpc.cpp</in>
         <in>toggles-report.cpp</in>
@@ -288,6 +290,8 @@
       </item>
       <item path="src/test/util.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/toggles/anyprov.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/toggles/driver/precompiled-asio.cpp"
             ex="false"
             tool="1"
@@ -323,6 +327,11 @@
             flavor2="0">
       </item>
       <item path="src/toggles/runner/gadget-encoding.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/incoming-edges-mode.cpp"
             ex="false"
             tool="1"
             flavor2="0">

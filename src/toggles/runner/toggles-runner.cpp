@@ -9,6 +9,8 @@ void jemalloc_tuning();
 int sync_mode(std::string_view db_path, const vector<std::string_view>& files);
 //defined in dump-gadget-mode.cpp
 int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
+//defined in incoming-edges-mode.cpp
+int incoming_edges_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
 //defined in msgpack-mode.cpp
 int msgpack_mode(std::string_view db_path, std::string_view input_file, std::string_view output_file);
 
@@ -38,6 +40,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return sync_mode(db_path, positionals);
 	else if (mode == "dump-gadget"sv || mode == "dump-gadgets"sv)
 		return dump_gadget_mode(db_path, positionals);
+	else if (mode == "incoming-edges"sv)
+		return incoming_edges_mode(db_path, positionals);
 	else if (mode == "msgpack"sv) {
 		if (!positionals.empty()) {
 			fmt::print(stderr, "ERROR: msgpack mode takes no positional arguments, but some passed: {}\n", positionals);
