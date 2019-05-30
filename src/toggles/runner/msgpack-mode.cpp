@@ -367,7 +367,7 @@ DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gad
 	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 }
 
-DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
+DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input_intervals, unsigned int max_states) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
@@ -384,7 +384,31 @@ DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input
 
 	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
 			env, gadget_hashtable, gadget_index, input_intervals);
+	std::size_t skipped = 0;
+
+	//We skip any gadget with locations < 4, but still record completions.
+	auto new_end = std::partition(inputs.begin(), inputs.end(),
+			[](const auto& p) {return encoding::locations(p.second.data()) < 4;});
+	skipped += std::distance(new_end, inputs.end());
+	inputs.erase(new_end, inputs.end());
+
+	//We skip any gadget with states > max_states, but do not record completions
+	//as we may have to come back for those later.
+	new_end = std::partition(inputs.begin(), inputs.end(), [max_states](const auto& p) {
+		//partition sorts true before false
+		return !(encoding::stats(p.second.data()).states > max_states);
+	});
+	interval_accumulator<uint64_t> bad(256);
+	for (auto i = new_end; i != inputs.end(); ++i)
+		bad(i->first);
+	vector<pair<uint64_t, uint64_t>> bad_intervals = std::move(bad).finish();
+	input_intervals = interval_difference(input_intervals.begin(), input_intervals.end(),
+			bad_intervals.begin(), bad_intervals.end());
+	skipped += std::distance(new_end, inputs.end());
+	inputs.erase(new_end, inputs.end());
+
 	Finisher<ConnectProvenance> outputs = do_connect(std::move(inputs));
+	outputs.skip(skipped);
 	return commit_connect_result(env, gadget_hashtable, gadget_index, connect_edges, completions,
 			std::move(input_intervals), std::move(outputs.rows_).values_container(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);

@@ -323,6 +323,7 @@ private:
 struct CompletenessOptions {
 	unsigned int precision;
 	unsigned int combine_max_left_states;
+	unsigned int connect_max_states;
 	bool multiplayer;
 };
 
@@ -675,7 +676,8 @@ private:
 	Control compute_connect() {
 		Control control = Control::proceed;
 		if (unary_needs_.size())
-			control = operate_unary("connect", "Connect", runtime_opts_.connect_gadgets_per_task, runtime_opts_.connect_task_batch_threshold);
+			control = operate_unary("connect", "Connect", runtime_opts_.connect_gadgets_per_task,
+					runtime_opts_.connect_task_batch_threshold, complete_opts_.connect_max_states);
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
@@ -700,13 +702,13 @@ private:
 	}
 
 	Control operate_unary(std::string_view operation_name, std::string_view log_name,
-			std::size_t gadgets_per_task, std::size_t batch_threshold) {
+			std::size_t gadgets_per_task, std::size_t batch_threshold, unsigned int max_states = 0) {
 		Stopwatch stopwatch = Stopwatch::process();
 		//TODO: this doesn't account for unconnectable gadgets
 		auto chunks = interval_chunk(unary_needs_.cbegin(), unary_needs_.cend(), gadgets_per_task);
 		if (chunks.size() < batch_threshold) {
 			std::string operation_cmd = fmt::format("{}-db", operation_name);
-			DatabaseOperationStatistics stats = do_unary_operation(*workers_, operation_cmd, chunks);
+			DatabaseOperationStatistics stats = do_unary_operation(operation_cmd, chunks, max_states);
 			fmt::print("{} operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 					log_name, stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			return Control::proceed;
@@ -730,15 +732,19 @@ private:
 		state_(std::move(targets));
 	}
 
-	DatabaseOperationStatistics do_unary_operation(WorkerManager& manager, std::string_view operation,
-			const vector<vector<pair<uint64_t, uint64_t>>>& chunks) {
+	DatabaseOperationStatistics do_unary_operation(std::string_view operation,
+			const vector<vector<pair<uint64_t, uint64_t>>>& chunks,
+			unsigned int max_states = 0) {
 		std::uint32_t seqno = 0;
 		DatabaseOperationStatistics overall_stats = {};
 		bool error_happened = false;
-		manager.run([&](simple_buffer& buffer) {
+		workers_->run([&](simple_buffer& buffer) {
 			if (error_happened) return false; //stop generating work, but let existing issued work finish
 			if (!(seqno < chunks.size())) return false;
-			pack_call(buffer, seqno, operation, chunks[seqno]);
+			if (max_states)
+				pack_call(buffer, seqno, operation, chunks[seqno], max_states);
+			else
+				pack_call(buffer, seqno, operation, chunks[seqno]);
 			++seqno;
 			return true;
 		}, [&](simple_buffer& buffer) {
@@ -902,6 +908,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	CompletenessOptions completeness_opts;
 	completeness_opts.precision = 8;
 	completeness_opts.combine_max_left_states = std::numeric_limits<unsigned int>::max(); //no limit
+	completeness_opts.connect_max_states = std::numeric_limits<unsigned int>::max(); //no limit
 	completeness_opts.multiplayer = false;
 	RuntimeOptions runtime_opts;
 	runtime_opts.combine_pairs_per_task = 5000;
@@ -924,8 +931,10 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			completeness_opts.multiplayer = true;
 		else if (argv[i] == "--precision"sv)
 			completeness_opts.precision = to_uint(argv[++i]);
-		else if (argv[i] == "--combine-max-left-states"sv)
+		else if (argv[i] == "--combine-max-left-states"sv || argv[i] == "--combine-max-left-states"sv)
 			completeness_opts.combine_max_left_states = to_uint(argv[++i]);
+		else if (argv[i] == "--connect-max-states"sv)
+			completeness_opts.connect_max_states = to_uint(argv[++i]);
 
 		else if (argv[i] == "--gadgets-per-task"sv)
 			runtime_opts.combine_pairs_per_task = runtime_opts.connect_gadgets_per_task
