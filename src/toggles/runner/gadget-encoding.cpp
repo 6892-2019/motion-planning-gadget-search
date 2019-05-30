@@ -296,6 +296,7 @@ using edge_coder = LLSSEdgeCoder;
 
 std::pair<Stats, const std::byte*> stats(const std::byte* encoded_gadget) {
 	Stats s = {};
+	s.components = 1;
 	s.locations = locations(encoded_gadget++);
 
 	std::byte second_byte = *encoded_gadget++;
