@@ -11,6 +11,8 @@
 #include <msgpack.hpp>
 #include <lmdb++.h>
 
+void jemalloc_tuning();
+
 struct farmhash_hash {
 	//std::hash<uint64_t> is the identity, and hopscotch doesn't like that.
 	uint64_t operator()(uint64_t x) const noexcept {

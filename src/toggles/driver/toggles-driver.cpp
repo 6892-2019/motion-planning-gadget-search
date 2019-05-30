@@ -886,6 +886,8 @@ private:
 };
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-l:libboost_system.a -llmdb'}
+	jemalloc_tuning();
+
 	std::string_view db_path, checkpoint_db_path;
 	unsigned int num_db_threads = 1;
 	std::vector<std::string> worker_addrs; //or @foo for response files

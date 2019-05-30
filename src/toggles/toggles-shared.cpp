@@ -3,12 +3,25 @@
 #include "stringutils.hpp"
 #include "tsl/ordered_set.h"
 #include "intervals.hpp"
+#include <jemalloc/jemalloc.h>
 #include <regex>
 
 using std::vector;
 using std::pair;
 using std::uint64_t;
 using namespace std::literals::string_view_literals;
+
+void jemalloc_tuning() {
+	//Both the runner and driver often block (on lmdb or on running tasks), so
+	//configure jemalloc background threads to let jemalloc yield unused memory
+	//back to the operating system.
+	bool yes_please = true;
+	int rc = mallctl("background_thread", nullptr, 0, &yes_please, sizeof(yes_please));
+	if (rc)
+		fmt::print("warning: problem initializing jemalloc opts: {} {}", rc, strerror(rc));
+}
+
+
 
 GadgetSet parse_gid_specs(const std::vector<std::string_view>& specs) {
 	std::regex is_integer(R"((\d+))"), is_range(R"((\(|\[)(\d+), ?(\d+)(\)|\]))");

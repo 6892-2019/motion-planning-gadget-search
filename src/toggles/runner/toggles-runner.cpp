@@ -3,6 +3,8 @@
 using std::vector;
 using namespace std::literals::string_view_literals;
 
+//defined in toggles-shared.cpp
+void jemalloc_tuning();
 //defined in sync.cpp
 int sync_mode(std::string_view db_path, const vector<std::string_view>& files);
 //defined in dump-gadget-mode.cpp
@@ -11,6 +13,8 @@ int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& g
 int msgpack_mode(std::string_view db_path, std::string_view input_file, std::string_view output_file);
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-llmdb -lyaml-cpp'}
+	jemalloc_tuning();
+
 	std::string_view mode = "unknown-mode";
 	std::string_view db_path = "/bad-db-path-arg", input_file = "-", output_file = "-";
 	vector<std::string_view> positionals;
