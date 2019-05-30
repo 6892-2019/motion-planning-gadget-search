@@ -224,7 +224,7 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 }
 
 DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_intervals,
-		vector<std::uint64_t> right_gids, unsigned int precision) {
+		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
@@ -254,19 +254,58 @@ DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_
 		}
 	}
 
+	//We pass two separate vectors of gadget data to do_combine, but we want to
+	//do only one select_gadget_id_to_data so as to only need one transaction.
 	if (!std::is_sorted(right_gids.begin(), right_gids.end()))
 		std::sort(right_gids.begin(), right_gids.end());
 	vector<pair<uint64_t, uint64_t>> right_intervals = maximal_intervals(right_gids.begin(), right_gids.end());
 	vector<pair<uint64_t, uint64_t>> input_intervals = interval_union(
 			left_intervals.cbegin(), left_intervals.cend(), right_intervals.cbegin(), right_intervals.cend());
-	//TODO: select_gadget_id_to_data should be templated on the result container so we can directly build this map
 	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
 			env, gadget_hashtable, gadget_index, std::move(input_intervals));
-	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
-	for (pair<std::uint64_t, vector<std::byte>>& p : inputs)
-		map.try_emplace(p.first, std::move(p.second));
-	Finisher<CombineProvenance> outputs = do_combine(std::move(map),
-			std::move(left_intervals), std::move(right_gids), precision);
+
+	vector<pair<uint64_t, vector<std::byte>>> right_data;
+	for (pair<uint64_t, vector<std::byte>>& p : inputs) {
+		auto rit = std::find(right_gids.begin(), right_gids.end(), p.first);
+		if (rit != right_gids.end()) {
+			uint64_t r = *rit;
+			right_gids.erase(rit);
+			//Move if this is exclusively a right, otherwise copy.
+			if (interval_contains(left_intervals, r))
+				right_data.push_back(p);
+			else {
+				right_data.push_back(std::move(p));
+				p.second.clear(); //to be erased later
+			}
+		}
+	}
+	if (!right_gids.empty())
+		throw std::logic_error(fmt::format("can't happen: some right gids not retrieved? {}", right_gids));
+
+	//Skip any gadgets that can't possibly combine with any right.  (do_combine
+	//will skip as appropriate if it sometimes fits.)  Also skip if it exceeds
+	//our predefined limits.
+	std::size_t skipped = 0;
+	unsigned int right_min_locs = 0;
+	for (pair<uint64_t, vector<std::byte>>& p : right_data)
+		right_min_locs = std::min(right_min_locs, encoding::locations(p.second.data()));
+	unsigned int left_max_locs = precision - right_min_locs;
+	for (pair<uint64_t, vector<std::byte>>& p : inputs) {
+		if (p.second.empty()) continue; //removed in the loop above
+		encoding::Stats stats = encoding::stats(p.second.data());
+		if (stats.locations > left_max_locs || stats.states > max_left_states) {
+			p.second.clear();
+			skipped += right_data.size();
+		}
+	}
+	inputs.erase(std::partition(inputs.begin(), inputs.end(), [](const auto& p){return !p.second.empty();}), inputs.end());
+	//TODO: consider sorting inputs (currently it's roughly hash-ordered).  Maybe
+	//we want to sort largest-first so we get any pathological determinizes out
+	//of the way early, rather than getting OOM killed at the end.  Note that
+	//do_combine now processes back-first like a stack to gradually release memory.
+
+	Finisher<CombineProvenance> outputs = do_combine(std::move(inputs), std::move(right_data), precision);
+	outputs.skip(skipped);
 	return commit_combine_result(env, gadget_hashtable, gadget_index, edge_tables, completions,
 			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }

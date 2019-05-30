@@ -317,6 +317,16 @@ private:
 };
 
 /**
+ * Various options controlling the completeness of the search.  These options
+ * are saved in checkpoints.
+ */
+struct CompletenessOptions {
+	unsigned int precision;
+	unsigned int combine_max_left_states;
+	bool multiplayer;
+};
+
+/**
  * Various control options used by a search.  These options can be changed from
  * run to run even when resuming from a checkpoint.
  */
@@ -396,11 +406,11 @@ private:
 
 public:
 	Search(vector<std::string>&& cmdline_specs, GadgetSet&& source_specs,
-			unsigned int precision, bool multiplayer, RuntimeOptions runtime_opts,
+			CompletenessOptions completeness_opts, RuntimeOptions runtime_opts,
 			lmdb::env&& database, std::optional<lmdb::env>&& checkpoint) :
 			generation_(0), subgeneration_(0), phase_(Phase::collect_initial),
 			cmdline_specs_(std::move(cmdline_specs)),
-			source_specs_(std::move(source_specs)), precision_(precision), multiplayer_(multiplayer),
+			source_specs_(std::move(source_specs)), complete_opts_(completeness_opts),
 			database_(std::move(database)), checkpoint_(std::move(checkpoint)), workers_(nullptr),
 			runtime_opts_(runtime_opts), generation_stopwatch_(Stopwatch::process()),
 			subgeneration_stopwatch_(Stopwatch::process()) {}
@@ -421,8 +431,7 @@ public:
 			unmarshal_reinterpret(s.source_specs_.ids, root, txn, "source_specs.ids", true);
 			unmarshal_reinterpret(s.source_specs_.ranges, root, txn, "source_specs.ranges", true);
 			unmarshal_nullseparated(s.source_specs_.names, root, txn, "source_specs.names", true);
-			s.precision_ = unmarshal_from_string<unsigned int>(root, txn, "precision");
-			s.multiplayer_ = bool(unmarshal_from_string<unsigned int>(root, txn, "multiplayer"));
+			//TODO: completeness options
 			txn.commit();
 		}
 		*s.checkpoint_ = std::move(checkpoint);
@@ -503,8 +512,7 @@ private:
 			Stopwatch stopwatch = Stopwatch::process();
 			auto [needy_lefts, needy_pairs] = combine_needs_sizes();
 			if (needy_pairs / runtime_opts_.combine_pairs_per_task < runtime_opts_.combine_task_batch_threshold) {
-				DatabaseOperationStatistics stats = do_combine_operation(*workers_, combine_needs_,
-						runtime_opts_.combine_pairs_per_task, precision_);
+				DatabaseOperationStatistics stats = do_combine_operation(combine_needs_);
 				fmt::print("Combine operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
@@ -556,7 +564,7 @@ private:
 	}
 
 	Control discover_needs_close() {
-		if (multiplayer_) {
+		if (complete_opts_.multiplayer) {
 			phase_ = Phase::discover_needs_mirror;
 			return Control::proceed;
 		}
@@ -566,7 +574,7 @@ private:
 	}
 
 	Control compute_close() {
-		assert(!multiplayer_);
+		assert(!complete_opts_.multiplayer);
 		Control control = Control::proceed;
 		if (unary_needs_.size())
 			control = operate_unary("close", "Close", runtime_opts_.close_gadgets_per_task, runtime_opts_.close_task_batch_threshold);
@@ -579,7 +587,7 @@ private:
 	}
 
 	Control follow_close() {
-		assert(!multiplayer_);
+		assert(!complete_opts_.multiplayer);
 		Stopwatch stopwatch = Stopwatch::process();
 		pair<vector<pair<uint64_t, uint64_t>>, vector<pair<uint64_t, uint64_t>>> close_edges =
 				follow_edges_with_inputs<SimpleEdge>(database_, edges_close_, state_.subgeneration());
@@ -741,23 +749,23 @@ private:
 		return overall_stats;
 	}
 
-	DatabaseOperationStatistics do_combine_operation(WorkerManager& manager,
-			const vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>& operands,
-			std::size_t batch_size, unsigned int precision) {
+	DatabaseOperationStatistics do_combine_operation(const vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>& operands) {
 		assert(!operands.empty());
 		std::uint32_t seqno = 0;
 		std::size_t right_index = 0, left_index = 0;
 		vector<vector<pair<uint64_t, uint64_t>>> chunks;
 		DatabaseOperationStatistics overall_stats = {};
 		bool error_happened = false;
-		manager.run([&](simple_buffer& buffer) {
+		workers_->run([&](simple_buffer& buffer) {
 			if (error_happened) return false; //stop generating work, but let existing issued work finish
 			if (!(right_index < operands.size())) return false;
 			if (!(left_index < chunks.size())) {
-				chunks = interval_chunk(operands[right_index].second.cbegin(), operands[right_index].second.cend(), batch_size);
+				chunks = interval_chunk(operands[right_index].second.cbegin(), operands[right_index].second.cend(),
+						runtime_opts_.combine_pairs_per_task);
 				left_index = 0;
 			}
-			pack_call(buffer, seqno++, "combine-db", chunks[left_index++], operands[right_index].first, precision);
+			pack_call(buffer, seqno++, "combine-db", chunks[left_index++], operands[right_index].first,
+					complete_opts_.precision, complete_opts_.combine_max_left_states);
 			if (!(left_index < chunks.size()))
 				++right_index;
 			return true;
@@ -868,8 +876,7 @@ private:
 	//(as opposed to, e.g., worker addresses).
 	vector<std::string> cmdline_specs_;
 	GadgetSet source_specs_;
-	unsigned int precision_;
-	bool multiplayer_;
+	CompletenessOptions complete_opts_;
 
 	//Things below here are not saved in the checkpoint.  They could be passed
 	//around most everywhere, but are saved here for convenience.
@@ -891,9 +898,11 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	std::string_view db_path, checkpoint_db_path;
 	unsigned int num_db_threads = 1;
 	std::vector<std::string> worker_addrs; //or @foo for response files
-	bool multiplayer = false;
 	std::vector<std::string_view> gid_specs;
-	unsigned int precision = 8;
+	CompletenessOptions completeness_opts;
+	completeness_opts.precision = 8;
+	completeness_opts.combine_max_left_states = std::numeric_limits<unsigned int>::max(); //no limit
+	completeness_opts.multiplayer = false;
 	RuntimeOptions runtime_opts;
 	runtime_opts.combine_pairs_per_task = 5000;
 	runtime_opts.connect_gadgets_per_task = runtime_opts.close_gadgets_per_task
@@ -910,10 +919,13 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			num_db_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--worker"sv)
 			worker_addrs.emplace_back(argv[++i]);
+
 		else if (argv[i] == "--multiplayer"sv)
-			multiplayer = true;
+			completeness_opts.multiplayer = true;
 		else if (argv[i] == "--precision"sv)
-			precision = to_uint(argv[++i]);
+			completeness_opts.precision = to_uint(argv[++i]);
+		else if (argv[i] == "--combine-max-left-states"sv)
+			completeness_opts.combine_max_left_states = to_uint(argv[++i]);
 
 		else if (argv[i] == "--gadgets-per-task"sv)
 			runtime_opts.combine_pairs_per_task = runtime_opts.connect_gadgets_per_task
@@ -1011,12 +1023,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			txn.commit();
 			//run the normal ctor, but also give it the environment
 			search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
-					precision, multiplayer, runtime_opts, std::move(data_env), std::move(checkpoint_env));
+					completeness_opts, runtime_opts, std::move(data_env), std::move(checkpoint_env));
 		}
 	} else
 		//no checkpoint environment available
 		search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
-			precision, multiplayer, runtime_opts, std::move(data_env), std::nullopt);
+			completeness_opts, runtime_opts, std::move(data_env), std::nullopt);
 
 	if (!search->execute(&manager)) {
 		//TODO: if we have a checkpoint database, we're going to take checkpoints

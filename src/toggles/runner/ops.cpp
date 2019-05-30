@@ -274,51 +274,42 @@ void combine(const Automaton<Precision>& la, AutomatonBase::state_type leftLocat
 }
 
 template<unsigned int Precision>
-Finisher<CombineProvenance> do_combine0(const tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash>& map,
-		const vector<pair<uint64_t, uint64_t>>& left_intervals, const vector<std::uint64_t>& right_gids) {
+Finisher<CombineProvenance> do_combine0(vector<pair<uint64_t, vector<std::byte>>> left_data,
+		vector<pair<uint64_t, vector<std::byte>>> right_data, unsigned int precision) {
 	vector<unique_ptr<Automaton<Precision>>> right_autos;
 	vector<unsigned int> right_locations;
 	vector<RotationVec> right_rotations;
-	for (std::uint64_t r : right_gids) {
-		auto it = map.find(r);
-		if (it == map.end())
-			throw std::logic_error(fmt::format("right gid {} not in map", r));
-		right_autos.push_back(encoding::decode<Precision>(it->second));
-		right_locations.push_back(right_autos.back()->active_alphabet_size());
+	for (pair<uint64_t, vector<std::byte>>& r : right_data) {
+		right_locations.push_back(encoding::locations(r.second.data()));
+		right_autos.push_back(encoding::decode<Precision>(r.second));
+		assert(right_locations.back() == right_autos.back()->active_alphabet_size());
 		right_rotations.push_back(find_useful_rotations(*right_autos.back()));
 	}
 
 	CombineProvenance prov;
 	Finisher<CombineProvenance> finisher;
-	for (const pair<uint64_t, uint64_t>& p : left_intervals) {
-		for (uint64_t l = p.first; l < p.second; ++l) {
-			prov.input1 = l;
-			auto it = map.find(l);
-			if (it == map.end())
-				throw std::logic_error(fmt::format("left gid {} not in map", l));
-			unique_ptr<Automaton<Precision>> pla = encoding::decode<Precision>(it->second);
-			//TODO: this and probably other places could use the encoded locations instead of iterating again
-			auto leftLocations = pla->active_alphabet_size();
-			for (auto ri : xrange(right_gids.size())) {
-				if (leftLocations + right_locations[ri] > Precision) {
-					//If we start filtering in the driver again, we should re-enable this warning.
-//					fmt::print(stderr, "WARNING: skipping combine between {} ({} locations) and {} ({} locations) which exceeds precision {}\n",
-//							l, leftLocations, right_gids[ri], right_locations[ri], Precision);
-					finisher.skip();
-					continue;
-				}
-				prov.input2 = right_gids[ri];
-				combine(*pla, leftLocations, *right_autos[ri], right_locations[ri], right_rotations[ri], prov, finisher);
+	while (!left_data.empty()) {
+		pair<uint64_t, vector<std::byte>>& l = left_data.back();
+		prov.input1 = l.first;
+		unsigned int leftLocations = encoding::locations(l.second.data());
+		unique_ptr<Automaton<Precision>> pla = encoding::decode<Precision>(l.second);
+		for (auto ri : xrange(right_data.size())) {
+			if (leftLocations + right_locations[ri] > Precision) {
+				finisher.skip();
+				continue;
 			}
+			prov.input2 = right_data[ri].first;
+			combine(*pla, leftLocations, *right_autos[ri], right_locations[ri], right_rotations[ri], prov, finisher);
 		}
+		left_data.pop_back();
 	}
 	return finisher;
 }
 
-Finisher<CombineProvenance> do_combine(tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map,
-		const vector<pair<uint64_t, uint64_t>>& left_intervals, const vector<std::uint64_t>& right_gids, unsigned int precision) {
+Finisher<CombineProvenance> do_combine(vector<pair<uint64_t, vector<std::byte>>>&& left_data,
+		vector<pair<uint64_t, vector<std::byte>>>&& right_data, unsigned int precision) {
 	switch (precision) {
-#define TOGGLESRUNNER_DO_COMBINE_CASE(N) case N: return do_combine0<N>(map, left_intervals, right_gids);
+#define TOGGLESRUNNER_DO_COMBINE_CASE(N) case N: return do_combine0<N>(std::move(left_data), std::move(right_data), precision);
 		TOGGLESRUNNER_DO_COMBINE_CASE(4)
 		TOGGLESRUNNER_DO_COMBINE_CASE(5)
 		TOGGLESRUNNER_DO_COMBINE_CASE(6)
