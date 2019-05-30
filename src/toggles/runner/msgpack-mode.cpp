@@ -388,14 +388,15 @@ DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input
 
 	//We skip any gadget with locations < 4, but still record completions.
 	auto new_end = std::partition(inputs.begin(), inputs.end(),
-			[](const auto& p) {return encoding::locations(p.second.data()) < 4;});
+			//partition sorts true before false, so negate filter condition
+			[](const auto& p) {return !(encoding::locations(p.second.data()) < 4);});
 	skipped += std::distance(new_end, inputs.end());
 	inputs.erase(new_end, inputs.end());
 
 	//We skip any gadget with states > max_states, but do not record completions
 	//as we may have to come back for those later.
 	new_end = std::partition(inputs.begin(), inputs.end(), [max_states](const auto& p) {
-		//partition sorts true before false
+		//partition sorts true before false, so negate filter condition
 		return !(encoding::stats(p.second.data()).states > max_states);
 	});
 	interval_accumulator<uint64_t> bad(256);
