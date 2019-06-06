@@ -11,6 +11,8 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files);
 int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
 //defined in incoming-edges-mode.cpp
 int incoming_edges_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
+//defned in update-predicates-mode.cpp
+int update_predicates_mode(std::string_view db_path, const vector<std::string_view>& more_arguments);
 //defined in msgpack-mode.cpp
 int msgpack_mode(std::string_view db_path, std::string_view input_file, std::string_view output_file);
 
@@ -42,6 +44,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return dump_gadget_mode(db_path, positionals);
 	else if (mode == "incoming-edges"sv)
 		return incoming_edges_mode(db_path, positionals);
+	else if (mode == "predicates"sv || mode == "update-predicates"sv)
+		return update_predicates_mode(db_path, positionals);
 	else if (mode == "msgpack"sv) {
 		if (!positionals.empty()) {
 			fmt::print(stderr, "ERROR: msgpack mode takes no positional arguments, but some passed: {}\n", positionals);

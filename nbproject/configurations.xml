@@ -50,8 +50,11 @@
           <in>selsert-gadget-by-data.hpp</in>
           <in>sync.cpp</in>
           <in>toggles-runner.cpp</in>
+          <in>update_predicates_mode.cpp</in>
         </df>
         <in>anyprov.hpp</in>
+        <in>gadget-encoding-stats.cpp</in>
+        <in>gadget-encoding-stats.hpp</in>
         <in>gadgets.yaml</in>
         <in>rpc.cpp</in>
         <in>toggles-report.cpp</in>
@@ -312,6 +315,16 @@
             tool="3"
             flavor2="0">
       </item>
+      <item path="src/toggles/gadget-encoding-stats.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/gadget-encoding-stats.hpp"
+            ex="false"
+            tool="3"
+            flavor2="0">
+      </item>
       <item path="src/toggles/gadgets.yaml" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
@@ -358,6 +371,11 @@
       <item path="src/toggles/runner/sync.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/runner/toggles-runner.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/update_predicates_mode.cpp"
             ex="false"
             tool="1"
             flavor2="0">

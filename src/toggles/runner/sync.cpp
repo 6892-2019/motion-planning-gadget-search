@@ -255,6 +255,21 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 			meta.put(txn, "creation_timestamp", fmt::format("{:%F %T %Z}", *std::localtime(&now)));
 		}
 
+		lmdb::dbi predicates = lmdb::dbi::open(txn, "predicates", MDB_CREATE);
+		MAYBE_UNUSED std::string_view unused_dont_care;
+		if (!predicates.get(txn, "valid_before", unused_dont_care)) {
+			//We add the location predicates here, but leave it to the driver to
+			//create the state predicates it actually uses.
+			std::string_view empty_data = "";
+			for (unsigned int locations = 2; locations <= 16; ++locations)
+				if (!predicates.put(txn, fmt::format("locations<={}", locations), empty_data))
+					throw std::logic_error("can't happen: failed to put predicate locations key?");
+			uint64_t empty = 1; //valid_before is exclusive
+			std::string_view valid_before_data = lmdb::to_sv<uint64_t>(empty);
+			if (!predicates.put(txn, "valid_before", valid_before_data))
+				throw std::logic_error("can't happen: failed to put predicate valid_before key?");
+		}
+
 		txn.commit();
 	}
 

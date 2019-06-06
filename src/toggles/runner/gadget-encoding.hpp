@@ -17,6 +17,10 @@
 #include <array>
 
 
+//Reading the header is available to all toggles targets for predicate indices.
+//Operations involving automata are defined here and limited to the runner.
+#include "../gadget-encoding-stats.hpp"
+
 namespace encoding {
 
 struct GadgetEdge {
@@ -40,13 +44,6 @@ std::unique_ptr<automaton::WorkingAutomaton> inflate_slls(const std::vector<Gadg
 		const std::vector<GadgetEdge>& dedges, unsigned int alphabetSize = 0);
 
 
-
-struct Stats {
-	unsigned int locations, states, undirected_edges, directed_edges, components;
-};
-
-unsigned int locations(const std::byte* encoded_gadget);
-Stats stats(const std::byte* encoded_gadget);
 
 std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gadget, std::size_t length,
 		unsigned int alphabet_size = 0);

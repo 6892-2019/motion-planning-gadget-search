@@ -61,6 +61,8 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 	{
 		lmdb::txn txn = lmdb::txn::begin(env, nullptr);
 		{
+			//This duplicates toggles-share's get_current_max_gadget_id, but
+			//we're going to keep using the cursor.
 			//We need an extra scope to ensure the cursor is destroyed before the
 			//transaction commits or aborts.
 			lmdb::cursor index_cur = lmdb::cursor::open(txn, gadget_index);

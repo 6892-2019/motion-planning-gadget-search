@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "toggles-shared.hpp"
+#include "gadget-encoding-stats.hpp"
 #include "stringutils.hpp"
 #include "tsl/ordered_set.h"
 #include "intervals.hpp"
@@ -135,53 +136,8 @@ std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_t
 }
 
 namespace {
-std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data0(
-		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& gadget_hashtable,
-		vector<pair<uint64_t, std::size_t>>& id_to_hash) {
-	//TODO: merge with the other std::get-based comparators
-	std::sort(id_to_hash.begin(), id_to_hash.end(), [](const auto& a, const auto& b) {
-		return std::get<1>(a) < std::get<1>(b);
-	});
-	std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> ret;
-	for (auto& p : id_to_hash) {
-		std::string_view value;
-		if (!gadget_hashtable.get(txn, lmdb::to_sv(p.second), value))
-			throw std::logic_error(fmt::format("hash {} not found (for id {})", p.second, p.first));
-		//The last 8 bytes are the id.  Check them, then don't return them.
-		uint64_t appended_id = lmdb::from_sv<uint64_t>(value.substr(value.size()-8));
-		if (appended_id != p.first)
-			throw std::logic_error(fmt::format("looked up hash {} for id {}, but hashtable gives id {}",
-					p.second, p.first, appended_id));
-		value.remove_suffix(8);
-		vector<std::byte> value_copy;
-		value_copy.resize(value.size());
-		std::memcpy(value_copy.data(), value.data(), value.size());
-		ret.emplace_back(p.first, std::move(value_copy));
-	}
-	txn.commit();
-	return ret;
-}
-} //anonymous namespace
-
-std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
-		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
-		const std::vector<std::uint64_t>& gids) {
-	assert(std::is_sorted(gids.begin(), gids.end()));
-	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-	vector<pair<uint64_t, std::size_t>> id_to_hash;
-	for (uint64_t id : gids) {
-		std::string_view value;
-		if (!gadget_index.get(txn, lmdb::to_sv(id), value))
-			throw std::logic_error(fmt::format("id {} not found", id));
-		id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
-	}
-	return select_gadget_id_to_data0(env, txn, gadget_hashtable, id_to_hash);
-}
-std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
-		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
-		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals) {
-	assert(std::is_sorted(gid_intervals.begin(), gid_intervals.end()));
-	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+std::vector<std::pair<std::uint64_t, std::uint64_t>> select_gadget_id_to_hash(
+		lmdb::txn& txn, lmdb::dbi& gadget_index, const vector<pair<uint64_t, uint64_t>>& gid_intervals) {
 	vector<pair<uint64_t, std::size_t>> id_to_hash;
 	lmdb::cursor cur = lmdb::cursor::open(txn, gadget_index);
 	for (pair<uint64_t, uint64_t> p : gid_intervals) {
@@ -199,8 +155,323 @@ std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_t
 			id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
 		}
 	}
-	return select_gadget_id_to_data0(env, txn, gadget_hashtable, id_to_hash);
+	return id_to_hash;
 }
+
+struct gadget_copier {
+	std::vector<std::byte> operator()(std::string_view gadget_hashtable_value) {
+		vector<std::byte> value_copy;
+		value_copy.resize(gadget_hashtable_value.size());
+		std::memcpy(value_copy.data(), gadget_hashtable_value.data(), gadget_hashtable_value.size());
+		return value_copy;
+	}
+};
+struct stats_extractor {
+	encoding::Stats operator()(std::string_view gadget_hashtable_value) {
+		return encoding::stats(reinterpret_cast<const std::byte*>(gadget_hashtable_value.data()));
+	}
+};
+
+template<class ValueExtractor, class V = decltype(ValueExtractor()(""sv))>
+std::vector<std::pair<std::uint64_t, V>> select_gadget_id_to_value(
+		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& gadget_hashtable,
+		vector<pair<uint64_t, std::size_t>>& id_to_hash) {
+	//TODO: merge with the other std::get-based comparators
+	std::sort(id_to_hash.begin(), id_to_hash.end(), [](const auto& a, const auto& b) {
+		return std::get<1>(a) < std::get<1>(b);
+	});
+	std::vector<std::pair<std::uint64_t, V>> ret;
+	ret.reserve(id_to_hash.size());
+	for (auto& p : id_to_hash) {
+		std::string_view value;
+		if (!gadget_hashtable.get(txn, lmdb::to_sv(p.second), value))
+			throw std::logic_error(fmt::format("hash {} not found (for id {})", p.second, p.first));
+		//The last 8 bytes are the id.  Check them, then don't return them.
+		uint64_t appended_id = lmdb::from_sv<uint64_t>(value.substr(value.size()-8));
+		if (appended_id != p.first)
+			throw std::logic_error(fmt::format("looked up hash {} for id {}, but hashtable gives id {}",
+					p.second, p.first, appended_id));
+		value.remove_suffix(8);
+		ret.emplace_back(p.first, ValueExtractor()(value));
+	}
+	return ret;
+}
+} //anonymous namespace
+
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		const std::vector<std::uint64_t>& gids) {
+	assert(std::is_sorted(gids.begin(), gids.end()));
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	vector<pair<uint64_t, std::size_t>> id_to_hash;
+	for (uint64_t id : gids) {
+		std::string_view value;
+		if (!gadget_index.get(txn, lmdb::to_sv(id), value))
+			throw std::logic_error(fmt::format("id {} not found", id));
+		id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
+	}
+	auto ret = select_gadget_id_to_value<gadget_copier>(env, txn, gadget_hashtable, id_to_hash);
+	txn.commit();
+	return ret;
+}
+std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals) {
+	assert(std::is_sorted(gid_intervals.begin(), gid_intervals.end()));
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto id_to_hash = select_gadget_id_to_hash(txn, gadget_index, gid_intervals);
+	auto ret = select_gadget_id_to_value<gadget_copier>(env, txn, gadget_hashtable, id_to_hash);
+	txn.commit();
+	return ret;
+}
+
+
+
+uint64_t get_current_max_gadget_id(lmdb::env& env) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto ret = get_current_max_gadget_id(txn);
+	txn.commit();
+	return ret;
+}
+uint64_t get_current_max_gadget_id(lmdb::env& env, lmdb::dbi& gadget_index) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto ret = get_current_max_gadget_id(txn, gadget_index);
+	txn.commit();
+	return ret;
+}
+uint64_t get_current_max_gadget_id(lmdb::txn& txn) {
+	lmdb::dbi gadget_index = lmdb::dbi::open(txn, "gadget_index");
+	return get_current_max_gadget_id(txn, gadget_index);
+}
+uint64_t get_current_max_gadget_id(lmdb::txn& txn, lmdb::dbi& gadget_index) {
+	//Duplicated from selsert_gadget_by_data.
+	lmdb::cursor index_cur = lmdb::cursor::open(txn, gadget_index);
+	std::string_view last_id_view;
+	if (index_cur.get(last_id_view, MDB_LAST))
+		return lmdb::from_sv<std::uint64_t>(last_id_view);
+	return 0; //note that 0 is not the id of any actual gadget
+}
+
+
+
+namespace {
+struct PredicateDemand {
+	uint64_t beginInclusive, endExclusive;
+	vector<unsigned int> locations, states;
+};
+PredicateDemand update_SL_predicates_discover(lmdb::env& env, lmdb::dbi& predicates,
+		lmdb::dbi& gadget_index, uint64_t valid_before) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	valid_before = std::min(valid_before, get_current_max_gadget_id(txn, gadget_index)+1);
+
+	lmdb::cursor cur = lmdb::cursor::open(txn, predicates);
+	std::string_view key = "valid_before", value = "";
+	if (!cur.get(key, value, MDB_SET))
+		throw std::runtime_error("missing predicates valid_before key (corrupt database?)");
+	uint64_t validity = lmdb::from_sv<uint64_t>(value);
+	if (valid_before <= validity)
+		return {0, 0, {}, {}};
+	//update interval is [validity, valid_before).
+
+	//TODO: probably goes in stringutils.hpp?
+	auto remove_prefix_if = [](std::string_view& key, std::string_view thing) -> bool {
+		if (key.compare(0, thing.size(), thing) == 0) {
+			key.remove_prefix(thing.size());
+			return true;
+		}
+		return false;
+	};
+
+	//Find the predicates to update.  The locations predicates should always be
+	//the same, but state predicates are computed on demand.
+	vector<unsigned int> locations, states;
+	cur.get(key, MDB_FIRST); //we know there's at least one key
+	do {
+		if (key == "valid_before"sv) continue;
+		else if (remove_prefix_if(key, "locations<="))
+			locations.push_back(from_string<unsigned int>(key));
+		else if (remove_prefix_if(key, "states<="))
+			states.push_back(from_string<unsigned int>(key));
+		else
+			throw std::runtime_error(fmt::format("unrecognized predicates key: {}", key));
+	} while (cur.get(key, MDB_NEXT));
+	cur.close();
+	txn.commit();
+
+	std::sort(locations.begin(), locations.end());
+	std::sort(states.begin(), states.end());
+	return {validity, valid_before, std::move(locations), std::move(states)};
+}
+
+const std::size_t update_SL_predicates_basecase_batch_size = 10000;
+struct PredicateUpdateResult {
+	vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> locations, states;
+	void merge(PredicateUpdateResult&& other) {
+		locations = merge0(std::move(locations), std::move(other.locations));
+		states = merge0(std::move(states), std::move(other.states));
+	}
+	vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> merge0(
+			const vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> us,
+			vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> them) {
+		assert(us.size() == them.size());
+		vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> ret;
+		for (std::size_t i = 0; i < us.size(); ++i) {
+			assert(us[i].first == them[i].first);
+			ret.emplace_back(us[i].first, interval_union(us[i].second.begin(), us[i].second.end(),
+					them[i].second.begin(), them[i].second.end()));
+		}
+		return ret;
+	}
+};
+PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& predicates,
+		lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, PredicateDemand demand) {
+	vector<pair<unsigned int, interval_accumulator<uint64_t>>> locations, states;
+	locations.reserve(demand.locations.size());
+	for (unsigned int i : demand.locations)
+		locations.emplace_back(i, 1024);
+	states.reserve(demand.states.size());
+	for (unsigned int i : demand.states)
+		states.emplace_back(i, 1024);
+	auto first_cmp = [](const auto& a, const auto& b) {
+		//not quite proj_compare, but close...
+		return std::get<0>(a) < b;
+	};
+
+	while (demand.beginInclusive < demand.endExclusive) {
+		//Work in batches to keep transactions short.
+		std::size_t batch_size = std::min(demand.endExclusive - demand.beginInclusive,
+				update_SL_predicates_basecase_batch_size);
+		vector<pair<uint64_t, uint64_t>> batch = {{demand.beginInclusive, demand.beginInclusive + batch_size}};
+
+		//We could (should?) be using abort/renew here, but they're awkward to
+		//use with the lmdbxx wrapper.
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		//We could reuse id_to_hash between iterations.
+		auto id_to_hash = select_gadget_id_to_hash(txn, gadget_index, batch);
+		vector<pair<uint64_t, encoding::Stats>> stats = select_gadget_id_to_value<stats_extractor>(
+				env, txn, gadget_hashtable, id_to_hash);
+		txn.commit();
+
+		for (const pair<uint64_t, encoding::Stats>& p : stats) {
+			//I tried commoning these with a lambda, but we'd have to work a
+			//pointer-to-data-member into it, so I gave up.
+			auto lit = std::lower_bound(locations.begin(), locations.end(), p.second.locations, first_cmp);
+			if (lit != locations.end())
+				(lit->second)(p.first);
+			auto sit = std::lower_bound(states.begin(), states.end(), p.second.states, first_cmp);
+			if (sit != states.end())
+				(sit->second)(p.first);
+		}
+		demand.beginInclusive += batch_size;
+	}
+
+	PredicateUpdateResult ret;
+	//We accumulated equality above, but our predicates are <=, so we need to
+	//union each set with the smaller sets.
+	auto convert_to_less_than = [](auto& ret, auto& accum) {
+		ret.reserve(accum.size());
+		for (std::size_t i = 0; i < accum.size(); ++i) {
+			ret.emplace_back(accum[i].first, std::move(accum[i].second).finish());
+			if (i > 0)
+				ret[i].second = interval_union(ret[i-1].second.cbegin(), ret[i-1].second.cend(),
+						ret[i].second.begin(), ret[i].second.end());
+		}
+	};
+	convert_to_less_than(ret.locations, locations);
+	convert_to_less_than(ret.states, states);
+	return ret;
+}
+
+bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t valid_before, PredicateUpdateResult result) {
+	auto txn = lmdb::txn::begin(env); //write txn
+	lmdb::cursor cur = lmdb::cursor::open(txn, predicates);
+	std::string_view valid_before_key = "valid_before", value = "";
+	if (!cur.get(valid_before_key, value, MDB_SET))
+		throw std::runtime_error("missing predicates valid_before key (corrupt database?)");
+	if (valid_before <= lmdb::from_sv<uint64_t>(value))
+		return false; //someone else already did it
+	value = lmdb::to_sv(valid_before);
+	if (!cur.put(valid_before_key, value))
+		throw new std::logic_error("can't happen? failed to put valid_before key when committing");
+
+	auto commit_stuff = [&](vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> stuff,
+			const char* key_format_string) {
+		for (pair<unsigned int, vector<pair<uint64_t, uint64_t>>>& p : stuff) {
+			if (p.second.empty()) continue;
+			std::string real_key = fmt::format(key_format_string, p.first);
+			std::string_view key = real_key;
+			//If we're committing a new state predicate, the key may not exist.
+			if (cur.get(key, value, MDB_SET)) {
+				if (value.size() % sizeof(pair<uint64_t, uint64_t>) != 0)
+					throw std::logic_error(fmt::format("predicates key {} has value length {} (not a multiple of {})",
+							key, value.size(), sizeof(pair<uint64_t, uint64_t>)));
+				const pair<uint64_t, uint64_t>* first = reinterpret_cast<const pair<uint64_t, uint64_t>*>(value.data());
+				const pair<uint64_t, uint64_t>* last = first + value.size() / sizeof(pair<uint64_t, uint64_t>);
+				p.second = interval_union(p.second.begin(), p.second.end(), first, last);
+			}
+			std::string_view value(reinterpret_cast<const char*>(p.second.data()),
+				p.second.size() * sizeof(pair<uint64_t, uint64_t>));
+			if (!cur.put(key, value))
+				throw std::logic_error(fmt::format("can't happen? failed to put predicate data for {} with {} intervals ({} bytes)",
+						key, p.second.size(), value.size()));
+		}
+	};
+	commit_stuff(result.locations, "locations<={}");
+	commit_stuff(result.states, "states<={}");
+	txn.commit();
+	return true;
+}
+}//anonymous namespace
+
+//update SL predicates through given id (default max) using N threads (or using given executor)
+bool update_SL_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, uint64_t valid_before, unsigned int threads) {
+	PredicateDemand demand = update_SL_predicates_discover(env, predicates, gadget_index, valid_before);
+	if (demand.endExclusive <= demand.beginInclusive) return false;
+
+	//TODO: fork threads for large updates
+	PredicateUpdateResult result = update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, demand);
+	return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
+}
+
+//create and update new state predicate to current validity using N threads
+bool create_state_predicate(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, unsigned int less_than_or_equal_to, unsigned int threads) {
+	//check it doesn't already exist, get current valid_before
+	//manually create singleton PredicateDemand
+	//re-use PredicateDemand commit
+}
+
+//get predicate (copy from DB)
+vector<pair<uint64_t, uint64_t>> get_location_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int max_locations);
+vector<pair<uint64_t, uint64_t>> get_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int max_locations);
+vector<pair<uint64_t, uint64_t>> get_state_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int max_states);
+vector<pair<uint64_t, uint64_t>> get_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int max_states);
+//get equality predicate (difference between two predicates from DB)
+vector<pair<uint64_t, uint64_t>> get_equal_location_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int locations);
+vector<pair<uint64_t, uint64_t>> get_equal_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int locations);
+vector<pair<uint64_t, uint64_t>> get_equal_state_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int states);
+vector<pair<uint64_t, uint64_t>> get_equal_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int states);
+//predicate_difference (for excluding impossible combines)
+vector<pair<uint64_t, uint64_t>> subtract_state_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		unsigned int max_locations,	const vector<pair<uint64_t, uint64_t>>& intervals);
+vector<pair<uint64_t, uint64_t>> subtract_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		unsigned int max_locations,	const vector<pair<uint64_t, uint64_t>>& intervals);
+vector<pair<uint64_t, uint64_t>> subtract_location_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+vector<pair<uint64_t, uint64_t>> subtract_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+//predicate_intersection (for retaining only possible connects)
+vector<pair<uint64_t, uint64_t>> intersect_state_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		unsigned int max_locations, const vector<pair<uint64_t, uint64_t>>& intervals);
+vector<pair<uint64_t, uint64_t>> intersect_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		unsigned int max_locations, const vector<pair<uint64_t, uint64_t>>& intervals);
+vector<pair<uint64_t, uint64_t>> intersect_location_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+vector<pair<uint64_t, uint64_t>> intersect_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+
+
 
 namespace {
 std::array<std::string_view, 3> completions_key_whitelist = {
