@@ -382,18 +382,26 @@ PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& p
 	return ret;
 }
 
-bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t valid_before, PredicateUpdateResult result) {
+bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t speculative_value_before,
+		PredicateUpdateResult result) {
 	auto txn = lmdb::txn::begin(env); //write txn
 	lmdb::cursor cur = lmdb::cursor::open(txn, predicates);
 	std::string_view valid_before_key = "valid_before", value = "";
 	if (!cur.get(valid_before_key, value, MDB_SET))
 		throw std::runtime_error("missing predicates valid_before key (corrupt database?)");
-	if (valid_before <= lmdb::from_sv<uint64_t>(value))
-		return false; //someone else already did it
-	value = lmdb::to_sv(valid_before);
-	if (!cur.put(valid_before_key, value))
-		throw new std::logic_error("can't happen? failed to put valid_before key when committing");
+	uint64_t actual_value_before = lmdb::from_sv<uint64_t>(value);
+	if (speculative_value_before < actual_value_before)
+		//If we're updating, someone else already did it.  If we're creating a
+		//new index, we can't commit because our results aren't valid for the
+		//full range.  (There's an LL/SC like thing going on there.)
+		return false;
+	if (speculative_value_before > actual_value_before) {
+		value = lmdb::to_sv(speculative_value_before);
+		if (!cur.put(valid_before_key, value))
+			throw new std::logic_error("can't happen? failed to put valid_before key when committing");
+	}
 
+	bool updated = false;
 	auto commit_stuff = [&](vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> stuff,
 			const char* key_format_string) {
 		for (pair<unsigned int, vector<pair<uint64_t, uint64_t>>>& p : stuff) {
@@ -402,6 +410,11 @@ bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t
 			std::string_view key = real_key;
 			//If we're committing a new state predicate, the key may not exist.
 			if (cur.get(key, value, MDB_SET)) {
+				//If we're up-to-date, actually doing the union will be useless.
+				//We're just looking for novel keys.
+				if (speculative_value_before == actual_value_before)
+					continue;
+
 				if (value.size() % sizeof(pair<uint64_t, uint64_t>) != 0)
 					throw std::logic_error(fmt::format("predicates key {} has value length {} (not a multiple of {})",
 							key, value.size(), sizeof(pair<uint64_t, uint64_t>)));
@@ -409,17 +422,19 @@ bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t
 				const pair<uint64_t, uint64_t>* last = first + value.size() / sizeof(pair<uint64_t, uint64_t>);
 				p.second = interval_union(p.second.begin(), p.second.end(), first, last);
 			}
+
 			std::string_view value(reinterpret_cast<const char*>(p.second.data()),
 				p.second.size() * sizeof(pair<uint64_t, uint64_t>));
 			if (!cur.put(key, value))
 				throw std::logic_error(fmt::format("can't happen? failed to put predicate data for {} with {} intervals ({} bytes)",
 						key, p.second.size(), value.size()));
+			updated = true;
 		}
 	};
 	commit_stuff(result.locations, "locations<={}");
 	commit_stuff(result.states, "states<={}");
 	txn.commit();
-	return true;
+	return updated;
 }
 }//anonymous namespace
 
@@ -435,11 +450,30 @@ bool update_SL_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadg
 }
 
 //create and update new state predicate to current validity using N threads
+//It would be easy to create multiple predicates at once should we need that.
+//Just filter the missing keys and fill in the PredicateDemand.
 bool create_state_predicate(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, unsigned int less_than_or_equal_to, unsigned int threads) {
-	//check it doesn't already exist, get current valid_before
-	//manually create singleton PredicateDemand
-	//re-use PredicateDemand commit
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	std::string_view value;
+	//If it exists, nothing to do.  This will page in (the start of) the value,
+	//but we're usually just about to read it anyway, so that's fine.
+	if (predicates.get(txn, fmt::format("states<={}", less_than_or_equal_to), value))
+		return false;
+	if (!predicates.get(txn, "valid_before", value))
+		throw std::runtime_error("missing predicates valid_before key (corrupt database?)");
+	uint64_t valid_before = lmdb::from_sv<uint64_t>(value);
+	txn.commit();
+
+	PredicateDemand demand = {1, valid_before, {}, {less_than_or_equal_to}};
+	//TODO: threads
+	PredicateUpdateResult result = update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, demand);
+	if (!update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result)))
+		//We could get the new valid_before and scan just a bit more, then union
+		//with the previous result (if we don't move it).  We should also check
+		//the other process didn't already create the key, too.
+		throw std::logic_error("TODO implement retry logic for when create_state_predicate speculation fails");
+	return true;
 }
 
 //get predicate (copy from DB)

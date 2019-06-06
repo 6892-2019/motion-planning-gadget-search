@@ -31,10 +31,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			input_file = argv[++i];
 		else if (argv[i] == "--output-file"sv || argv[i] == "--output"sv || argv[i] == "-o"sv)
 			output_file = argv[++i];
-		else if (argv[i][0] == '-') {
-			fmt::print(stderr, "ERROR: unknown option {}\n", argv[i]);
-			std::exit(2);
-		} else
+		else
+			//These may be not be positionals, strictly speaking, but instead
+			//options parsed by the mode.
 			positionals.push_back(argv[i]);
 	}
 
@@ -44,7 +43,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return dump_gadget_mode(db_path, positionals);
 	else if (mode == "incoming-edges"sv)
 		return incoming_edges_mode(db_path, positionals);
-	else if (mode == "predicates"sv || mode == "update-predicates"sv)
+	else if (mode == "predicates"sv)
 		return update_predicates_mode(db_path, positionals);
 	else if (mode == "msgpack"sv) {
 		if (!positionals.empty()) {
