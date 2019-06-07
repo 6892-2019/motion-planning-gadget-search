@@ -255,6 +255,62 @@ uint64_t get_current_max_gadget_id(lmdb::txn& txn, lmdb::dbi& gadget_index) {
 
 
 namespace {
+/**
+ * Returns a view to an interval list in the database, or a pair of nullptr if
+ * the key does not exist.  Throws if the value has the wrong size.
+ */
+pair<const pair<uint64_t, uint64_t>*, const pair<uint64_t, uint64_t>*>
+view_interval_list(lmdb::txn& txn, lmdb::dbi& database, std::string_view key) {
+	std::string_view value;
+	if (!database.get(txn, key, value))
+		return {nullptr, nullptr};
+	//TODO: this kind of logic is pretty common, but with different types/throw info;
+	//maybe there's a helper that returns a range or throws via a lambda?
+	if (value.size() % sizeof(pair<uint64_t, uint64_t>) != 0)
+		//There doesn't seem to be a way to get a dbi's name, so the best wa can
+		//give is the handle number.
+		throw std::logic_error(fmt::format("view_interval_list: db {} key {} has value length {} (not a multiple of {})",
+				database.handle(), key, value.size(), sizeof(pair<uint64_t, uint64_t>)));
+	const pair<uint64_t, uint64_t>* first = reinterpret_cast<const pair<uint64_t, uint64_t>*>(value.data());
+	const pair<uint64_t, uint64_t>* last = first + value.size() / sizeof(pair<uint64_t, uint64_t>);
+	return {first, last};
+}
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> subtract_interval_list(
+		lmdb::txn& txn, lmdb::dbi& database, std::string_view key,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
+	auto list = view_interval_list(txn, database, key);
+	if (!list.first)
+		return intervals;
+	return interval_difference(intervals.begin(), intervals.end(), list.first, list.second);
+}
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_interval_list(
+		lmdb::txn& txn, lmdb::dbi& database, std::string_view key,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
+	auto list = view_interval_list(txn, database, key);
+	if (!list.first)
+		return intervals;
+	return interval_intersection(intervals.begin(), intervals.end(), list.first, list.second);
+}
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> write_interval_list_union(
+		lmdb::txn& txn, lmdb::dbi& database, std::string_view key,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
+	auto list = view_interval_list(txn, database, key);
+	auto result = list.first ?
+		interval_union(list.first, list.second, intervals.begin(), intervals.end()) :
+		intervals; //if key not present, our intervals are the first
+	std::string_view value(reinterpret_cast<const char*>(result.data()),
+			result.size() * sizeof(pair<uint64_t, uint64_t>));
+	if (!database.put(txn, key, value))
+		throw std::logic_error(fmt::format("can't happen? write_interval_list_union db {} key {} with {} intervals ({} bytes)",
+				key, result.size(), value.size()));
+	//We may as well return this given we computed it.
+	return result;
+}
+
+
 struct PredicateDemand {
 	uint64_t beginInclusive, endExclusive;
 	vector<unsigned int> locations, states;
@@ -476,34 +532,146 @@ bool create_state_predicate(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& ga
 	return true;
 }
 
+namespace {
+vector<pair<uint64_t, uint64_t>> get_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int limit) {
+	std::string key = fmt::format("{}<={}", kind, limit);
+	auto view = view_interval_list(txn, predicates, key);
+	if (!view.first)
+		return {};
+	return {view.first, view.second};
+}
+vector<pair<uint64_t, uint64_t>> get_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int limit) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto ret = get_predicate(txn, predicates, kind, limit);
+	txn.commit();
+	return ret;
+}
+
+vector<pair<uint64_t, uint64_t>> get_predicate_range_query(lmdb::txn& txn, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int lowerExclusive, unsigned int upperInclusive) {
+	std::string key = fmt::format("{}<={}", kind, upperInclusive);
+	auto upper = view_interval_list(txn, predicates, key);
+	if (!upper.first)
+		throw std::runtime_error(fmt::format("can't do {} {} {} range query if upper key missing",
+				kind, lowerExclusive, upperInclusive));
+	key = fmt::format("{}<={}", kind, lowerExclusive);
+	auto lower = view_interval_list(txn, predicates, key);
+	if (!lower.first)
+		throw std::runtime_error(fmt::format("can't do {} {} {} range query if lower key missing",
+				kind, lowerExclusive, upperInclusive));
+	return interval_difference(upper.first, upper.second, lower.first, lower.second);
+}
+vector<pair<uint64_t, uint64_t>> get_predicate_range_query(lmdb::env& env, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int lowerExclusive, unsigned int upperInclusive) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto ret = get_predicate_range_query(txn, predicates, kind, lowerExclusive, upperInclusive);
+	txn.commit();
+	return ret;
+}
+
+vector<pair<uint64_t, uint64_t>> subtract_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int limit, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	std::string key = fmt::format("{}<={}", kind, limit);
+	auto view = view_interval_list(txn, predicates, key);
+	if (!view.first)
+		throw std::logic_error(fmt::format("can't subtract_predicate {} {} if key missing", kind, limit));
+	return interval_difference(intervals.begin(), intervals.end(), view.first, view.second);
+}
+vector<pair<uint64_t, uint64_t>> subtract_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int limit, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto ret = subtract_predicate(txn, predicates, kind, limit, intervals);
+	txn.commit();
+	return ret;
+}
+
+vector<pair<uint64_t, uint64_t>> intersect_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int limit, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	std::string key = fmt::format("{}<={}", kind, limit);
+	auto view = view_interval_list(txn, predicates, key);
+	if (!view.first)
+		throw std::logic_error(fmt::format("can't intersect_predicate {} {} if key missing", kind, limit));
+	return interval_intersection(intervals.begin(), intervals.end(), view.first, view.second);
+}
+vector<pair<uint64_t, uint64_t>> intersect_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		std::string_view kind, unsigned int limit, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	auto ret = intersect_predicate(txn, predicates, kind, limit, intervals);
+	txn.commit();
+	return ret;
+}
+}//anonymous namespace
+
 //get predicate (copy from DB)
-vector<pair<uint64_t, uint64_t>> get_location_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int max_locations);
-vector<pair<uint64_t, uint64_t>> get_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int max_locations);
-vector<pair<uint64_t, uint64_t>> get_state_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int max_states);
-vector<pair<uint64_t, uint64_t>> get_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int max_states);
+vector<pair<uint64_t, uint64_t>> get_location_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int max_locations) {
+	return get_predicate(env, predicates, "locations", max_locations);
+}
+vector<pair<uint64_t, uint64_t>> get_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int max_locations) {
+	return get_predicate(txn, predicates, "locations", max_locations);
+}
+vector<pair<uint64_t, uint64_t>> get_state_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int max_states) {
+	return get_predicate(env, predicates, "states", max_states);
+}
+vector<pair<uint64_t, uint64_t>> get_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int max_states) {
+	return get_predicate(txn, predicates, "states", max_states);
+}
 //get equality predicate (difference between two predicates from DB)
-vector<pair<uint64_t, uint64_t>> get_equal_location_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int locations);
-vector<pair<uint64_t, uint64_t>> get_equal_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int locations);
-vector<pair<uint64_t, uint64_t>> get_equal_state_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int states);
-vector<pair<uint64_t, uint64_t>> get_equal_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int states);
+vector<pair<uint64_t, uint64_t>> get_equal_location_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int locations) {
+	if (locations < 2) throw std::logic_error(fmt::format("get_equal_location_predicate {}", locations));
+	if (locations == 2) //1-location gadgets aren't in the database
+		return get_location_predicate(env, predicates, locations);
+	return get_predicate_range_query(env, predicates, "locations", locations-1, locations);
+}
+vector<pair<uint64_t, uint64_t>> get_equal_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int locations) {
+	if (locations < 2) throw std::logic_error(fmt::format("get_equal_location_predicate {}", locations));
+	if (locations == 2) //1-location gadgets aren't in the database
+		return get_location_predicate(txn, predicates, locations);
+	return get_predicate_range_query(txn, predicates, "locations", locations-1, locations);
+}
+vector<pair<uint64_t, uint64_t>> get_equal_state_predicate(lmdb::env& env, lmdb::dbi& predicates, unsigned int states) {
+	if (states == 0) throw std::logic_error(fmt::format("get_equal_state_predicate {}", states));
+	return get_predicate_range_query(env, predicates, "states", states-1, states);
+}
+vector<pair<uint64_t, uint64_t>> get_equal_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates, unsigned int states) {
+	if (states == 0) throw std::logic_error(fmt::format("get_equal_state_predicate {}", states));
+	return get_predicate_range_query(txn, predicates, "states", states-1, states);
+}
 //predicate_difference (for excluding impossible combines)
-vector<pair<uint64_t, uint64_t>> subtract_state_predicate(lmdb::env& env, lmdb::dbi& predicates,
-		unsigned int max_locations,	const vector<pair<uint64_t, uint64_t>>& intervals);
-vector<pair<uint64_t, uint64_t>> subtract_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
-		unsigned int max_locations,	const vector<pair<uint64_t, uint64_t>>& intervals);
 vector<pair<uint64_t, uint64_t>> subtract_location_predicate(lmdb::env& env, lmdb::dbi& predicates,
-		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+		unsigned int max_locations,	const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return subtract_predicate(env, predicates, "locations", max_locations, intervals);
+}
 vector<pair<uint64_t, uint64_t>> subtract_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
-		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+		unsigned int max_locations,	const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return subtract_predicate(txn, predicates, "locations", max_locations, intervals);
+}
+vector<pair<uint64_t, uint64_t>> subtract_state_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return subtract_predicate(env, predicates, "states", max_states, intervals);
+}
+vector<pair<uint64_t, uint64_t>> subtract_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return subtract_predicate(txn, predicates, "states", max_states, intervals);
+}
 //predicate_intersection (for retaining only possible connects)
-vector<pair<uint64_t, uint64_t>> intersect_state_predicate(lmdb::env& env, lmdb::dbi& predicates,
-		unsigned int max_locations, const vector<pair<uint64_t, uint64_t>>& intervals);
-vector<pair<uint64_t, uint64_t>> intersect_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
-		unsigned int max_locations, const vector<pair<uint64_t, uint64_t>>& intervals);
 vector<pair<uint64_t, uint64_t>> intersect_location_predicate(lmdb::env& env, lmdb::dbi& predicates,
-		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+		unsigned int max_locations, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return intersect_predicate(env, predicates, "locations", max_locations, intervals);
+}
 vector<pair<uint64_t, uint64_t>> intersect_location_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
-		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals);
+		unsigned int max_locations, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return intersect_predicate(txn, predicates, "locations", max_locations, intervals);
+}
+vector<pair<uint64_t, uint64_t>> intersect_state_predicate(lmdb::env& env, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return intersect_predicate(env, predicates, "states", max_states, intervals);
+}
+vector<pair<uint64_t, uint64_t>> intersect_state_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
+		unsigned int max_states, const vector<pair<uint64_t, uint64_t>>& intervals) {
+	return intersect_predicate(txn, predicates, "states", max_states, intervals);
+}
 
 
 
@@ -525,66 +693,40 @@ void check_completions_key(std::string_view key) {
 			return;
 	throw std::logic_error(fmt::format("bad completions key: {}", key));
 }
-
-pair<const pair<uint64_t, uint64_t>*, const pair<uint64_t, uint64_t>*>
-get_completions_key(lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind) {
-	check_completions_key(kind);
-	std::string_view value;
-	if (!completions.get(txn, kind, value))
-		//We checked the key validity above, so we must have no completions yet.
-		//It's a bit silly to copy here, but this probably isn't the common case.
-		return {nullptr, nullptr};
-	//TODO: this kind of logic is pretty common, but with different types/throw info;
-	//maybe there's a helper that returns a range or throws via a lambda?
-	if (value.size() % sizeof(pair<uint64_t, uint64_t>) != 0)
-		throw std::logic_error(fmt::format("completions key {} has value length {} (not a multiple of {})",
-				kind, value.size(), sizeof(pair<uint64_t, uint64_t>)));
-	const pair<uint64_t, uint64_t>* first = reinterpret_cast<const pair<uint64_t, uint64_t>*>(value.data());
-	const pair<uint64_t, uint64_t>* last = first + value.size() / sizeof(pair<uint64_t, uint64_t>);
-	return {first, last};
-}
 }
 
+//TODO: filter_completion is a poor name because "filter" usually keeps elements
+//for which the predicate is true, while we're removing them.  Make this subtract_completion.
 std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
 		lmdb::env& env, lmdb::dbi& completions, std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
+	check_completions_key(kind);
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-	auto ret = filter_completion(env, txn, completions, kind, intervals);
+	auto ret = subtract_interval_list(txn, completions, kind, intervals);
 	txn.commit();
 	return ret;
 }
 std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
 		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-	auto comp_range = get_completions_key(env, txn, completions, kind);
-	if (!comp_range.first)
-		return intervals;
-	return interval_difference(intervals.begin(), intervals.end(), comp_range.first, comp_range.second);
+	check_completions_key(kind);
+	return subtract_interval_list(txn, completions, kind, intervals);
 }
 
 std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_completion(
 		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-	auto comp_range = get_completions_key(env, txn, completions, kind);
-	if (!comp_range.first)
-		return {};
-	return interval_intersection(intervals.begin(), intervals.end(), comp_range.first, comp_range.second);
+	check_completions_key(kind);
+	return intersect_interval_list(txn, completions, kind, intervals);
 }
 
+//TODO: Rename this function.  Unlike the others, it writes to the database.
+//maybe "update_completion"?
 std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
 		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-	auto comp_range = get_completions_key(env, txn, completions, kind);
-	auto result = comp_range.first ?
-		interval_union(comp_range.first, comp_range.second, intervals.begin(), intervals.end()) :
-		intervals; //if key not present, our intervals are the first
-	std::string_view value(reinterpret_cast<const char*>(result.data()),
-			result.size() * sizeof(pair<uint64_t, uint64_t>));
-	if (!completions.put(txn, kind, value))
-		throw std::logic_error(fmt::format("can't happen? failed to put completion data for {} with {} intervals ({} bytes)",
-				kind, result.size(), value.size()));
-	//We may as well return this given we computed it.
-	return result;
+	check_completions_key(kind);
+	return write_interval_list_union(txn, completions, kind, intervals);
 }
 
 
