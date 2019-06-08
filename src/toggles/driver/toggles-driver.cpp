@@ -2,6 +2,7 @@
 #include "worker-manager.hpp"
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
+#include "../gadget-encoding-stats.hpp"
 #include "intervals.hpp"
 #include "stringutils.hpp"
 #include "ioutils.hpp"
@@ -322,6 +323,7 @@ private:
  */
 struct CompletenessOptions {
 	unsigned int precision;
+	unsigned int combine_max_left_locations; //computed from precision if not specified
 	unsigned int combine_max_left_states;
 	unsigned int connect_max_states;
 	bool multiplayer;
@@ -516,9 +518,10 @@ private:
 		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
 		std::size_t total_candidates = interval_size(unary_needs_);
-		//TODO: also a max_locations filter based on precision; that requires
-		//knowing the min locations among the combine rights.
-		ActivePredicates preds = {.max_states = complete_opts_.combine_max_left_states};
+		ActivePredicates preds = {
+			.max_locations = complete_opts_.combine_max_left_locations,
+			.max_states = complete_opts_.combine_max_left_states
+		};
 		if (preds)
 			//Modifying unary_needs_ here is fine because predicates are
 			//completeness options also saved in the checkpoint.
@@ -662,14 +665,8 @@ private:
 		//I suppose we could wait until after any subgenerations (connects) to
 		//choose the set of combine rights, but this matches how the old
 		//generational search worked.
-		if (generation_ == 0 && subgeneration_ == 0) {
-			combine_rights_ = interval_inflate(state_.subgeneration().begin(), state_.subgeneration().end());
-			assert(std::is_sorted(combine_rights_.begin(), combine_rights_.end()));
-			fmt::print("Combine rights ({}):", combine_rights_.size());
-			for (uint64_t id : combine_rights_)
-				fmt::print(" {}", id);
-			fmt::print("\n");
-		}
+		if (generation_ == 0 && subgeneration_ == 0)
+			initialize_combine_rights();
 
 		state_.flip_subgeneration();
 		if (state_.prev_subgeneration().empty()) {
@@ -866,6 +863,26 @@ private:
 		return false;
 	}
 
+	void initialize_combine_rights() {
+		assert(combine_rights_.empty());
+		combine_rights_ = interval_inflate(state_.subgeneration().begin(), state_.subgeneration().end());
+		assert(std::is_sorted(combine_rights_.begin(), combine_rights_.end()));
+		fmt::print("Combine rights ({}):", combine_rights_.size());
+		for (uint64_t id : combine_rights_)
+			fmt::print(" {}", id);
+		fmt::print("\n");
+
+		//We only actually need the locations (or the encoding::Stats), but if
+		//this is the only such use we don't need to define a select_id_to_stats.
+		vector<pair<uint64_t, vector<std::byte>>> data = select_gadget_id_to_data(
+				database_, gadget_hashtable_, gadget_index_, combine_rights_);
+		unsigned int smallest_right = std::numeric_limits<unsigned int>::max();
+		for (const pair<uint64_t, vector<std::byte>>& p : data)
+			smallest_right = std::min(smallest_right, encoding::locations(p.second.data()));
+		complete_opts_.combine_max_left_locations = std::min(complete_opts_.combine_max_left_locations,
+				complete_opts_.precision - smallest_right);
+	}
+
 	/**
 	 * Computes two different size metrics for combine_needs.  The first element
 	 * in the pair is the total number of left gadgets to be combined; the
@@ -988,7 +1005,7 @@ private:
 	//(as opposed to, e.g., worker addresses).
 	vector<std::string> cmdline_specs_;
 	GadgetSet source_specs_;
-	CompletenessOptions complete_opts_;
+	CompletenessOptions complete_opts_; //combine_left_max_locations may be modified!
 
 	//Things below here are not saved in the checkpoint.  They could be passed
 	//around most everywhere, but are saved here for convenience.
@@ -1012,6 +1029,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	std::vector<std::string_view> gid_specs;
 	CompletenessOptions completeness_opts;
 	completeness_opts.precision = 8;
+	completeness_opts.combine_max_left_locations = std::numeric_limits<unsigned int>::max(); //no limit
 	completeness_opts.combine_max_left_states = std::numeric_limits<unsigned int>::max(); //no limit
 	completeness_opts.connect_max_states = std::numeric_limits<unsigned int>::max(); //no limit
 	completeness_opts.multiplayer = false;
