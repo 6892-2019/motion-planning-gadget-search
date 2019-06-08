@@ -348,6 +348,10 @@ struct RuntimeOptions {
 	std::size_t combine_task_batch_threshold, connect_task_batch_threshold,
 			close_task_batch_threshold, mirror_task_batch_threshold;
 	/**
+	 * The max number of threads to use for threaded database operations.
+	 */
+	unsigned int db_threads;
+	/**
 	 * The directory to write batch tasks into.
 	 */
 	std::string batch_task_directory;
@@ -400,6 +404,17 @@ private:
 		stop,
 	};
 
+	struct ActivePredicates {
+		unsigned int min_locations = 0;
+		unsigned int max_locations = std::numeric_limits<unsigned int>::max();
+		unsigned int min_states = 0;
+		unsigned int max_states = std::numeric_limits<unsigned int>::max();
+		operator bool() const {
+			return min_locations || max_locations != std::numeric_limits<unsigned int>::max() ||
+				min_states || max_states != std::numeric_limits<unsigned int>::max();
+		}
+	};
+
 	//for the convenience of resume()
 	Search(lmdb::env&& database, RuntimeOptions runtime_opts) :
 			database_(std::move(database)), runtime_opts_(runtime_opts),
@@ -444,6 +459,7 @@ public:
 	 */
 	bool execute(WorkerManager* workers) {
 		open_subdatabases();
+		ensure_predicates();
 		workers_ = workers;
 
 		Control control = Control::proceed;
@@ -499,10 +515,18 @@ private:
 	Control discover_needs_combine() {
 		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
+		std::size_t total_candidates = interval_size(unary_needs_);
+		//TODO: also a max_locations filter based on precision; that requires
+		//knowing the min locations among the combine rights.
+		ActivePredicates preds = {.max_states = complete_opts_.combine_max_left_states};
+		if (preds)
+			//Modifying unary_needs_ here is fine because predicates are
+			//completeness options also saved in the checkpoint.
+			apply_predicates(unary_needs_, preds);
 		combine_needs_ = find_required_combines(database_, completions_, unary_needs_, combine_rights_);
 		auto [needy_lefts, needy_pairs] = combine_needs_sizes();
-		fmt::print("Found {} of {} lefts needing combine ({} total pairs) in {}\n",
-				needy_lefts, interval_size(unary_needs_), needy_pairs, stopwatch.elapsed().hms());
+		fmt::print("Found {} of {} eligible lefts ({} total candidates) needing combine ({} total pairs) in {}\n",
+				needy_lefts, interval_size(unary_needs_), total_candidates, needy_pairs, stopwatch.elapsed().hms());
 
 		phase_ = Phase::compute_combine;
 		return Control::proceed;
@@ -664,11 +688,8 @@ private:
 	}
 
 	Control discover_needs_connect() {
-		filter_unary("connect", state_.prev_subgeneration());
-		//We used to filter out gadgets with < 4 locations here, but for now
-		//we'll defer that to task-writing time or to the runner so we don't
-		//have to touch the gadget data.  (It wouldn't be done in filter_unary
-		//anyway now that we aren't emitting SQL.)
+		filter_unary("connect", state_.prev_subgeneration(),
+				{.min_locations = 4, .max_states = complete_opts_.connect_max_states});
 		phase_ = Phase::compute_connect;
 		return Control::proceed;
 	}
@@ -692,13 +713,40 @@ private:
 		return Control::proceed;
 	}
 
-	void filter_unary(std::string_view completions_key, const vector<pair<uint64_t, uint64_t>>& candidates) {
-		Stopwatch stopwatch = Stopwatch::process();
+	void filter_unary(std::string_view completions_key, const vector<pair<uint64_t, uint64_t>>& candidates,
+			ActivePredicates preds) {
 		if (!unary_needs_.empty())
 			throw std::logic_error(fmt::format("called filter_unary for {} but unary_needs_ not empty\n", completions_key));
-		unary_needs_ = filter_completion(database_, completions_, completions_key, candidates);
-		fmt::print("Found {} of {} gadgets needing {} in {}\n",
+		if (candidates.empty())
+			return;
+
+		Stopwatch stopwatch = Stopwatch::process();
+		if (!preds) {
+			unary_needs_ = filter_completion(database_, completions_, completions_key, candidates);
+			fmt::print("Found {} of {} gadgets needing {} in {}\n",
 				interval_size(unary_needs_), interval_size(candidates), completions_key, stopwatch.elapsed().hms());
+			return;
+		}
+
+		update_predicates(candidates.back().second);
+
+		auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
+		//We filter with predicates first to get more informative stats, but if
+		//performance is bad due to low selectivity, we could filter by
+		//completions first.
+		apply_predicates(txn, candidates, preds);
+		std::size_t eligible = interval_size(unary_needs_);
+		unary_needs_ = filter_completion(database_, txn, completions_, completions_key, unary_needs_);
+		txn.commit();
+		fmt::print("Found {} of {} eligible gadgets ({} total candidates) needing {} in {}\n",
+				interval_size(unary_needs_), eligible, interval_size(candidates), completions_key, stopwatch.elapsed().hms());
+	}
+	void filter_unary(std::string_view completions_key, const vector<pair<uint64_t, uint64_t>>& candidates) {
+		//I'd like "ActivePredicates preds = {}" in the above overload, but that
+		//is currently rejected.  See https://stackoverflow.com/q/53408962/3614835
+		//and https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 .
+		ActivePredicates preds;
+		return filter_unary(completions_key, candidates, preds);
 	}
 
 	Control operate_unary(std::string_view operation_name, std::string_view log_name,
@@ -834,6 +882,63 @@ private:
 		return {needy_lefts, needy_pairs};
 	}
 
+	void ensure_predicates() {
+		auto ensure_predicate = [&](unsigned int max_states) {
+			Stopwatch stopwatch = Stopwatch::process();
+			if (create_state_predicate(database_, predicates_, gadget_hashtable_, gadget_index_,
+					max_states, runtime_opts_.db_threads)) {
+				Stopwatch::Result elapsed = stopwatch.elapsed();
+				fmt::print("Created predicate states<={} using {} threads in {} ({})\n",
+						max_states, runtime_opts_.db_threads, elapsed.hms(), elapsed.utilization());
+			}
+		};
+		//TODO: we should process these all at once, not sequentially, by adding
+		//a create_state_predicate overload taking a vector.
+		if (complete_opts_.combine_max_left_states != std::numeric_limits<unsigned int>::max())
+			ensure_predicate(complete_opts_.combine_max_left_states);
+		if (complete_opts_.connect_max_states != std::numeric_limits<unsigned int>::max())
+			ensure_predicate(complete_opts_.connect_max_states);
+	}
+
+	//always leaves the result in unary_needs_; candidates may be unary_needs_ too
+	void apply_predicates(lmdb::txn& txn, const vector<pair<uint64_t, uint64_t>>& candidates, ActivePredicates preds) {
+		assert(preds);
+		//We could just copy candidates to unary_needs_ and then always read
+		//from unary_needs_, but that might be an expensive copy.
+		const vector<pair<uint64_t, uint64_t>>* source = &candidates;
+		if (preds.min_locations) {
+			unary_needs_ = subtract_location_predicate(txn, predicates_, preds.min_locations-1, *source);
+			source = &unary_needs_;
+		}
+		if (preds.max_locations != std::numeric_limits<unsigned int>::max()) {
+			unary_needs_ = intersect_location_predicate(txn, predicates_, preds.max_locations, *source);
+			source = &unary_needs_;
+		}
+		if (preds.min_states) {
+			unary_needs_ = subtract_state_predicate(txn, predicates_, preds.min_states-1, *source);
+			source = &unary_needs_;
+		}
+		if (preds.max_states != std::numeric_limits<unsigned int>::max()) {
+			unary_needs_ = intersect_state_predicate(txn, predicates_, preds.max_states, *source);
+			source = &unary_needs_;
+		}
+	}
+	void apply_predicates(const vector<pair<uint64_t, uint64_t>>& candidates, ActivePredicates preds) {
+		auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
+		apply_predicates(txn, candidates, preds);
+		txn.commit();
+	}
+
+	void update_predicates(uint64_t interval_back_second) {
+		Stopwatch stopwatch = Stopwatch::process();
+		if (update_SL_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
+				interval_back_second, runtime_opts_.db_threads)) {
+			//TODO: more informative update_SL_predicates return value
+			auto elapsed = stopwatch.elapsed();
+			fmt::print("Updated predicates in {} ({})\n", elapsed.hms(), elapsed.utilization());
+		}
+	}
+
 	void open_subdatabases() {
 		if (gadget_hashtable_.handle() != std::numeric_limits<MDB_dbi>::max())
 			return; //already initialized
@@ -846,6 +951,7 @@ private:
 		edges_close_ = lmdb::dbi::open(txn, "edges-close");
 		edges_mirror_ = lmdb::dbi::open(txn, "edges-mirror");
 		completions_ = lmdb::dbi::open(txn, "completions");
+		predicates_ = lmdb::dbi::open(txn, "predicates");
 		txn.commit();
 	}
 
@@ -887,7 +993,7 @@ private:
 	//Things below here are not saved in the checkpoint.  They could be passed
 	//around most everywhere, but are saved here for convenience.
 	lmdb::env database_;
-	lmdb::dbi gadget_hashtable_, gadget_index_, edges_connect_, edges_close_, edges_mirror_, completions_;
+	lmdb::dbi gadget_hashtable_, gadget_index_, edges_connect_, edges_close_, edges_mirror_, completions_, predicates_;
 	vector<pair<uint64_t, lmdb::dbi>> edges_combine_; //sorted
 	std::optional<lmdb::env> checkpoint_;
 	WorkerManager* workers_; //may be nullptr if no worker args given (must write tasks)
@@ -902,7 +1008,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	jemalloc_tuning();
 
 	std::string_view db_path, checkpoint_db_path;
-	unsigned int num_db_threads = 1;
 	std::vector<std::string> worker_addrs; //or @foo for response files
 	std::vector<std::string_view> gid_specs;
 	CompletenessOptions completeness_opts;
@@ -917,13 +1022,14 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	runtime_opts.combine_task_batch_threshold = runtime_opts.connect_task_batch_threshold
 			= runtime_opts.close_task_batch_threshold = runtime_opts.mirror_task_batch_threshold
 			= std::numeric_limits<std::size_t>::max();
+	runtime_opts.db_threads = 1;
 	for (int i = 1; i < argc; ++i) {
 		if (argv[i] == "--db-path"sv)
 			db_path = argv[++i];
 		else if (argv[i] == "--checkpoint-db-path"sv)
 			checkpoint_db_path = argv[++i];
 		else if (argv[i] == "--db-threads"sv)
-			num_db_threads = to_uint(argv[++i]);
+			runtime_opts.db_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--worker"sv)
 			worker_addrs.emplace_back(argv[++i]);
 
