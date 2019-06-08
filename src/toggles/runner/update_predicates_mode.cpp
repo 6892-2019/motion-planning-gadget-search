@@ -9,8 +9,11 @@ using std::uint64_t;
 using std::pair;
 using namespace std::literals::string_view_literals;
 
+//defined in sync.hpp
+void initialize_predicates_database(lmdb::txn& txn, lmdb::dbi& predicates);
+
 int update_predicates_mode(std::string_view db_path, const vector<std::string_view>& args) {
-	bool update = false, list_all_predicates = false;
+	bool update = false, list_all_predicates = false, reinitialize = false;
 	unsigned int num_threads = 1;
 	vector<unsigned int> create_state, delete_state;
 	vector<std::string_view> dump;
@@ -21,6 +24,8 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 			list_all_predicates = true;
 		else if (args[i] == "--dump"sv)
 			dump.push_back(args[++i]);
+		else if (args[i] == "--reinitialize"sv)
+			reinitialize = true;
 		else if (args[i] == "--delete-state"sv)
 			delete_state.push_back(from_string<unsigned int>(args[++i]));
 		else if (args[i] == "--create-state"sv)
@@ -66,6 +71,13 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 			}
 		}
 		txn.commit();
+	}
+
+	if (reinitialize) {
+		lmdb::txn txn = lmdb::txn::begin(env);
+		initialize_predicates_database(txn, predicates);
+		txn.commit();
+		fmt::print("reinitialized predicates database\n");
 	}
 
 	for (std::string_view key : dump) {
