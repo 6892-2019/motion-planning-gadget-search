@@ -461,7 +461,6 @@ bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t
 	auto commit_stuff = [&](vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> stuff,
 			const char* key_format_string) {
 		for (pair<unsigned int, vector<pair<uint64_t, uint64_t>>>& p : stuff) {
-			if (p.second.empty()) continue;
 			std::string real_key = fmt::format(key_format_string, p.first);
 			std::string_view key = real_key;
 			//If we're committing a new state predicate, the key may not exist.
@@ -470,6 +469,9 @@ bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t
 				//We're just looking for novel keys.
 				if (speculative_value_before == actual_value_before)
 					continue;
+				//If we've nothing to add, don't.  (We do have to fetch the key
+				//before checking this, because creating an empty predicate is fine.)
+				if (p.second.empty()) continue;
 
 				if (value.size() % sizeof(pair<uint64_t, uint64_t>) != 0)
 					throw std::logic_error(fmt::format("predicates key {} has value length {} (not a multiple of {})",
