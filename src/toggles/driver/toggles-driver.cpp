@@ -357,6 +357,7 @@ struct RuntimeOptions {
 	 * The directory to write batch tasks into.
 	 */
 	std::string batch_task_directory;
+	unsigned int stop_after_gen, stop_after_subgen;
 };
 
 class Search {
@@ -511,7 +512,7 @@ private:
 		generation_stopwatch_.reset();
 		subgeneration_stopwatch_.reset();
 		phase_ = Phase::discover_needs_combine;
-		return Control::proceed;
+		return should_stop() ? Control::suspend : Control::proceed;
 	}
 
 	Control discover_needs_combine() {
@@ -681,7 +682,7 @@ private:
 		++subgeneration_;
 		subgeneration_stopwatch_.reset();
 		phase_ = Phase::discover_needs_connect;
-		return Control::proceed;
+		return should_stop() ? Control::suspend : Control::proceed;
 	}
 
 	Control discover_needs_connect() {
@@ -956,6 +957,11 @@ private:
 		}
 	}
 
+	bool should_stop() const {
+		return std::tie(generation_, subgeneration_) >
+				std::tie(runtime_opts_.stop_after_gen, runtime_opts_.stop_after_subgen);
+	}
+
 	void open_subdatabases() {
 		if (gadget_hashtable_.handle() != std::numeric_limits<MDB_dbi>::max())
 			return; //already initialized
@@ -1041,6 +1047,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			= runtime_opts.close_task_batch_threshold = runtime_opts.mirror_task_batch_threshold
 			= std::numeric_limits<std::size_t>::max();
 	runtime_opts.db_threads = 1;
+	runtime_opts.stop_after_gen = runtime_opts.stop_after_subgen = std::numeric_limits<unsigned int>::max();
 	for (int i = 1; i < argc; ++i) {
 		if (argv[i] == "--db-path"sv)
 			db_path = argv[++i];
@@ -1050,6 +1057,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			runtime_opts.db_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--worker"sv)
 			worker_addrs.emplace_back(argv[++i]);
+		else if (argv[i] == "--stop-after"sv) {
+			Parts p = partition(argv[++i], '.');
+			runtime_opts.stop_after_gen = from_string<unsigned int>(std::get<0>(p));
+			if (!std::get<1>(p).empty()) //yes, <1>; if there's a ., must have a number after
+				runtime_opts.stop_after_subgen = from_string<unsigned int>(std::get<2>(p));
+		}
 
 		else if (argv[i] == "--multiplayer"sv)
 			completeness_opts.multiplayer = true;
