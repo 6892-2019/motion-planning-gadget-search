@@ -196,15 +196,13 @@ std::size_t compressed_size(const std::vector<GadgetEdge>& edges, const EdgeCode
 	return size;
 }
 template<class EdgeCoder>
-std::size_t write_compressed(const std::vector<GadgetEdge>& edges, const EdgeCoder& coder, PackWriter& writer) {
-	std::size_t size = 0;
+void write_compressed(const std::vector<GadgetEdge>& edges, const EdgeCoder& coder, PackWriter& writer) {
 	std::uint64_t previous = 0;
 	for (const GadgetEdge& e : edges) {
 		std::uint64_t cur = coder.encode(e);
 		writer.writeVarint(numeric_cast<unsigned int>(cur - previous));
 		previous = cur;
 	}
-	return size;
 }
 
 template<class EdgeCoder>
