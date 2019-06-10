@@ -5,6 +5,7 @@
 #include "canonicalize.hpp"
 #include "gadget-encoding.hpp"
 #include "selsert-gadget-by-data.hpp"
+#include "tsl/ordered_set.h"
 #include "tsl/ordered_map.h"
 #include "lmdb++.h"
 #include <fmt/time.h>
@@ -149,7 +150,13 @@ void initialize_predicates_database(lmdb::txn& txn, lmdb::dbi& predicates) {
 }
 
 int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
-	vector<vector<std::byte>> canonicals;
+	//vector_ordered_set
+	tsl::ordered_set<vector<std::byte>, farmhash_hash, std::equal_to<vector<std::byte>>,
+			std::allocator<vector<std::byte>>, std::vector<vector<std::byte>>> canonicals;
+	auto register_gadget = [&](vector<std::byte>&& gadget) {
+		auto it = canonicals.insert(std::move(gadget)).first;
+		return numeric_cast<std::size_t>(std::distance(canonicals.begin(), it));
+	};
 	tsl::ordered_map<std::string, vector<std::size_t>> naming;
 	for (std::string_view filename : files) {
 		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
@@ -170,35 +177,35 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 					canonicalize_from_slls(std::move(uedges), std::move(dedges));
 			//We are chiral if any state has enantiomorphs.
 			bool chiral = std::any_of(morphs.begin(), morphs.end(), [](const auto& q){return q.second.has_value();});
-			std::size_t group_start = canonicals.size();
+			vector<std::size_t> whole_group_indices;
 			if (morphs.size() == 1 && !chiral) {
-				canonicals.push_back(std::move(morphs[0].first));
+				whole_group_indices.push_back(register_gadget(std::move(morphs[0].first)));
 				//singleton group -- we'll install the usual group name later
 			} else if (morphs.size() == 1 && chiral) {
 				auto& p = morphs[0];
-				naming["r-"+gadget_name] = {canonicals.size()};
-				canonicals.push_back(std::move(p.first));
-				naming["s-"+gadget_name] = {canonicals.size()};
-				canonicals.push_back(std::move(*p.second));
+				naming["r-"+gadget_name] = {register_gadget(std::move(p.first))};
+				naming["s-"+gadget_name] = {register_gadget(std::move(*p.second))};
+				whole_group_indices = {naming["r-"+gadget_name].front(), naming["s-"+gadget_name].front()};
 			} else if (morphs.size() > 1 && !chiral)
 				for (std::size_t i = 0; i < morphs.size(); ++i) {
-					naming[fmt::format("{}-{}", gadget_name, i)] = {canonicals.size()};
-					canonicals.push_back(std::move(morphs[i].first));
+					std::size_t number = register_gadget(std::move(morphs[i].first));
+					naming[fmt::format("{}-{}", gadget_name, i)] = {number};
+					whole_group_indices.push_back(number);
 				}
 			else if (morphs.size() > 1 && chiral)
 				for (std::size_t i = 0; i < morphs.size(); ++i) {
-					naming[fmt::format("r-{}-{}", gadget_name, i)] = {canonicals.size()};
-					canonicals.push_back(std::move(morphs[i].first));
+					std::size_t number = register_gadget(std::move(morphs[i].first));
+					naming[fmt::format("r-{}-{}", gadget_name, i)] = {number};
+					whole_group_indices.push_back(number);
 					if (morphs[i].second) {
-						naming[fmt::format("s-{}-{}", gadget_name, i)] = {canonicals.size()};
-						canonicals.push_back(std::move(*morphs[i].second));
+						number = register_gadget(std::move(*morphs[i].second));
+						naming[fmt::format("s-{}-{}", gadget_name, i)] = {number};
+						whole_group_indices.push_back(number);
 					} else
 						naming[fmt::format("s-{}-{}", gadget_name, i)] = naming.at(fmt::format("r-{}-{}", gadget_name, i));
 				}
 			else
 				throw std::logic_error("empty morphs somehow?");
-			vector<std::size_t> whole_group_indices(canonicals.size() - group_start);
-			std::iota(whole_group_indices.begin(), whole_group_indices.end(), group_start);
 			naming[gadget_name] = std::move(whole_group_indices);
 		}
 
@@ -278,7 +285,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		txn.commit();
 	}
 
-	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(canonicals));
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(canonicals).values_container());
 	//Punning a bit on this vector: in the map, it's indices into canonicals,
 	//but we're about to remap it to gadget ids.
 	std::deque<pair<std::string, std::vector<uint64_t>>> sorted_names = std::move(naming).values_container();
