@@ -394,3 +394,54 @@ TEST_CASE("IntervalsTest_IntervalContainsExhaustion") {
 		}
 	}
 }
+
+TEST_CASE("IntervalsTest_IntervalAggregateExhaustion") {
+	constexpr unsigned int limit = 1 << 5;
+	vector<pair<std::byte, vector<pair<int, int>>>> intervals;
+	vector<vector<pair<int, int>>> actual_union;
+	actual_union.resize(3);
+	//We want a type that's std::sortable but very unlike an int.
+	std::byte a = std::byte{0}, b = std::byte{1}, c = std::byte{2};
+	for (unsigned int p = 0; p < limit; ++p) {
+		auto pbits = indices_of_set_bits(p);
+		auto pranges = maximal_intervals(pbits.cbegin(), pbits.cend());
+		intervals.emplace_back(a, pranges);
+		for (unsigned int q = 0; q < limit; ++q) {
+			auto qbits = indices_of_set_bits(q);
+			auto qranges = maximal_intervals(qbits.cbegin(), qbits.cend());
+			intervals.emplace_back(b, qranges);
+			for (unsigned int r = 0; r < limit; ++r) {
+				auto rbits = indices_of_set_bits(r);
+				auto rranges = maximal_intervals(rbits.cbegin(), rbits.cend());
+				intervals.emplace_back(c, rranges);
+
+				vector<pair<vector<std::byte>, vector<pair<int, int>>>> agg = interval_aggregate(intervals);
+				//The intervals should all be disjoint.
+				for (std::size_t x = 0; x < agg.size(); ++x)
+					for (std::size_t y = x+1; y < agg.size(); ++y)
+						CHECK_UNARY(interval_intersection(agg[x].second.cbegin(), agg[x].second.cend(),
+								agg[y].second.cbegin(), agg[y].second.cend()).empty());
+				//The union of all intervals keyed on some element should be the
+				//input intervals for that element.
+				for (vector<pair<int, int>>& x : actual_union)
+					x.clear();
+				for (const pair<vector<std::byte>, vector<pair<int, int>>>& x : agg) {
+					for (std::byte y : x.first) {
+						std::size_t z = std::to_integer<std::size_t>(y);
+						actual_union[z] = interval_union(actual_union[z].cbegin(), actual_union[z].cend(),
+								x.second.cbegin(), x.second.cend());
+					}
+				}
+				for (unsigned int x = 0; x < 3; ++x)
+					CHECK_UNARY(std::equal(actual_union[x].cbegin(), actual_union[x].cend(),
+							intervals[x].second.cbegin(), intervals[x].second.cend()));
+
+				//We could be checking the key vectors are all sorted and have no duplicate elements.
+
+				intervals.pop_back();
+			}
+			intervals.pop_back();
+		}
+		intervals.pop_back();
+	}
+}

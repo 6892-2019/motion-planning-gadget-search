@@ -48,60 +48,7 @@ vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>> find_required_c
 		}
 		txn.commit();
 	}
-
-	//TODO: this is probably worth lifting to intervals.hpp, at least for testing's sake
-	//This is a sweep-line-based multiway group intersection to group intervals
-	//having the same set of combine rights.  Each combine right is "active" or
-	//"inactive", changing state at interval endpoints.  At each event point,
-	//the current interval is committed with the current active set, then the
-	//active set is updated.
-	vector<uint64_t> active;
-	active.reserve(intervals.size());
-	//(event point, true = becoming active, false = becoming inactive, the combine right)
-	vector<std::tuple<uint64_t, bool, uint64_t>> events;
-	events.reserve(event_count);
-	for (const pair<uint64_t, vector<pair<uint64_t, uint64_t>>>& i : intervals)
-		for (const pair<uint64_t, uint64_t>& j : i.second) {
-			events.emplace_back(j.first, true, i.first);
-			events.emplace_back(j.second, false, i.first);
-		}
-	std::sort(events.begin(), events.end(), std::greater<>()); //reversed sort for pop_back()
-	//The previous event point.  Initializing to 0 is safe because the active
-	//set starts empty, so we won't emit a spurious interval.  Similarly, a loop
-	//epilogue is unnecessary because the active set is empty at the end.
-	uint64_t cur = 0;
-	//vector_ordered_map
-	tsl::ordered_map<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>, farmhash_hash,
-			std::equal_to<vector<uint64_t>>, std::allocator<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>,
-			std::vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>> result;
-	while (!events.empty()) {
-		uint64_t event_point = std::get<0>(events.back());
-		if (!active.empty()) {
-			//We don't retain sorted order during insertions and removals, so we
-			//need to sort here.  (If most event points only occur for one list
-			//of intervals, maintaining order might be faster.)
-			std::sort(active.begin(), active.end());
-			result[active].emplace_back(cur, event_point);
-		}
-		cur = event_point;
-
-		//Process all events at this point.
-		while (std::get<0>(events.back()) == event_point) {
-			std::tuple<uint64_t, bool, uint64_t> e = events.back();
-			events.pop_back();
-			if (std::get<1>(e)) {
-				assert(std::find(active.begin(), active.end(), std::get<2>(e)) == active.end());
-				active.push_back(std::get<2>(e));
-			} else {
-				auto it = std::find(active.begin(), active.end(), std::get<2>(e));
-				assert(it != active.end());
-				std::iter_swap(it, active.end()-1);
-				active.pop_back();
-			}
-		}
-	}
-	//TODO: assert pairwise intersections are empty and overall union is the original interval list
-	return std::move(result).values_container();
+	return interval_aggregate(intervals);
 }
 
 void ping_all_workers(WorkerManager& manager) {

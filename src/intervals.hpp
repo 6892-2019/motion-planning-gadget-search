@@ -8,6 +8,7 @@
 #ifndef INTERVALS_HPP
 #define INTERVALS_HPP
 
+#include "tsl/ordered_map.h"
 #include <vector>
 #include <utility>
 #include <cassert>
@@ -353,6 +354,87 @@ std::vector<std::pair<T, T>> interval_difference(It1 left, It1 left_end, It2 rig
 		ret.insert(ret.end(), left, left_end);
 	}
 	return ret;
+}
+
+namespace detail {
+//TODO: before factoring this out, we were using farmhash_hash; we don't want
+//that dependency here if we can avoid it.
+struct interval_agg_hasher {
+	template<typename K>
+	std::size_t operator()(const std::vector<K>& x) const noexcept {
+		std::size_t h = 3;
+		for (const auto& b : x)
+			h = 31*h + std::hash<K>()(b);
+		return h;
+	}
+	std::size_t operator()(const std::vector<std::byte>& x) const noexcept {
+		std::size_t h = 3;
+		for (std::byte b : x)
+			h = 31*h + std::to_integer<unsigned int>(b);
+		return h;
+	}
+};
+}
+
+template<typename T, typename K>
+std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>> interval_aggregate(
+		const std::vector<std::pair<K, std::vector<std::pair<T, T>>>>& intervals) {
+	//This is a sweep-line-based multiway group intersection to group intervals
+	//having the same set of combine rights.  Each combine right is "active" or
+	//"inactive", changing state at interval endpoints.  At each event point,
+	//the current interval is committed with the current active set, then the
+	//active set is updated.
+	//TODO: assert the K are distinct
+	std::vector<K> active;
+	active.reserve(intervals.size());
+	//There will usually be far fewer groups than intervals, so pre-sizing is cheap enough to make sense.
+	std::size_t event_count = 0;
+	for (const std::pair<K, std::vector<std::pair<T, T>>>& i : intervals)
+		event_count += 2*i.second.size(); //not interval_size
+	//(event point, true = becoming active, false = becoming inactive, the combine right)
+	std::vector<std::tuple<T, bool, K>> events;
+	events.reserve(event_count);
+	for (const std::pair<K, std::vector<std::pair<T, T>>>& i : intervals)
+		for (const std::pair<T, T>& j : i.second) {
+			events.emplace_back(j.first, true, i.first);
+			events.emplace_back(j.second, false, i.first);
+		}
+	std::sort(events.begin(), events.end(), std::greater<>()); //reversed sort for pop_back()
+	//The previous event point.  Initializing to 0 is safe because the active
+	//set starts empty, so we won't emit a spurious interval.  Similarly, a loop
+	//epilogue is unnecessary because the active set is empty at the end.
+	T cur = 0;
+	//vector_ordered_map
+	tsl::ordered_map<std::vector<K>, std::vector<std::pair<T, T>>, detail::interval_agg_hasher,
+			std::equal_to<std::vector<K>>, std::allocator<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>>,
+			std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>>> result;
+	while (!events.empty()) {
+		T event_point = std::get<0>(events.back());
+		if (!active.empty()) {
+			//We don't retain sorted order during insertions and removals, so we
+			//need to sort here.  (If most event points only occur for one list
+			//of intervals, maintaining order might be faster.)
+			std::sort(active.begin(), active.end());
+			result[active].emplace_back(cur, event_point);
+		}
+		cur = event_point;
+
+		//Process all events at this point.
+		while (!events.empty() && std::get<0>(events.back()) == event_point) {
+			std::tuple<T, bool, K> e = events.back();
+			events.pop_back();
+			if (std::get<1>(e)) {
+				assert(std::find(active.begin(), active.end(), std::get<2>(e)) == active.end());
+				active.push_back(std::get<2>(e));
+			} else {
+				auto it = std::find(active.begin(), active.end(), std::get<2>(e));
+				assert(it != active.end());
+				std::iter_swap(it, active.end()-1);
+				active.pop_back();
+			}
+		}
+	}
+	return std::move(result).values_container();
 }
 
 #endif /* INTERVALS_HPP */
