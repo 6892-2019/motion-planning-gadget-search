@@ -30,27 +30,6 @@ pair<vector<pair<uint64_t, uint64_t>>, vector<pair<uint64_t, uint64_t>>> follow_
 	return {std::move(input_accum).finish(), std::move(output_accum).finish()};
 }
 
-/**
- * Finds required combines.
- * @return pairs of sets of right ids and the intervals of left ids needing to
- * be combined against them (i.e., backwards)
- */
-vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>> find_required_combines(
-		lmdb::env& env, lmdb::dbi& completions,
-		const vector<pair<uint64_t, uint64_t>>& candidates, const vector<uint64_t>& combine_rights) {
-	vector<pair<uint64_t, vector<pair<uint64_t, uint64_t>>>> intervals;
-	std::size_t event_count = 0;
-	{
-		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-		for (uint64_t r : combine_rights) {
-			intervals.emplace_back(r, filter_completion(env, txn, completions, fmt::format("combine-{}", r), candidates));
-			event_count += 2*intervals.back().second.size(); //not interval_size
-		}
-		txn.commit();
-	}
-	return interval_aggregate(intervals);
-}
-
 void ping_all_workers(WorkerManager& manager) {
 	struct PingGenerator : public WorkGenerator {
 		PingGenerator(std::size_t worker_count) : i(0), max(worker_count) {}
@@ -470,11 +449,26 @@ private:
 			.max_locations = complete_opts_.combine_max_left_locations,
 			.max_states = complete_opts_.combine_max_left_states
 		};
-		if (preds)
-			//Modifying unary_needs_ here is fine because predicates are
-			//completeness options also saved in the checkpoint.
-			apply_predicates(unary_needs_, preds);
-		combine_needs_ = find_required_combines(database_, completions_, unary_needs_, combine_rights_);
+
+		vector<pair<uint64_t, vector<pair<uint64_t, uint64_t>>>> intervals;
+		{
+			auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
+			if (preds)
+				//Modifying unary_needs_ here is fine because predicates are
+				//completeness options also saved in the checkpoint.
+				apply_predicates(txn, unary_needs_, preds);
+
+			for (std::size_t i = 0; i < combine_rights_.size(); ++i) {
+				uint64_t r = combine_rights_[i];
+				vector<pair<uint64_t, uint64_t>> undone = filter_completion(database_, txn,
+						completions_, fmt::format("combine-{}", r), unary_needs_);
+				vector<pair<uint64_t, uint64_t>> possible = intersect_location_predicate(txn, predicates_,
+						combine_left_locations_[i], std::move(undone));
+				intervals.emplace_back(r, std::move(possible));
+			}
+			txn.commit();
+		}
+		combine_needs_ = interval_aggregate(intervals);
 		auto [needy_lefts, needy_pairs] = combine_needs_sizes();
 		fmt::print("Found {} of {} eligible lefts ({} total candidates) needing combine ({} total pairs) in {}\n",
 				needy_lefts, interval_size(unary_needs_), total_candidates, needy_pairs, stopwatch.elapsed().hms());
@@ -824,11 +818,14 @@ private:
 		//this is the only such use we don't need to define a select_id_to_stats.
 		vector<pair<uint64_t, vector<std::byte>>> data = select_gadget_id_to_data(
 				database_, gadget_hashtable_, gadget_index_, combine_rights_);
-		unsigned int smallest_right = std::numeric_limits<unsigned int>::max();
+		//proj_compare
+		std::sort(data.begin(), data.end(), [](const auto& a, const auto& b) {
+			return a.first < b.first;
+		});
 		for (const pair<uint64_t, vector<std::byte>>& p : data)
-			smallest_right = std::min(smallest_right, encoding::locations(p.second.data()));
+			combine_left_locations_.emplace_back(complete_opts_.precision - encoding::locations(p.second.data()));
 		complete_opts_.combine_max_left_locations = std::min(complete_opts_.combine_max_left_locations,
-				complete_opts_.precision - smallest_right);
+				*std::max_element(combine_left_locations_.begin(), combine_left_locations_.end()));
 	}
 
 	/**
@@ -953,6 +950,10 @@ private:
 	unsigned int generation_;
 	unsigned int subgeneration_;
 	Phase phase_;
+
+	//don't know where this goes.  Initialized with combine_rights_, but not
+	//necessary for correctness.  see also combine_left_max_locations
+	vector<unsigned int> combine_left_locations_;
 
 	//These are options that cannot be changed when loading from a checkpoint
 	//(as opposed to, e.g., worker addresses).
