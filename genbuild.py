@@ -17,7 +17,7 @@ default_targets = ['debug', 'release']
 # flags that don't depend on the configuration
 global_flags = OrderedDict()
 global_flags['builddir'] = 'build' # significant to Ninja
-global_flags['modeflags'] = '-std=c++1z'
+global_flags['modeflags'] = '-std=c++2a'
 global_flags['warnflags'] = '-pedantic -Wall -Wextra -Wuninitialized -Winit-self -Wconversion -Wuseless-cast -Wlogical-op -Waggressive-loop-optimizations -Winvalid-pch -Wno-unused-parameter -Wduplicated-cond -Wnull-dereference -Wno-dangling-else -Wsuggest-override -fdiagnostics-color=always'
 global_flags['ldflags'] = '-fuse-ld=gold -Wl,--gc-sections -Wl,--gdb-index -u malloc -ljemalloc_pic -lc -lpthread -ldl'
 

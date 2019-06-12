@@ -23,7 +23,7 @@ namespace detail {
 
 class PackWriter {
 public:
-	PackWriter(Pack* first, Pack* last) : cur_(first), last_(last), first_(first), overflow_(false) {}
+	PackWriter(std::byte* first, std::byte* last) : cur_(first), last_(last), first_(first), overflow_(false) {}
 	PackWriter& write8(unsigned int value) {
 		assert((value & 0xFFU) == value);
 		writeBytes<1>(value);
@@ -77,7 +77,20 @@ public:
 		return *this;
 	}
 
-	PackWriter& seek(Pack* pos) {
+	static unsigned int varint_size(unsigned int value) {
+		if (value <= VARINT_ONE)
+			return 1;
+		else if (value <= (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE - 1)
+			return 2;
+		else if (value <= (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE - 1 + 65536)
+			return 3;
+		else if (value <= 16777215)
+			return 4;
+		else
+			return 5;
+	}
+
+	PackWriter& seek(std::byte* pos) {
 		assert(first_ <= pos);
 		if (!(pos < last_)) {
 			pos = last_;
@@ -86,7 +99,7 @@ public:
 		cur_ = pos;
 		return *this;
 	}
-	Pack* tell() const {return cur_;}
+	std::byte* tell() const {return cur_;}
 	bool overflow() const {return overflow_;}
 private:
 	template<unsigned int N>
@@ -103,16 +116,16 @@ private:
 		}
 		cur_ = std::copy_n(begin, count, cur_);
 	}
-	Pack* cur_;
-	Pack* const last_;
-	Pack* const first_;
+	std::byte* cur_;
+	std::byte* const last_;
+	std::byte* const first_;
 	bool overflow_; //set on attempt to write past last_
 };
 
 
 class PackReader {
 public:
-	PackReader(const Pack* first, const Pack* last) : cur_(first), last_(last), first_(first), overflow_(false) {}
+	PackReader(const std::byte* first, const std::byte* last) : cur_(first), last_(last), first_(first), overflow_(false) {}
 	unsigned int read8() {
 		return readBytes<1>();
 	}
@@ -156,12 +169,12 @@ public:
 		__builtin_unreachable();
 	}
 
-	PackReader& seek(Pack* pos) {
+	PackReader& seek(std::byte* pos) {
 		assert(first_ <= pos && pos < last_);
 		cur_ = pos;
 		return *this;
 	}
-	const Pack* tell() const {return cur_;}
+	const std::byte* tell() const {return cur_;}
 	bool overflow() const {return overflow_;}
 	bool eof() const {return cur_ == last_;}
 private:
@@ -187,9 +200,9 @@ private:
 		cur_ += N;
 		return value;
 	}
-	const Pack* cur_;
-	const Pack* const last_;
-	const Pack* const first_;
+	const std::byte* cur_;
+	const std::byte* const last_;
+	const std::byte* const first_;
 	bool overflow_; //set on attempt to read past last_
 };
 

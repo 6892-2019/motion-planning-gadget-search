@@ -26,6 +26,7 @@
         <in>bounded_queue-test.cpp</in>
         <in>circular_deque-test.cpp</in>
         <in>expr-test.cpp</in>
+        <in>intervals-test.cpp</in>
         <in>regex-test.cpp</in>
         <in>util-test.cpp</in>
         <in>util.cpp</in>
@@ -34,15 +35,26 @@
         <df name="driver">
           <in>precompiled-asio.cpp</in>
           <in>toggles-driver.cpp</in>
+          <in>worker-manager.cpp</in>
+          <in>worker-manager.hpp</in>
         </df>
         <df name="runner">
           <in>canonicalize.cpp</in>
+          <in>dump-gadget-mode.cpp</in>
+          <in>gadget-encoding.cpp</in>
+          <in>incoming-edges-mode.cpp</in>
+          <in>msgpack-mode.cpp</in>
           <in>ops.cpp</in>
+          <in>provenance.hpp</in>
+          <in>selsert-gadget-by-data.cpp</in>
+          <in>selsert-gadget-by-data.hpp</in>
+          <in>sync.cpp</in>
           <in>toggles-runner.cpp</in>
+          <in>update_predicates_mode.cpp</in>
         </df>
-        <in>canonicalize.cpp</in>
-        <in>database.cpp</in>
-        <in>database.hpp</in>
+        <in>anyprov.hpp</in>
+        <in>gadget-encoding-stats.cpp</in>
+        <in>gadget-encoding-stats.hpp</in>
         <in>gadgets.yaml</in>
         <in>rpc.cpp</in>
         <in>toggles-report.cpp</in>
@@ -61,6 +73,7 @@
       <in>expr.cpp</in>
       <in>hopcroft.cpp</in>
       <in>hopcroft.hpp</in>
+      <in>intervals.hpp</in>
       <in>ioutils.cpp</in>
       <in>maybe_owning_ptr.hpp</in>
       <in>natural_map.hpp</in>
@@ -196,6 +209,8 @@
       </item>
       <item path="src/hopcroft.hpp" ex="false" tool="3" flavor2="0">
       </item>
+      <item path="src/intervals.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/ioutils.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="0">
           <incDir>
@@ -270,17 +285,15 @@
       </item>
       <item path="src/test/expr-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/test/intervals-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="src/test/regex-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/util-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/util.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/canonicalize.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/database.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/database.hpp" ex="false" tool="3" flavor2="0">
+      <item path="src/toggles/anyprov.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/driver/precompiled-asio.cpp"
             ex="false"
@@ -292,6 +305,26 @@
             tool="1"
             flavor2="0">
       </item>
+      <item path="src/toggles/driver/worker-manager.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/driver/worker-manager.hpp"
+            ex="false"
+            tool="3"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/gadget-encoding-stats.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/gadget-encoding-stats.hpp"
+            ex="false"
+            tool="3"
+            flavor2="0">
+      </item>
       <item path="src/toggles/gadgets.yaml" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
@@ -301,9 +334,48 @@
             tool="1"
             flavor2="0">
       </item>
+      <item path="src/toggles/runner/dump-gadget-mode.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/gadget-encoding.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/incoming-edges-mode.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/msgpack-mode.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
       <item path="src/toggles/runner/ops.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/toggles/runner/provenance.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/toggles/runner/selsert-gadget-by-data.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/selsert-gadget-by-data.hpp"
+            ex="false"
+            tool="3"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/sync.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="src/toggles/runner/toggles-runner.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/update_predicates_mode.cpp"
             ex="false"
             tool="1"
             flavor2="0">

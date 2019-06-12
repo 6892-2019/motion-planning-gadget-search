@@ -1,8 +1,10 @@
 #include "precompiled.hpp"
 #include "toggles-shared.hpp"
+#include "anyprov.hpp"
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
-#include <pqxx/stream_from>
+#include "intervals.hpp"
+#include "tsl/ordered_set.h"
 
 using std::vector;
 using std::pair;
@@ -10,60 +12,17 @@ using std::uint8_t;
 using std::uint64_t;
 using namespace std::literals::string_view_literals;
 
-//grumble
-namespace pqxx {
-template<> struct string_traits<uint8_t> {
-	static constexpr const char* name() noexcept {return "uint8_t";}
-	static constexpr bool has_null() noexcept {return false;}
-	static bool is_null() {return false;}
-	[[noreturn]] static uint8_t null() {pqxx::internal::throw_null_conversion(name());}
-	static void from_string(const char s[], uint8_t& t) {
-		//We don't have the string length?!
-		unsigned int x;
-		string_traits<unsigned int>::from_string(s, x);
-		t = numeric_cast<uint8_t>(x);
-	}
-	static std::string to_string(uint8_t x) {
-		return std::to_string(x);
-	}
-};
-}
-
-enum class EdgeKind : unsigned char {
-	combine = 0, connect = 1, close = 2, mirror = 3, source = 4
-};
-std::string_view name_for_kind(EdgeKind kind) {
-	switch (kind) {
-		case EdgeKind::combine: return "combine";
-		case EdgeKind::connect: return "connect";
-		case EdgeKind::close: return "close";
-		case EdgeKind::mirror: return "mirror";
-		case EdgeKind::source: return "source";
-	}
-	throw std::logic_error(fmt::format("bad kind: {}", static_cast<unsigned int>(kind)));
-}
-template<>
-struct fmt::formatter<EdgeKind> : formatter<std::string_view> {
-	template<typename FormatContext>
-	auto format(const EdgeKind kind, FormatContext& ctx) {
-		return fmt::formatter<std::string_view>::format(name_for_kind(kind), ctx);
-	}
-};
-
-
 /**
  * SkinnyProv stores just enough information to get the actual edge later.  For
- * combines and connects that's the edge id (the primary key of the row); for
- * close and mirror it's the other end of the edge.  This saves memory at the
- * cost of having to fetch the edges (serially) when reporting a result.
- *
- * Storing the output in SkinnyProv lets us serialize the structure (for later
- * queries without the BFS from the database) but wastes some space because the
- * map will store another copy.
+ * connect, close and mirror edges, that's the other end of the edge; for
+ * combines, it's the left input.  For connects we have to search for the edge
+ * leading to the output; for combines we additionally have to search over all
+ * allowed right inputs.  In both cases, if there are many edges, it doesn't
+ * matter which we pick.
  */
 class SkinnyProv {
 public:
-	SkinnyProv(uint64_t output, uint64_t key, EdgeKind kind) : output_(output), key_(key), kind_(kind) {}
+	SkinnyProv(uint64_t output, uint64_t input, EdgeKind kind) : output_(output), input_(input), kind_(kind) {}
 	SkinnyProv(const SkinnyProv&) = default;
 	SkinnyProv(SkinnyProv&&) = default;
 	SkinnyProv& operator=(const SkinnyProv&) = default;
@@ -71,14 +30,14 @@ public:
 	uint64_t output() const {
 		return output_;
 	}
-	uint64_t key() const {
-		return key_;
+	uint64_t input() const {
+		return input_;
 	}
 	EdgeKind kind() const {
 		return kind_;
 	}
 private:
-	std::uint64_t output_, key_;
+	std::uint64_t output_, input_;
 	EdgeKind kind_; //TODO: put in the high bits of the other fields
 };
 bool operator<(const SkinnyProv& a, const SkinnyProv& b) {
@@ -91,133 +50,9 @@ bool operator<(const SkinnyProv& a, uint64_t b) {
 	return a.output() < b;
 }
 
-class AnyProv {
-public:
-	static AnyProv source(uint64_t output) {
-		return {EdgeKind::source, output, std::numeric_limits<uint64_t>::max(),
-				std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint8_t>::max(),
-				std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max(),
-				std::numeric_limits<uint8_t>::max()};
-	}
-	static AnyProv combine(uint64_t input1, uint64_t input2, uint64_t output1,
-			uint8_t splice, uint8_t rotation, uint8_t connectPoint,
-			uint8_t canonicalizePermutation) {
-		return {EdgeKind::combine, output1, input1, input2, splice, rotation, connectPoint, canonicalizePermutation};
-	}
-	static AnyProv combine(const pqxx::row& r) {
-		return combine(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint64_t>(),
-				r[3].as<uint8_t>(), r[4].as<uint8_t>(), r[5].as<uint8_t>(), r[6].as<uint8_t>());
-	}
-	static AnyProv connect(uint64_t input1, uint64_t output1,
-			uint8_t connectPoint, uint8_t canonicalizePermutation) {
-		return {EdgeKind::connect, output1, input1, std::numeric_limits<uint64_t>::max(),
-				std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max(),
-				connectPoint, canonicalizePermutation};
-	}
-	static AnyProv connect(const pqxx::row& r) {
-		return connect(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>(), r[3].as<uint8_t>());
-	}
-	static AnyProv close(uint64_t input1, uint64_t output1, uint8_t canonicalizePermutation) {
-		return {EdgeKind::close, output1, input1, std::numeric_limits<uint64_t>::max(),
-				std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max(),
-				std::numeric_limits<uint8_t>::max(), canonicalizePermutation};
-	}
-	static AnyProv close(const pqxx::row& r) {
-		return close(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
-	}
-	static AnyProv mirror(uint64_t input1, uint64_t output1, uint8_t canonicalizePermutation) {
-		return {EdgeKind::mirror, output1, input1, std::numeric_limits<uint64_t>::max(),
-				std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max(),
-				std::numeric_limits<uint8_t>::max(), canonicalizePermutation};
-	}
-	static AnyProv mirror(const pqxx::row& r) {
-		return mirror(r[0].as<uint64_t>(), r[1].as<uint64_t>(), r[2].as<uint8_t>());
-	}
+using EdgeCache = tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>;
 
-	EdgeKind kind() const {
-		return kind_;
-	}
-	uint64_t output() const {
-		return output1_;
-	}
-	uint64_t input1() const {
-		return input1_;
-	}
-	uint64_t input2() const {
-		assert(input2_ != std::numeric_limits<uint64_t>::max());
-		return input2_;
-	}
-	uint8_t splice() const {
-		assert(splice_ != std::numeric_limits<uint8_t>::max());
-		return splice_;
-	}
-	uint8_t rotation() const {
-		assert(rotation_ != std::numeric_limits<uint8_t>::max());
-		return rotation_;
-	}
-	uint8_t connectPoint() const {
-		assert(connectPoint_ != std::numeric_limits<uint8_t>::max());
-		return connectPoint_;
-	}
-	uint8_t canonicalizePermutation() const {
-		return canonicalizePermutation_;
-	}
-
-	vector<uint64_t> inputs() const {
-		//Returning a vector isn't great for perf, but is convenient.
-		vector<uint64_t> r;
-		if (input1_ != std::numeric_limits<uint64_t>::max())
-			r.push_back(input1_);
-		if (input2_ != std::numeric_limits<uint64_t>::max())
-			r.push_back(input2_);
-		return r;
-	}
-private:
-	AnyProv(EdgeKind kind, uint64_t output1, uint64_t input1, uint64_t input2,
-			uint8_t splice, uint8_t rotation, uint8_t connectPoint,
-			uint8_t canonicalizeRotation) : output1_(output1), input1_(input1),
-					input2_(input2), splice_(splice), rotation_(rotation),
-					connectPoint_(connectPoint), canonicalizePermutation_(canonicalizeRotation), kind_(kind) {}
-	std::uint64_t output1_, input1_, input2_;
-	std::uint8_t splice_, rotation_, connectPoint_;
-	std::uint8_t canonicalizePermutation_;
-	//TODO: steal two bits from one of the other fields, or encode using special values of unused fields
-	EdgeKind kind_;
-};
-
-template<>
-struct fmt::formatter<AnyProv> {
-	template<typename ParseContext>
-	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
-	template<typename FormatContext>
-	auto format(const AnyProv& p, FormatContext& ctx) {
-		switch (p.kind()) {
-			case EdgeKind::combine:
-				return fmt::format_to(ctx.out(), "{} = combine {} splice {:d} with {} rotate {:d} connect at {:d} @{:d}",
-						p.output(), p.input1(), p.splice(), p.input2(), p.rotation(),
-						p.connectPoint(), p.canonicalizePermutation());
-			case EdgeKind::connect:
-				return fmt::format_to(ctx.out(), "{} = connect {} at {:d} @{:d}",
-						p.output(), p.input1(), p.connectPoint(), p.canonicalizePermutation());
-			case EdgeKind::close:
-				return fmt::format_to(ctx.out(), "{} = close {} @{:d}",
-						p.output(), p.input1(), p.canonicalizePermutation());
-			case EdgeKind::mirror:
-				return fmt::format_to(ctx.out(), "{} = mirror {} @{:d}",
-						p.output(), p.input1(), p.canonicalizePermutation());
-			case EdgeKind::source:
-				return fmt::format_to(ctx.out(), "{} = source", p.output());
-			default:
-				//TODO: We'd like to dump the other members to help track down
-				//the corruption, but we'd hit the asserts in the methods.
-				//Figure out how friending a future full specialization works,
-				//then print the members directly.
-				return fmt::format_to(ctx.out(), "unknown AnyProv kind {}", static_cast<unsigned char>(p.kind()));
-		}
-	}
-};
-
-vector<AnyProv> toposort_provs(const tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& prov, uint64_t root) {
+vector<AnyProv> toposort_provs(const EdgeCache& prov, uint64_t root) {
 	tsl::hopscotch_map<uint64_t, uint64_t, farmhash_hash> needs;
 	tsl::hopscotch_map<uint64_t, vector<uint64_t>, farmhash_hash> releases;
 	vector<uint64_t> stack;
@@ -258,223 +93,6 @@ vector<AnyProv> toposort_provs(const tsl::hopscotch_map<uint64_t, AnyProv, farmh
 	return ret;
 }
 
-std::string build_insert_closedset_query(std::size_t count, unsigned int generation) {
-	vector<std::string> things;
-	for (std::size_t i = 1; i <= count; ++i)
-		things.push_back(fmt::format("(${}::int8, {}::int2)", i, generation));
-	return "insert into closedset (id, gen) values " + join(things, ", ");
-}
-
-std::string build_follow_combine_query(unsigned int generation_start, unsigned int next_generation) {
-	return fmt::format(
-			"with edges as (select distinct on(output1) * from combine_edges\n"
-			"  join closedset as c1 on c1.id = input1\n"
-			"  join closedset as c2 on c2.id = input2\n"
-			"  where (c1.gen >= {0} or c2.gen >= {0})\n"
-			"    and not exists (select 1 from closedset where closedset.id = output1)\n"
-			"),"
-			"ins as (insert into closedset(id, gen) select edges.output1, {1} from edges)\n"
-			//everything but the id
-			"select input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation from edges",
-			generation_start, next_generation);
-}
-
-std::string build_follow_connect_query(unsigned int subgeneration_start, unsigned int next_generation) {
-	return fmt::format(
-			"with edges as (select distinct on(output1) * from connect_edges join closedset on (\n"
-			"  closedset.id = input1 and\n"
-			"  gen = {0}\n"
-			"  and not exists (select 1 from closedset where closedset.id = output1 limit 1)\n"
-			")),\n"
-			"ins as (insert into closedset(id, gen) select edges.output1, {1} from edges)\n"
-			"select input1, output1, connect_location, canonicalize_rotation from edges",
-			subgeneration_start, next_generation);
-}
-
-std::string build_follow_close_query(unsigned int subgeneration_start) {
-	return fmt::format(
-			"with edges as (select distinct on(output1) * from close_edges join closedset on (\n"
-			"  id = input1\n"
-			"  and gen = {0}\n"
-			"  and not exists (select 1 from closedset where id = output1)\n"
-			")),\n"
-			"ins as (insert into closedset(id, gen) select edges.output1, {0} from edges)\n"
-			"select input1, output1, canonicalize_rotation from edges",
-			subgeneration_start);
-}
-
-std::string build_follow_mirror_query(unsigned int subgeneration_start) {
-	//select distinct doesn't just work here because of a/b symmetry
-	return fmt::format(
-			"with aedges as (select * from mirror_edges join closedset on (\n"
-			"  id = a\n"
-			"  and gen = {0}\n"
-			"  and not exists (select 1 from closedset where id = b)\n"
-			")),\n"
-			"bedges as (select * from mirror_edges join closedset on (\n"
-			"  id = b\n"
-			"  and gen = {0}\n"
-			"  and not exists (select 1 from closedset where id = a)\n"
-			")),\n"
-			"ains as (insert into closedset(id, gen) select aedges.b, {0} from aedges),\n"
-			"bins as (insert into closedset(id, gen) select bedges.a, {0} from bedges)\n"
-			"select a, b, canonicalize_rotation from aedges\n"
-			"union all\n"
-			"select b, a, canonicalize_rotation from bedges",
-			subgeneration_start);
-}
-
-std::string build_follow_combine_into_table_query(unsigned int generation_start) {
-	return fmt::format(
-			"create temporary table edges(output1, key) on commit drop as (\n"
-			"  select output1, min(combine_edges.id) from combine_edges\n"
-			"    join closedset as c1 on c1.id = input1\n"
-			"    join closedset as c2 on c2.id = input2\n"
-			"    where (c1.gen >= {0} or c2.gen >= {0})\n"
-			"      and not exists (select 1 from closedset where closedset.id = output1)\n"
-			"    group by output1\n"
-			")",
-			generation_start);
-}
-
-std::string build_follow_connect_into_table_query(unsigned int subgeneration_start) {
-	return fmt::format(
-			"create temporary table edges(output1, key) on commit drop as (\n"
-			"  select output1, min(connect_edges.id) from connect_edges join closedset on (\n"
-			"    closedset.id = input1 and\n"
-			"    gen = {0}\n"
-			"    and not exists (select 1 from closedset where closedset.id = output1 limit 1)\n"
-			"  )\n"
-			"  group by output1\n"
-			")\n",
-			subgeneration_start);
-}
-
-std::string build_follow_close_into_table_query(unsigned int subgeneration_start) {
-	return fmt::format(
-			"create temporary table edges(output1, key) on commit drop as (\n"
-			"  select output1, min(input1) from close_edges join closedset on (\n"
-			"    id = input1\n"
-			"    and gen = {0}\n"
-			"    and not exists (select 1 from closedset where id = output1)\n"
-			"  )\n"
-			"  group by output1\n"
-			")\n",
-			subgeneration_start);
-}
-
-std::string build_follow_mirror_into_table_query(unsigned int subgeneration_start) {
-	//select distinct doesn't just work here because of a/b symmetry
-	return fmt::format(
-			"create temporary table edges(output1, key) on commit drop as (\n"
-			"  select b, a from mirror_edges join closedset on (\n"
-			"    id = a\n"
-			"    and gen = {0}\n"
-			"    and not exists (select 1 from closedset where id = b)\n"
-			"  )\n"
-			"  union all\n"
-			"  select a, b from mirror_edges join closedset on (\n"
-			"    id = b\n"
-			"    and gen = {0}\n"
-			"    and not exists (select 1 from closedset where id = a)\n"
-			"  )\n"
-			")\n",
-			subgeneration_start);
-}
-
-std::string build_copy_edges_to_closedset_query(unsigned int next_generation) {
-	return fmt::format("insert into closedset(id, gen)\n"
-			"select output1, {0} from edges",
-			next_generation);
-}
-
-std::string build_get_combine_edges_by_id_immediate_query(const vector<uint64_t>& ids) {
-	vector<std::string> things;
-	things.reserve(ids.size());
-	for (uint64_t i : ids)
-		things.push_back(std::to_string(i));
-	return "select input1, input2, output1, splice, rotation, connect_location, canonicalize_rotation from combine_edges\n"
-			"where id in (" + join(things, ", ") + ")";
-}
-
-std::string build_get_connect_edges_by_id_immediate_query(const vector<uint64_t>& ids) {
-	vector<std::string> things;
-	things.reserve(ids.size());
-	for (uint64_t i : ids)
-		things.push_back(std::to_string(i));
-	return "select input1, output1, connect_location, canonicalize_rotation from connect_edges\n"
-			"where id in (" + join(things, ", ") + ")";
-}
-
-//A given gadget only closes to one other gadget, so the inputs uniquely identify the edges.
-std::string build_get_close_edges_immediate_query(const vector<uint64_t>& inputs) {
-	vector<std::string> things;
-	things.reserve(inputs.size());
-	for (uint64_t i : inputs)
-		things.push_back(std::to_string(i));
-	return "select input1, output1, canonicalize_rotation from close_edges\n"
-			"where input1 in (" + join(things, ", ") + ")";
-}
-
-std::string build_get_mirror_edges_immediate_query(const vector<SkinnyProv>& edges) {
-	vector<std::string> things;
-	things.reserve(edges.size());
-	for (const SkinnyProv& p : edges)
-		things.push_back(fmt::format("({}, {})", p.key(), p.output()));
-	//Mirror edges are canonicalized, but we care which direction is which (to
-	//prevent cycles in the edge cache).  So we'll ask for our edges to be
-	//returned with the extra information.
-	return "select v.input, v.output, canonicalize_rotation from (values " +
-			join(things, ", ") +
-			") as v(input, output) join mirror_edges on (" +
-			"  (a = v.input and b = v.output) or (b = v.input and a = v.output))";
-}
-
-std::size_t do_stuff(pqxx::connection& conn, tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& prov,
-		std::string query, AnyProv(*ctor)(const pqxx::row&), std::string_view op_name,
-		unsigned int generation, unsigned int subgeneration) {
-	Stopwatch stopwatch = Stopwatch::process();
-	ro_transaction trans(conn); //writing temp tables is fine
-	pqxx::result res = trans.exec(query);
-	std::size_t size = res.size();
-	for (const pqxx::row& r : res) {
-		AnyProv p = ctor(r);
-		auto iter_bool = prov.try_emplace(p.output(), p);
-		if (!iter_bool.second)
-			throw std::logic_error(fmt::format("conflict while {}:\n  {}\n  {}",
-					op_name, iter_bool.first->second, p));
-	}
-	trans.commit();
-	fmt::print("{} {}.{} found {} in {}, closed size {}\n", op_name,
-			generation, subgeneration, size, stopwatch.elapsed().hms(), prov.size());
-	return size;
-}
-
-std::size_t do_stuff_temptable(pqxx::connection& conn, std::vector<SkinnyProv>& curgen,
-		std::string query, EdgeKind kind, unsigned int next_generation,
-		unsigned int generation, unsigned int subgeneration) {
-	std::size_t prev_size = curgen.size();
-	Stopwatch stopwatch = Stopwatch::process();
-	//TODO: we're not readonly only because we run "create table as".  If we
-	//created the table once and repeatedly truncated it, we could be.
-	pqxx::transaction<pqxx::read_committed> trans(conn);
-	trans.exec(query); //make the table
-	trans.exec(build_copy_edges_to_closedset_query(next_generation));
-
-	pqxx::stream_from stream(trans, "edges");
-	std::pair<uint64_t, uint64_t> row;
-	while (stream >> row)
-		curgen.emplace_back(row.first, row.second, kind);
-	stream.complete();
-
-	trans.commit();
-	std::size_t new_size = curgen.size();
-	fmt::print("{} {}.{} found {} in {}, curgen size {}\n", name_for_kind(kind),
-			generation, subgeneration, new_size - prev_size, stopwatch.elapsed().hms(), curgen.size());
-	return new_size - prev_size;
-}
-
-
 SkinnyProv find_sp(const vector<vector<SkinnyProv>>& provs, uint64_t output) {
 	for (const vector<SkinnyProv>& prov : provs) {
 		auto lb = std::lower_bound(prov.begin(), prov.end(), output);
@@ -484,12 +102,29 @@ SkinnyProv find_sp(const vector<vector<SkinnyProv>>& provs, uint64_t output) {
 	throw std::logic_error(fmt::format("could not find SkinnyProv for {}", output));
 }
 
-void fill_cache(pqxx::connection& conn,
-		tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& edge_cache,
-		const vector<uint64_t>& roots, const vector<vector<SkinnyProv>>& prov) {
-	vector<uint64_t> frontier(roots.begin(), roots.end());
-	vector<uint64_t> combine_batch, connect_batch, close_batch;
-	vector<SkinnyProv> mirror_batch;
+template<class Edge>
+std::optional<Edge> search_for_edge(lmdb::txn& txn, lmdb::dbi& edges, uint64_t input, uint64_t output) {
+	std::optional<Edge> ret;
+	visit_edges<Edge>(txn, edges, input, [&ret, output](uint64_t, const Edge& e) {
+		if (e.output == output) {
+			ret = e;
+			return VisitEdgeResult::quit;
+		}
+		return VisitEdgeResult::proceed;
+	});
+	return ret;
+}
+
+void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges,
+		lmdb::dbi& connect_edges, lmdb::dbi& close_edges, lmdb::dbi& mirror_edges,
+		const vector<pair<uint64_t, uint64_t>>& roots, const vector<vector<SkinnyProv>>& prov,
+		EdgeCache& edge_cache) {
+	//This batching logic was quite helpful for postgres, but is probably less
+	//helpful with lmdb because queries are local.
+	vector<uint64_t> frontier = interval_inflate(roots.begin(), roots.end());
+	//We don't need to know the other end for close and mirror lookups, but it
+	//avoids special-casing in search_for_edge and adds some error-checking.
+	vector<SkinnyProv> combine_batch, connect_batch, close_batch, mirror_batch;
 	while (!frontier.empty()) {
 		combine_batch.clear();
 		connect_batch.clear();
@@ -501,17 +136,17 @@ void fill_cache(pqxx::connection& conn,
 				continue;
 			SkinnyProv p = find_sp(prov, frontier[i]);
 			switch (p.kind()) {
-				case EdgeKind::combine: combine_batch.push_back(p.key()); break;
-				case EdgeKind::connect: connect_batch.push_back(p.key()); break;
+				case EdgeKind::combine: combine_batch.push_back(p); break;
+				case EdgeKind::connect: connect_batch.push_back(p); break;
 				//We "look through" close and mirror edges so we terminate in
 				//fewer iterations.
 				case EdgeKind::close:
-					close_batch.push_back(p.key());
-					frontier.push_back(p.key());
+					close_batch.push_back(p);
+					frontier.push_back(p.input());
 					break;
 				case EdgeKind::mirror:
 					mirror_batch.push_back(p);
-					frontier.push_back(p.key());
+					frontier.push_back(p.input());
 					break;
 				case EdgeKind::source:
 					//nothing to do
@@ -522,29 +157,39 @@ void fill_cache(pqxx::connection& conn,
 
 		if (combine_batch.empty() || connect_batch.empty() || close_batch.empty() || mirror_batch.empty()) {
 			vector<AnyProv> edges;
-			ro_transaction trans(conn);
-
-			if (!combine_batch.empty()) {
-				pqxx::result rows = trans.exec(build_get_combine_edges_by_id_immediate_query(combine_batch));
-				for (const pqxx::row& r : rows)
-					edges.push_back(AnyProv::combine(r));
+			for (const SkinnyProv& p : combine_batch) {
+				//We have to search all the combine databases.
+				std::optional<CombineEdge> e;
+				uint64_t input2 = 0;
+				for (pair<uint64_t, lmdb::dbi>& db : combine_edges) {
+					e = search_for_edge<CombineEdge>(txn, db.second, p.input(), p.output());
+					if (e) {
+						input2 = db.first;
+						break;
+					}
+				}
+				if (!e)
+					throw std::logic_error(fmt::format("no combine edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::combine(p.input(), input2, *e));
 			}
-			if (!connect_batch.empty()) {
-				pqxx::result rows = trans.exec(build_get_connect_edges_by_id_immediate_query(connect_batch));
-				for (const pqxx::row& r : rows)
-					edges.push_back(AnyProv::connect(r));
+			for (const SkinnyProv& p : connect_batch) {
+				std::optional<ConnectEdge> e = search_for_edge<ConnectEdge>(txn, connect_edges, p.input(), p.output());
+				if (!e)
+					throw std::logic_error(fmt::format("no connect edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::connect(p.input(), *e));
 			}
-			if (!close_batch.empty()) {
-				pqxx::result rows = trans.exec(build_get_close_edges_immediate_query(close_batch));
-				for (const pqxx::row& r : rows)
-					edges.push_back(AnyProv::close(r));
+			for (const SkinnyProv& p : close_batch) {
+				std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, close_edges, p.input(), p.output());
+				if (!e)
+					throw std::logic_error(fmt::format("no close edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::close(p.input(), *e));
 			}
-			if (!mirror_batch.empty()) {
-				pqxx::result rows = trans.exec(build_get_mirror_edges_immediate_query(mirror_batch));
-				for (const pqxx::row& r : rows)
-					edges.push_back(AnyProv::mirror(r));
+			for (const SkinnyProv& p : mirror_batch) {
+				std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, mirror_edges, p.input(), p.output());
+				if (!e)
+					throw std::logic_error(fmt::format("no mirror edge for {}/{}", p.input(), p.output()));
+				edges.push_back(AnyProv::mirror(p.input(), *e));
 			}
-			trans.commit();
 
 			for (const AnyProv& p : edges) {
 				auto pair = edge_cache.try_emplace(p.output(), p);
@@ -555,202 +200,329 @@ void fill_cache(pqxx::connection& conn,
 				for (uint64_t i : inputs)
 					frontier.push_back(i);
 			}
+			std::sort(frontier.begin(), frontier.end());
+			frontier.erase(std::unique(frontier.begin(), frontier.end()), frontier.end());
 		}
 	}
 }
-void fill_cache(pqxx::connection& conn,
-		tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>& edge_cache,
-		const vector<uint64_t>& roots, const vector<SkinnyProv>& prov) {
-	vector<vector<SkinnyProv>> nested_prov;
-	nested_prov.emplace_back(prov);
-	fill_cache(conn, edge_cache, roots, nested_prov);
+
+struct TargetStuff {
+	vector<pair<uint64_t, uint64_t>> intervals;
+	EdgeCache edge_cache;
+	tsl::hopscotch_map<uint64_t, vector<std::string>, farmhash_hash> inv_names;
+};
+
+TargetStuff target_stuff(lmdb::env& env) {
+	//Our targets are always the full set of named gadgets.  Because there are a
+	//bounded number of edges there, we eagerly fill the target edge cache.  We
+	//also build an id -> names map and the target set for later intersection
+	//checking.
+	EdgeCache edge_cache;
+	//We'll have many repeated strings we could try to share, maybe by indices
+	//into another vector?
+	tsl::hopscotch_map<uint64_t, vector<std::string>, farmhash_hash> inv_names;
+
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	lmdb::dbi names = lmdb::dbi::open(txn, "names");
+	{
+		lmdb::cursor cur = lmdb::cursor::open(txn, names);
+		std::string_view key, value;
+		if (!cur.get(key, value, MDB_FIRST))
+			throw std::logic_error("no names?");
+		do {
+			//TODO: this was copied from follow_edges; see also unmarshal_reinterpret
+			if (value.size() == 0 || value.size() % sizeof(uint64_t) != 0)
+				throw std::logic_error(fmt::format("name key {} has value length {} (not a multiple of {})",
+						//We want the dbi's name here, but I don't see how to get it.
+						//The message won't distinguish close and mirror.
+						key, value.size(), sizeof(uint64_t)));
+			const uint64_t* first = reinterpret_cast<const uint64_t*>(value.data());
+			const uint64_t* last = first + value.size() / sizeof(uint64_t);
+			for (const uint64_t* e = first; e != last; ++e)
+				inv_names[*e].push_back(std::string(key));
+		} while (cur.get(key, value, MDB_NEXT));
+	}
+	vector<uint64_t> stable_iteration;
+	for (auto it = inv_names.begin(); it != inv_names.end(); ++it) {
+		stable_iteration.push_back(it->first);
+		edge_cache.insert_or_assign(it->first, AnyProv::source(it->first));
+		std::sort(it.value().begin(), it.value().end());
+	}
+
+	lmdb::dbi close_edges = lmdb::dbi::open(txn, "edges-close");
+	for (uint64_t i : stable_iteration)
+		visit_edges<SimpleEdge>(txn, close_edges, i, [&](uint64_t input, const SimpleEdge& e) {
+			assert(input == i);
+			if (!edge_cache.count(e.output))
+				edge_cache.insert_or_assign(e.output, AnyProv::close(i, e));
+			return VisitEdgeResult::proceed;
+		});
+
+	stable_iteration.clear();
+	for (auto it = edge_cache.begin(); it != edge_cache.end(); ++it)
+		stable_iteration.push_back(it->first);
+	lmdb::dbi mirror_edges = lmdb::dbi::open(txn, "edges-mirror");
+	for (uint64_t i : stable_iteration)
+		visit_edges<SimpleEdge>(txn, mirror_edges, i, [&](uint64_t input, const SimpleEdge& e) {
+			assert(input == i);
+			if (!edge_cache.count(e.output))
+				edge_cache.insert_or_assign(e.output, AnyProv::mirror(i, e));
+			return VisitEdgeResult::proceed;
+		});
+
+	txn.commit();
+	interval_accumulator<uint64_t> accum(512);
+	for (auto it = edge_cache.begin(); it != edge_cache.end(); ++it)
+		accum(it->first);
+	return {std::move(accum).finish(), std::move(edge_cache), std::move(inv_names)};
 }
 
-int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-lpqxx -lpq'}
-	std::string_view db_user = "jbosboom", db_pass = "", db_host = "127.0.0.1",
-			db_port = "5432", db_name = "togglesearch";
-	bool multiplayer = false;
-	std::vector<std::string_view> source_specs, target_specs;
-	std::vector<std::string_view>* active_spec = &source_specs;
+//find all the possible combine rights, but don't open any databases
+vector<pair<uint64_t, uint64_t>> find_all_combine_rights(lmdb::env& env) {
+	const std::string_view edges_combine_prefix = "edges-combine-"sv;
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	lmdb::dbi main = lmdb::dbi::open(txn, nullptr);
+	lmdb::cursor cur = lmdb::cursor::open(txn, main);
+	std::string_view key = edges_combine_prefix;
+	if (!cur.get(key, MDB_SET_RANGE))
+		throw std::logic_error("no combine edge subdatabases?");
+
+	interval_accumulator<uint64_t> accum(64);
+	//no starts_with yet
+	while (key.compare(0, edges_combine_prefix.size(), edges_combine_prefix) == 0) {
+		key.remove_prefix(edges_combine_prefix.size());
+		accum(from_string<uint64_t>(key));
+		if (!cur.get(key, MDB_NEXT)) break;
+	}
+	txn.commit();
+	return std::move(accum).finish();
+}
+
+int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-llmdb'}
+	std::string_view db_path = "jbosboom";
+	bool multiplayer = false, combine_all = false;
+	std::vector<std::string_view> source_specs;
 	for (int i = 1; i < argc; ++i) {
-		if (argv[i] == "--db-user"sv)
-			db_user = argv[++i];
-		else if (argv[i] == "--db-pass"sv)
-			db_pass = argv[++i];
-		else if (argv[i] == "--db-host"sv)
-			db_host = argv[++i];
-		else if (argv[i] == "--db-port"sv)
-			db_port = argv[++i];
-		else if (argv[i] == "--db-name"sv)
-			db_name = argv[++i];
+		if (argv[i] == "--db-path"sv)
+			db_path = argv[++i];
 		else if (argv[i] == "--multiplayer"sv)
 			multiplayer = true;
-		else if (argv[i] == "--"sv)
-			if (active_spec == &target_specs) {
-				fmt::print("ERROR: passed -- twice?\n");
-				std::exit(1);
-			} else
-				active_spec = &target_specs;
+		else if (argv[i] == "--combine-all"sv)
+			//Combine against any reachable gadget, not just the initial set.
+			//When we reach a new gadget that's been used as the right operand
+			//of a combine, we'll try all gadgets in the closed set on the left,
+			//and any newly-reached gadgets will be processed as normal.  This
+			//breaks the generational aspect of the search -- paths with the
+			//fewest combines are no longer assured.
+			combine_all = true;
 		else
-			active_spec->emplace_back(argv[i]);
+			source_specs.emplace_back(argv[i]);
 	}
 
 	GadgetSet source_set = parse_gid_specs(source_specs);
 	fmt::print("Source spec: {}\n", format_gadget_set(source_set));
-	GadgetSet target_set = parse_gid_specs(target_specs);
-	fmt::print("Target spec: {}\n", format_gadget_set(target_set));
 
-	std::string connect_str = format_connect_string(db_user, db_pass, db_host, db_port, db_name);
-	pqxx::connection conn(connect_str);
+	lmdb::env env = lmdb::env::create();
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(std::string(db_path).c_str(), MDB_RDONLY | MDB_NORDAHEAD);
+	lmdb::dbi edges_connect, edges_close, edges_mirror, completions;
+	vector<pair<uint64_t, lmdb::dbi>> edges_combine; //lazily-initialized later when we know what we're using
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		edges_connect = lmdb::dbi::open(txn, "edges-connect");
+		edges_close = lmdb::dbi::open(txn, "edges-close");
+		edges_mirror = lmdb::dbi::open(txn, "edges-mirror");
+		completions = lmdb::dbi::open(txn, "completions");
+		txn.commit();
+	}
+
+	TargetStuff target = target_stuff(env);
+	const vector<pair<uint64_t, uint64_t>> possible_combine_rights = find_all_combine_rights(env);
 
 	//Minimal provenance information.  prov.back() is the current generation,
 	//the only vector being appended to.  The other generations are kept sorted
-	//for binary-search-based lookups.
+	//for binary-search-based lookups.  There's no correspondence between the
+	//various vectors and generations; we're mostly just avoiding sorting all
+	//the data over and over, on the assumption that we're printing tracebacks
+	//infrequently.
 	vector<vector<SkinnyProv>> prov;
-	vector<SkinnyProv> target_prov; //only one generation here
 	prov.emplace_back();
 	//We store most edges as SkinnyProv, only getting the full edge data when
 	//we're going to print a derivation.
-	tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash> edge_cache, target_edge_cache;
-	vector<uint64_t> source_ids, target_ids;
-	unsigned int generation_start = 0, subgeneration_start = 0;
+	EdgeCache edge_cache;
+	//The closed set and intervals of gadgets pending processing.  We always
+	//close and mirror if anything is awaiting such, then connect, and only if
+	//neither is possible do we combine.  (This is nearly equivalent to the
+	//generational search done by the driver, except that we connect before the
+	//first combine while the driver doesn't.)
+	vector<pair<uint64_t, uint64_t>> closed, awaiting_combine, awaiting_connect, awaiting_closemirror;
+	//For logging purposes only -- not actually controlling anything.
+	unsigned int generation = 0, subgeneration = 0;
 
-	auto close_and_mirror = [&conn, multiplayer](vector<SkinnyProv>& prov,
-			unsigned int subgeneration_start, unsigned int generation, unsigned int subgeneration) {
-		if (!multiplayer)
-			do_stuff_temptable(conn, prov, build_follow_close_into_table_query(subgeneration_start),
-					EdgeKind::close, subgeneration_start, generation, subgeneration);
-		do_stuff_temptable(conn, prov, build_follow_mirror_into_table_query(subgeneration_start),
-				EdgeKind::mirror, subgeneration_start, generation, subgeneration);
+	vector<uint64_t> source_ids = collect_initial_gadget_set(env, source_set);
+	std::sort(source_ids.begin(), source_ids.end());
+	for (uint64_t i : source_ids)
+		edge_cache.try_emplace(i, AnyProv::source(i));
+	closed = maximal_intervals(source_ids.begin(), source_ids.end());
+	awaiting_closemirror = awaiting_connect = awaiting_combine = closed;
+
+	auto print_trace = [&target](const vector<AnyProv>& trace) {
+		for (const AnyProv& p : trace) {
+			if (p.kind() == EdgeKind::source) {
+				auto it = target.inv_names.find(p.output());
+				if (it == target.inv_names.end())
+					fmt::print("{} <names not found?>\n", p);
+				else
+					fmt::print("{} {}\n", p, target.inv_names.at(p.output()));
+			} else
+				fmt::print("{}\n", p);
+		}
 	};
 
-	for (unsigned int generation = 0; ; generation++) {
-		if (generation == 0) {
-			source_ids = collect_initial_gadget_set(conn, source_set);
-			std::sort(source_ids.begin(), source_ids.end());
-			for (uint64_t i : source_ids)
-				edge_cache.try_emplace(i, AnyProv::source(i));
-			vector<uint64_t> target_ids = collect_initial_gadget_set(conn, target_set);
-			//What we really want is a std::set_difference that works like std::unique
-			//(moving the subtracted elements to the end of the vector), but in lieu of
-			//doing that properly, we're abusing the edge cache.
-			target_ids.erase(std::remove_if(target_ids.begin(), target_ids.end(),
-					[&edge_cache](const auto& i){return edge_cache.count(i);}), target_ids.end());
-			if (target_ids.empty()) {
-				fmt::print("ERROR: all target ids were specified in source ids, exiting\n");
-				std::exit(3);
+	auto record_closed = [&](lmdb::txn& txn, const vector<pair<uint64_t, uint64_t>>& discovered) {
+		closed = interval_union(closed.begin(), closed.end(), discovered.cbegin(), discovered.cend());
+
+		vector<pair<uint64_t, uint64_t>> found = interval_intersection(
+				target.intervals.cbegin(), target.intervals.cend(), discovered.cbegin(), discovered.cend());
+		if (!found.empty()) {
+			std::sort(prov.back().begin(), prov.back().end());
+			fill_cache(txn, edges_combine, edges_connect, edges_close, edges_mirror, found, prov, edge_cache);
+			for (const pair<uint64_t, uint64_t>& p : found)
+				for (uint64_t root = p.first; root < p.second; ++root) {
+					fmt::print("Target trace:\n");
+					print_trace(toposort_provs(target.edge_cache, root));
+					fmt::print("Source trace:\n");
+					print_trace(toposort_provs(edge_cache, root));
+				}
+		}
+
+		//TODO: if combine_all, check for newly-reachable combine rights; put
+		//the new rights in the pool and in a special queue for full closed set
+		//processing.
+	};
+
+	while (!awaiting_closemirror.empty() || !awaiting_connect.empty() || !awaiting_combine.empty()) {
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		if (!awaiting_closemirror.empty()) {
+			if (!multiplayer) {
+				vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
+						env, txn, completions, "close", awaiting_closemirror);
+				//vector_ordered_set (could use deque here, I guess)
+				tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
+				visit_edges<SimpleEdge>(txn, edges_close, possible, [&](uint64_t input, const SimpleEdge& e) {
+					if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
+						prov.back().emplace_back(e.output, input, EdgeKind::close);
+					return VisitEdgeResult::proceed;
+				});
+				vector<uint64_t> novel = std::move(already_added).values_container();
+				std::sort(novel.begin(), novel.end());
+				vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+				if (!discovered.empty()) { //avoid copying if nothing found (especially for close)
+					record_closed(txn, discovered);
+					//Outputs of close get mirrored, so put them in closemirror immediately.
+					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
+							discovered.begin(), discovered.end());
+					//They also get connected and combined.
+					awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
+							discovered.cbegin(), discovered.cend());
+					awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
+							discovered.cbegin(), discovered.cend());
+				}
 			}
-			std::sort(target_ids.begin(), target_ids.end());
-			for (uint64_t i : target_ids)
-				target_edge_cache.try_emplace(i, AnyProv::source(i));
 
-			{
-				transaction trans(conn);
-				trans.exec("create temporary table closedset ("
-						//can't add "references gadgets" because temp tables can't reference perm tables
-						"id bigint primary key not null,"
-						"gen smallint not null"
-						") on commit preserve rows");
-				//We want to close and mirror the targets in the same way as sources
-				//so we can recognize when we've build a closed/mirrored gadget.
-				trans.exec_params(build_insert_closedset_query(target_ids.size(), 0),
-						pqxx::prepare::make_dynamic_params(target_ids));
-				trans.commit();
+			vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
+						env, txn, completions, "mirror", awaiting_closemirror);
+			//vector_ordered_set (could use deque here, I guess)
+			tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
+			visit_edges<SimpleEdge>(txn, edges_mirror, possible, [&](uint64_t input, const SimpleEdge& e) {
+				if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
+					prov.back().emplace_back(e.output, input, EdgeKind::mirror);
+				return VisitEdgeResult::proceed;
+			});
+			vector<uint64_t> novel = std::move(already_added).values_container();
+			std::sort(novel.begin(), novel.end());
+			vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+			if (!discovered.empty()) { //avoid copying if nothing found (should be uncommon for mirror...)
+				record_closed(txn, discovered);
+				awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
+						discovered.cbegin(), discovered.cend());
+				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
+						discovered.cbegin(), discovered.cend());
 			}
 
-			//do_stuff starts its own transaction so we have to do this outside.
-			close_and_mirror(target_prov, 0, 0, 0);
-			std::sort(target_prov.begin(), target_prov.end());
+			awaiting_closemirror.clear();
 
-			transaction trans(conn);
-			//Delete the target stuff and insert the sources.
-			trans.exec("delete from closedset");
-			trans.exec_params(build_insert_closedset_query(source_ids.size(), 0),
-					pqxx::prepare::make_dynamic_params(source_ids));
-			trans.commit();
-		} else {
-//			std::size_t discovered = do_stuff(conn, prov,
-//					build_follow_combine_query(generation_start, subgeneration_start+1),
-//					AnyProv::combine, "combining", generation, 0);
-			std::size_t discovered = do_stuff_temptable(conn, prov.back(),
-					build_follow_combine_into_table_query(generation_start),
-					EdgeKind::combine, subgeneration_start+1, generation, 0);
-			if (!discovered)
-				break;
-			generation_start = subgeneration_start = subgeneration_start+1;
-		}
-
-		close_and_mirror(prov.back(), subgeneration_start, generation, 0);
-
-		for (unsigned int subgeneration = 1; ; subgeneration++) {
-//			std::size_t discovered = do_stuff(conn, prov,
-//					build_follow_connect_query(subgeneration_start, subgeneration_start+1),
-//					AnyProv::connect, "connecting", generation, subgeneration);
-			std::size_t discovered = do_stuff_temptable(conn, prov.back(),
-					build_follow_connect_into_table_query(subgeneration_start), EdgeKind::connect,
-					subgeneration_start+1, generation, subgeneration);
-			if (!discovered)
-				break;
-			++subgeneration_start;
-			close_and_mirror(prov.back(), subgeneration_start, generation, subgeneration);
-		}
-
-		{
-			transaction trans(conn);
-			trans.exec("analyze closedset");
-			trans.commit();
-		}
-
-		auto get_names = [&](uint64_t id) -> std::string {
-			ro_transaction trans(conn);
-			pqxx::result res = trans.exec_params("select name from names where gadget_id = $1 and "
-					"not exists (select 1 from names as n2 where n2.gadget_id != $1 and n2.name = names.name) order by name", id);
-			vector<std::string_view> names;
-			for (const pqxx::row& r : res)
-				names.push_back(r[0].c_str());
-			return join(names, ", ");
-		};
-
-		std::sort(prov.back().begin(), prov.back().end());
-		using prov_iterator = vector<SkinnyProv>::const_iterator;
-		vector<pair<uint64_t, uint64_t>> source_target_pairs;
-		vector<uint64_t> source_roots, target_roots;
-		for (prov_iterator target = target_prov.begin(); target != target_prov.end(); ++target) {
-			prov_iterator lb = std::lower_bound(prov.back().cbegin(), prov.back().cend(), *target);
-			if (*lb == *target) {
-				source_target_pairs.emplace_back(lb->output(), target->output());
-				source_roots.emplace_back(lb->output());
-				target_roots.emplace_back(target->output());
+			if (edges_combine.empty()) {
+				//Fix the initial combine rights pool as anything reachable in
+				//one closemirror from the initial gadgets and having combine edges.
+				vector<pair<uint64_t, uint64_t>> rights = interval_intersection(closed.cbegin(), closed.cend(),
+						possible_combine_rights.cbegin(), possible_combine_rights.cend());
+				if (rights.empty())
+					throw std::runtime_error(fmt::format("no closemirror-reachable combine rights? possible rights are {}", possible_combine_rights));
+				for (const pair<uint64_t, uint64_t>& p : rights)
+					for (uint64_t r = p.first; r < p.second; ++r)
+						edges_combine.emplace_back(r, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", r).c_str()));
+				//TODO: make tuple comparator a utility function (proj_compare)
+				std::sort(edges_combine.begin(), edges_combine.end(), [](const auto& a, const auto& b) {
+					return std::get<0>(a) < std::get<0>(b);
+				});
 			}
-		}
-
-		if (!source_target_pairs.empty()) {
-			fill_cache(conn, edge_cache, source_roots, prov);
-			fill_cache(conn, target_edge_cache, target_roots, target_prov);
-
-			for (const pair<uint64_t, uint64_t>& p : source_target_pairs) {
-				vector<AnyProv> target_trace = toposort_provs(target_edge_cache, p.second);
-				fmt::print("Target trace:\n");
-					for (const AnyProv& p : target_trace) {
-						if (p.kind() == EdgeKind::source)
-							fmt::print("{} {}\n", p, get_names(p.output()));
-						else
-							fmt::print("{}\n", p);
-					}
-				vector<AnyProv> source_trace = toposort_provs(edge_cache, p.first);
-				fmt::print("Source trace:\n");
-					for (const AnyProv& p : source_trace)
-						if (p.kind() == EdgeKind::source)
-							fmt::print("{} {}\n", p, get_names(p.output()));
-						else
-							fmt::print("{}\n", p);
-
-				//Don't report finding it again in the future.
-				target_prov.erase(std::lower_bound(target_prov.begin(), target_prov.end(), p.second));
+		} else if (!awaiting_connect.empty()) {
+			vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
+					env, txn, completions, "connect", awaiting_connect);
+			//vector_ordered_set (could use deque here, I guess)
+			tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
+			visit_edges<ConnectEdge>(txn, edges_connect, possible, [&](uint64_t input, const ConnectEdge& e) {
+				if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
+					prov.back().emplace_back(e.output, input, EdgeKind::connect);
+				return VisitEdgeResult::proceed;
+			});
+			vector<uint64_t> novel = std::move(already_added).values_container();
+			std::sort(novel.begin(), novel.end());
+			vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+			if (!discovered.empty()) {
+				record_closed(txn, discovered);
+				awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
+						discovered.begin(), discovered.end());
+				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
+						discovered.cbegin(), discovered.cend());
 			}
+			awaiting_connect = std::move(discovered); //i.e., if empty, clear
+		} else if (!awaiting_combine.empty()) {
+			vector<pair<uint64_t, uint64_t>> awaiting_combine_next;
+			for (pair<uint64_t, lmdb::dbi>& right : edges_combine) {
+				vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
+					env, txn, completions, fmt::format("combine-{}", right.first), awaiting_combine);
+				//vector_ordered_set (could use deque here, I guess)
+				tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
+				visit_edges<CombineEdge>(txn, right.second, possible, [&](uint64_t input, const CombineEdge& e) {
+					if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
+						prov.back().emplace_back(e.output, input, EdgeKind::combine);
+					return VisitEdgeResult::proceed;
+				});
+				vector<uint64_t> novel = std::move(already_added).values_container();
+				std::sort(novel.begin(), novel.end());
+				vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+				if (!discovered.empty()) {
+					record_closed(txn, discovered);
+					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
+							discovered.begin(), discovered.end());
+					awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
+							discovered.cbegin(), discovered.cend());
+					awaiting_combine_next = interval_union(awaiting_combine_next.begin(), awaiting_combine_next.end(),
+							discovered.cbegin(), discovered.cend());
+				}
+			}
+			awaiting_combine = std::move(awaiting_combine_next);
+		} else
+			throw std::logic_error("can't happen: nothing to do?");
+		txn.commit();
+		if (!prov.empty()) {
+			std::sort(prov.back().begin(), prov.back().end());
+			prov.emplace_back();
 		}
-
-		prov.emplace_back();
 	}
+
 	return 0;
 }

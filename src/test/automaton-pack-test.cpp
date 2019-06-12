@@ -27,6 +27,17 @@ TEST_CASE("AutomatonTest_VarintRoundtrip") {
 	}
 }
 
+TEST_CASE("AutomatonTest_VarintSize") {
+	for (unsigned int i = 0; i < 70000; ++i) {
+		std::array<std::byte, 8> data;
+		std::fill(data.begin(), data.end(), std::byte{0});
+
+		detail::PackWriter writer(data.begin(), data.end());
+		writer.writeVarint(i);
+		CHECK_EQ(detail::PackWriter::varint_size(i), writer.tell() - data.begin());
+	}
+}
+
 namespace {
 void test_pack(WorkingAutomaton& a) {
 	a.canonicalize();
