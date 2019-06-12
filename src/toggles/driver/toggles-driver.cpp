@@ -482,7 +482,7 @@ private:
 			Stopwatch stopwatch = Stopwatch::process();
 			auto [needy_lefts, needy_pairs] = combine_needs_sizes();
 			if (needy_pairs / runtime_opts_.combine_pairs_per_task < runtime_opts_.combine_task_batch_threshold) {
-				DatabaseOperationStatistics stats = do_combine_operation(combine_needs_);
+				DatabaseOperationStatistics stats = do_combine_operation();
 				fmt::print("Combine operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
@@ -742,25 +742,30 @@ private:
 		return overall_stats;
 	}
 
-	DatabaseOperationStatistics do_combine_operation(const vector<pair<vector<uint64_t>, vector<pair<uint64_t, uint64_t>>>>& operands) {
-		assert(!operands.empty());
+	DatabaseOperationStatistics do_combine_operation() {
+		assert(!combine_needs_.empty());
 		std::uint32_t seqno = 0;
-		std::size_t right_index = 0, left_index = 0;
-		vector<vector<pair<uint64_t, uint64_t>>> chunks;
+		std::size_t outer_index = 0, inner_index = 0;
+		auto make_chunks = [&]() {
+			return interval_chunk(combine_needs_[outer_index].second.cbegin(), combine_needs_[outer_index].second.cend(),
+				std::max<std::uint64_t>(runtime_opts_.combine_pairs_per_task / combine_needs_[outer_index].first.size(), 1));
+		};
+		vector<vector<pair<uint64_t, uint64_t>>> chunks = make_chunks();
 		DatabaseOperationStatistics overall_stats = {};
 		bool error_happened = false;
 		workers_->run([&](simple_buffer& buffer) {
 			if (error_happened) return false; //stop generating work, but let existing issued work finish
-			if (!(right_index < operands.size())) return false;
-			if (!(left_index < chunks.size())) {
-				chunks = interval_chunk(operands[right_index].second.cbegin(), operands[right_index].second.cend(),
-						runtime_opts_.combine_pairs_per_task);
-				left_index = 0;
-			}
-			pack_call(buffer, seqno++, "combine-db", chunks[left_index++], operands[right_index].first,
+			if (!(outer_index < combine_needs_.size())) return false;
+			pack_call(buffer, seqno++, "combine-db", chunks[inner_index++], combine_needs_[outer_index].first,
 					complete_opts_.precision, complete_opts_.combine_max_left_states);
-			if (!(left_index < chunks.size()))
-				++right_index;
+			if (!(inner_index < chunks.size())) {
+				inner_index = 0;
+				++outer_index;
+				if (outer_index < combine_needs_.size())
+					chunks = make_chunks();
+				else
+					vector<vector<pair<uint64_t, uint64_t>>> release_memory(std::move(chunks));
+			}
 			return true;
 		}, [&](simple_buffer& buffer) {
 			error_happened |= process_operation_response(buffer, overall_stats);
