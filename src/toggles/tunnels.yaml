@@ -1,0 +1,59 @@
+directed-crumbler:
+  dedges: [[0, 0, 1, 1]]
+crumbler:
+  dedges: [[0, 0, 1, 1], [0, 1, 0, 1]]
+one-way-crumbler: # primary direction crumbles
+  dedges: [[0, 0, 1, 1], [0, 1, 0, 0]]
+directed-lock:
+  dedges: [[0, 0, 1, 0]]
+  empty-states: [1]
+lock:
+  uedges: [[0, 0, 1, 0]]
+  empty-states: [1]
+directed-semi-tripwire:
+  dedges: [[0, 0, 1, 1], [1, 0, 1, 1]]
+directed-tripwire:
+  dedges: [[0, 0, 1, 1], [1, 0, 1, 0]]
+locked-toggle:
+  dedges: [[0, 0, 1, 0], [1, 1, 0, 1]]
+semi-toggle:
+  dedges: [[0, 0, 1, 1], [1, 1, 0, 1]]
+toggle:
+  uedges: [[0, 0, 1, 1]]
+anti-lock:
+  uedges: [[0, 0, 1, 0]]
+  dedges: [[1, 0, 1, 1]]
+reverse-half-crumbler:
+  dedges: [[0, 1, 0, 0], [0, 0, 1, 1], [1, 0, 1, 1]]
+half-crumbler:
+  dedges: [[0, 0, 1, 0], [0, 1, 0, 1], [1, 0, 1, 1]]
+bidirectional-half-crumbler:
+  dedges: [[0, 0, 1, 1], [0, 1, 0, 1], [1, 0, 1, 1]]
+generator: # states flipped from diagram so 0 is top component
+  uedges: [[1, 0, 1, 1]]
+  dedges: [[0, 0, 1, 1]]
+one-way-self-toggle:
+  dedges: [[0, 0, 1, 1], [0, 1, 0, 0], [1, 0, 1, 0]]
+toggle-self-toggle:
+  dedges: [[0, 0, 1, 0]]
+  uedges: [[0, 1, 0, 1]]
+self-toggle:
+  dedges: [[0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 1]]
+quarter-tripwire: # primary direction trips
+  dedges: [[0, 1, 0, 0], [0, 0, 1, 1]]
+  uedges: [[1, 0, 1, 1]]
+one-way-tripwire: # primary direction trips
+  dedges: [[0, 1, 0, 0], [0, 0, 1, 1], [1, 0, 1, 0], [1, 1, 0, 1]]
+semi-tripwire: # trips from state 0
+  dedges: [[0, 0, 1, 1], [0, 1, 0, 1]]
+  uedges: [[1, 0, 1, 1]]
+toggle-tripwire:
+  dedges: [[0, 1, 0, 0], [1, 0, 1, 1]]
+  uedges: [[0, 0, 1, 1]]
+three-quarter-tripwire:
+  dedges: [[0, 0, 1, 1], [1, 1, 0, 1]]
+  uedges: [[0, 1, 0, 1]]
+tripwire:
+  uedges: [[0, 0, 1, 1], [0, 1, 0, 1]]
+
