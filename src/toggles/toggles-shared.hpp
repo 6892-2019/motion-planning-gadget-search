@@ -209,7 +209,7 @@ struct formatter<CombineEdge> {
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
 	auto format(const CombineEdge& e, FormatContext& ctx) {
-		return format_to(ctx.begin(), "[{}, {}, {}, {}, {}]",
+		return format_to(ctx.out(), "[{}, {}, {}, {}, {}]",
 				e.output, e.splice, e.rotation, e.connectPoint, e.canonicalizePermutation);
 	}
 };
@@ -220,7 +220,7 @@ struct formatter<ConnectEdge> {
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
 	auto format(const ConnectEdge& e, FormatContext& ctx) {
-		return format_to(ctx.begin(), "[{}, {}, {}]",
+		return format_to(ctx.out(), "[{}, {}, {}]",
 				e.output, e.connectPoint, e.canonicalizePermutation);
 	}
 };
@@ -231,7 +231,7 @@ struct formatter<SimpleEdge> {
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
 	auto format(const SimpleEdge& e, FormatContext& ctx) {
-		return format_to(ctx.begin(), "[{}, {}]", e.output, e.canonicalizePermutation);
+		return format_to(ctx.out(), "[{}, {}]", e.output, e.canonicalizePermutation);
 	}
 };
 } //namespace fmt

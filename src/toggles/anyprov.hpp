@@ -24,10 +24,10 @@ std::string_view name_for_kind(EdgeKind kind) {
 	throw std::logic_error(fmt::format("bad kind: {}", static_cast<unsigned int>(kind)));
 }
 template<>
-struct fmt::formatter<EdgeKind> : formatter<std::string_view> {
+struct fmt::formatter<EdgeKind> : formatter<string_view> {
 	template<typename FormatContext>
 	auto format(const EdgeKind kind, FormatContext& ctx) {
-		return fmt::formatter<std::string_view>::format(name_for_kind(kind), ctx);
+		return fmt::formatter<string_view>::format(name_for_kind(kind), ctx);
 	}
 };
 
