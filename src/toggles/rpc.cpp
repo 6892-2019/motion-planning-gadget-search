@@ -63,7 +63,7 @@ void read_buffer(simple_buffer& buf, const std::string& filename) {
 simple_buffer read_buffer(const std::string& filename) {
 	simple_buffer b;
 	read_buffer(b, filename);
-	return std::move(b);
+	return b;
 }
 
 

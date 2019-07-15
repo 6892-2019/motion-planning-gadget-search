@@ -110,18 +110,18 @@ private:
 	}
 
 	void dispatch_connect(std::size_t index) {
-		sockets_[index].async_connect(workers_[index], [=](const boost::system::error_code& ec){on_connect(index, ec);});
+		sockets_[index].async_connect(workers_[index], [=, this](const boost::system::error_code& ec){on_connect(index, ec);});
 	}
 	void dispatch_write(std::size_t index) {
 		asio::async_write(sockets_[index], asio::const_buffer(buffers_[index].data(), buffers_[index].size()),
-				[=](const boost::system::error_code& ec, std::size_t bytes){after_write(index, ec, bytes);});
+				[=, this](const boost::system::error_code& ec, std::size_t bytes){after_write(index, ec, bytes);});
 	}
 	void dispatch_read(std::size_t index) {
 		auto& buf = buffers_[index];
 		asio::async_read(sockets_[index],
 				//asio's buffer view starts after the existing data, if any
 				asio::mutable_buffer(reinterpret_cast<char*>(buf.data()) + buf.size(), buf.capacity() - buf.size()),
-				[=](const boost::system::error_code& ec, std::size_t bytes){after_read(index, ec, bytes);});
+				[=, this](const boost::system::error_code& ec, std::size_t bytes){after_read(index, ec, bytes);});
 	}
 	/**
 	 * Closes a socket, ignoring errors we don't care about.  (There's an

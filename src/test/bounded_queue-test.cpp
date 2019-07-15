@@ -24,11 +24,11 @@ TEST_CASE("BoundedQueueTest_TrivialTwoThreads") {
 	bounded_queue<int> queue(5);
 	CHECK_EQ(queue.capacity(), 5);
 	//these are actually synchronous because the returned future's dtor blocks
-	std::async(std::launch::async, [&]{queue.put(0);});
-	std::async(std::launch::async, [&]{queue.put(1);});
-	std::async(std::launch::async, [&]{queue.put(2);});
-	std::async(std::launch::async, [&]{queue.put(3);});
-	std::async(std::launch::async, [&]{queue.put(4);});
+	{ auto f = std::async(std::launch::async, [&]{queue.put(0);}); }
+	{ auto f = std::async(std::launch::async, [&]{queue.put(1);}); }
+	{ auto f = std::async(std::launch::async, [&]{queue.put(2);}); }
+	{ auto f = std::async(std::launch::async, [&]{queue.put(3);}); }
+	{ auto f = std::async(std::launch::async, [&]{queue.put(4);}); }
 	CHECK_EQ(queue.size(), 5);
 	CHECK_EQ(queue.take(), 0);
 	CHECK_EQ(queue.take(), 1);
