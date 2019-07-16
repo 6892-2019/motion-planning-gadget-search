@@ -6,6 +6,7 @@
 #include "intervals.hpp"
 #include <jemalloc/jemalloc.h>
 #include <regex>
+#include <future>
 
 using std::vector;
 using std::pair;
@@ -314,6 +315,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> write_interval_list_union(
 struct PredicateDemand {
 	uint64_t beginInclusive, endExclusive;
 	vector<unsigned int> locations, states;
+	std::size_t size() const {return endExclusive - beginInclusive;}
 };
 PredicateDemand update_SL_predicates_discover(lmdb::env& env, lmdb::dbi& predicates,
 		lmdb::dbi& gadget_index, uint64_t valid_before) {
@@ -362,9 +364,10 @@ PredicateDemand update_SL_predicates_discover(lmdb::env& env, lmdb::dbi& predica
 const std::size_t update_SL_predicates_basecase_batch_size = 10000;
 struct PredicateUpdateResult {
 	vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> locations, states;
-	void merge(PredicateUpdateResult&& other) {
+	PredicateUpdateResult& merge(PredicateUpdateResult&& other) {
 		locations = merge0(std::move(locations), std::move(other.locations));
 		states = merge0(std::move(states), std::move(other.states));
+		return *this;
 	}
 	vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> merge0(
 			const vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> us,
@@ -497,17 +500,67 @@ bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t
 	txn.commit();
 	return updated;
 }
+
+PredicateUpdateResult update_SL_predicates_parallel_merge(vector<PredicateUpdateResult>::iterator first,
+		vector<PredicateUpdateResult>::iterator last, unsigned int threads) {
+	std::size_t size = std::distance(first, last);
+	if (size == 1)
+		return std::move(*first);
+	if (size == 2)
+		return std::move(*first).merge(std::move(*(first+1)));
+
+	auto midpoint = first + size/2;
+	if (threads > 1) {
+		unsigned int right_threads = threads/2;
+		std::future<PredicateUpdateResult> right = std::async(std::launch::async, [=](){
+			return update_SL_predicates_parallel_merge(midpoint, last, right_threads);
+		});
+		PredicateUpdateResult left = update_SL_predicates_parallel_merge(first, midpoint, threads - right_threads);
+		return left.merge(right.get());
+	} else {
+		PredicateUpdateResult left = update_SL_predicates_parallel_merge(first, midpoint, 1),
+				right = update_SL_predicates_parallel_merge(midpoint, last, 1);
+		return left.merge(std::move(right));
+	}
+}
 }//anonymous namespace
 
 //update SL predicates through given id (default max) using N threads (or using given executor)
 bool update_SL_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, uint64_t valid_before, unsigned int threads) {
 	PredicateDemand demand = update_SL_predicates_discover(env, predicates, gadget_index, valid_before);
-	if (demand.endExclusive <= demand.beginInclusive) return false;
+	if (demand.size() <= 0) return false;
 
-	//TODO: fork threads for large updates
-	PredicateUpdateResult result = update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, demand);
-	return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
+	if (threads <= 1 || demand.size() < 4*update_SL_predicates_basecase_batch_size) {
+		PredicateUpdateResult result = update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, demand);
+		return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
+	} else {
+		vector<pair<uint64_t, uint64_t>> demanded_interval = {{demand.beginInclusive, demand.endExclusive}};
+		//TODO: We could avoid a bunch of allocations by replacing this abuse of
+		//interval_chunk with explicit base/offset addressing (taking care to
+		//special-case the last chunk).
+		auto chunks = interval_chunk(demanded_interval.begin(), demanded_interval.end(), update_SL_predicates_basecase_batch_size);
+		vector<PredicateUpdateResult> results_to_merge(chunks.size());
+		std::atomic<std::size_t> task_index_dispenser(0);
+
+		vector<std::future<void>> futures;
+		for (unsigned int i = 0; i < threads && i < chunks.size(); ++i)
+			futures.push_back(std::async(std::launch::async, [&]() {
+				PredicateDemand task = demand;
+				for (std::size_t index = task_index_dispenser++; index < chunks.size(); index = task_index_dispenser++) {
+					assert(chunks[index].size() == 1);
+					task.beginInclusive = chunks[index][0].first;
+					task.endExclusive = chunks[index][0].second;
+					results_to_merge[index] = update_SL_predicates_basecase(env, predicates,
+							gadget_hashtable, gadget_index, task);
+				}
+			}));
+		for (std::size_t i = 0; i < futures.size(); ++i)
+			futures[i].wait();
+
+		PredicateUpdateResult result = update_SL_predicates_parallel_merge(results_to_merge.begin(), results_to_merge.end(), threads);
+		return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
+	}
 }
 
 //create and update new state predicate to current validity using N threads

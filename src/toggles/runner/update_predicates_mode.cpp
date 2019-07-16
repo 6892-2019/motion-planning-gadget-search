@@ -133,7 +133,8 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 	if (update) {
 		Stopwatch stopwatch = Stopwatch::process();
 		//maybe should return the number of gadgets added to the predicates for reporting?
-		if (update_SL_predicates(env, predicates, gadget_hashtable, gadget_index))
+		if (update_SL_predicates(env, predicates, gadget_hashtable, gadget_index,
+				std::numeric_limits<std::uint64_t>::max(), num_threads))
 			fmt::print("updated predicates in {}\n", stopwatch.elapsed().hms());
 		else
 			fmt::print("predicates already up-to-date\n");
