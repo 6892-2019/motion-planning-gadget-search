@@ -248,11 +248,12 @@ private:
  * are saved in checkpoints.
  */
 struct CompletenessOptions {
-	unsigned int precision;
-	unsigned int combine_max_left_locations; //computed from precision if not specified
-	unsigned int combine_max_left_states;
-	unsigned int connect_max_states;
-	bool multiplayer;
+	unsigned int precision = 8;
+	//computed from precision if not specified
+	unsigned int combine_max_left_locations = std::numeric_limits<unsigned int>::max();
+	unsigned int combine_max_left_states = std::numeric_limits<unsigned int>::max();
+	unsigned int connect_max_states = std::numeric_limits<unsigned int>::max();
+	bool multiplayer = false;
 };
 
 /**
@@ -263,8 +264,8 @@ struct RuntimeOptions {
 	/**
 	 * The number of left-right pairs in each combine task.
 	 */
-	std::size_t combine_pairs_per_task;
-	std::size_t connect_gadgets_per_task, close_gadgets_per_task, mirror_gadgets_per_task;
+	std::size_t combine_pairs_per_task = 5000;
+	std::size_t connect_gadgets_per_task = 5000, close_gadgets_per_task = 5000, mirror_gadgets_per_task = 5000;
 	/**
 	 * When allowing batch operation, the number of tasks required to trigger
 	 * writing tasks and suspending.  Below this threshold the tasks will be run
@@ -273,17 +274,19 @@ struct RuntimeOptions {
 	 *
 	 * When not in batch mode, this is max(), so batching will never be invoked.
 	 */
-	std::size_t combine_task_batch_threshold, connect_task_batch_threshold,
-			close_task_batch_threshold, mirror_task_batch_threshold;
+	std::size_t combine_task_batch_threshold = std::numeric_limits<unsigned int>::max(),
+			connect_task_batch_threshold = std::numeric_limits<unsigned int>::max(),
+			close_task_batch_threshold = std::numeric_limits<unsigned int>::max(),
+			mirror_task_batch_threshold = std::numeric_limits<unsigned int>::max();
 	/**
 	 * The max number of threads to use for threaded database operations.
 	 */
-	unsigned int db_threads;
+	unsigned int db_threads = 1;
 	/**
 	 * The directory to write batch tasks into.
 	 */
 	std::string batch_task_directory;
-	unsigned int stop_after_gen, stop_after_subgen;
+	unsigned int stop_after_gen = std::numeric_limits<unsigned int>::max(), stop_after_subgen = std::numeric_limits<unsigned int>::max();
 };
 
 class Search {
@@ -987,20 +990,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	std::vector<std::string> worker_addrs; //or @foo for response files
 	std::vector<std::string_view> gid_specs;
 	CompletenessOptions completeness_opts;
-	completeness_opts.precision = 8;
-	completeness_opts.combine_max_left_locations = std::numeric_limits<unsigned int>::max(); //no limit
-	completeness_opts.combine_max_left_states = std::numeric_limits<unsigned int>::max(); //no limit
-	completeness_opts.connect_max_states = std::numeric_limits<unsigned int>::max(); //no limit
-	completeness_opts.multiplayer = false;
 	RuntimeOptions runtime_opts;
-	runtime_opts.combine_pairs_per_task = 5000;
-	runtime_opts.connect_gadgets_per_task = runtime_opts.close_gadgets_per_task
-			= runtime_opts.mirror_gadgets_per_task = 5000;
-	runtime_opts.combine_task_batch_threshold = runtime_opts.connect_task_batch_threshold
-			= runtime_opts.close_task_batch_threshold = runtime_opts.mirror_task_batch_threshold
-			= std::numeric_limits<std::size_t>::max();
-	runtime_opts.db_threads = 1;
-	runtime_opts.stop_after_gen = runtime_opts.stop_after_subgen = std::numeric_limits<unsigned int>::max();
 	for (int i = 1; i < argc; ++i) {
 		if (argv[i] == "--db-path"sv)
 			db_path = argv[++i];
