@@ -254,6 +254,7 @@ struct CompletenessOptions {
 	unsigned int combine_max_left_states = std::numeric_limits<unsigned int>::max();
 	unsigned int connect_max_states = std::numeric_limits<unsigned int>::max();
 	bool multiplayer = false;
+	bool follow_mirror = true;
 };
 
 /**
@@ -592,7 +593,8 @@ private:
 	}
 
 	Control follow_mirror() {
-		follow_unary_simple(&follow_edges<SimpleEdge>, edges_mirror_, state_.subgeneration(), "mirror");
+		if (complete_opts_.follow_mirror)
+			follow_unary_simple(&follow_edges<SimpleEdge>, edges_mirror_, state_.subgeneration(), "mirror");
 
 		std::string_view step_type = subgeneration_ == 0 ? "combine"sv : "connect"sv;
 		Stopwatch::Result elapsed = subgeneration_stopwatch_.elapsed();
@@ -1015,6 +1017,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			completeness_opts.combine_max_left_states = to_uint(argv[++i]);
 		else if (argv[i] == "--connect-max-states"sv)
 			completeness_opts.connect_max_states = to_uint(argv[++i]);
+		else if (argv[i] == "--no-follow-mirror"sv)
+			completeness_opts.follow_mirror = false;
 
 		else if (argv[i] == "--gadgets-per-task"sv)
 			runtime_opts.combine_pairs_per_task = runtime_opts.connect_gadgets_per_task
