@@ -22,7 +22,13 @@ using namespace std::literals::string_view_literals;
  */
 class SkinnyProv {
 public:
-	SkinnyProv(uint64_t output, uint64_t input, EdgeKind kind) : output_(output), input_(input), kind_(kind) {}
+	SkinnyProv(uint64_t output, uint64_t input, EdgeKind kind) : output_(output),
+			input_(input | (static_cast<uint64_t>(kind) << 56)) {
+		//We should never get this high, but just in case, don't silently get
+		//the wrong result.  (We could use just the highest 3 bits.)
+		if (input > 0x00FFFFFFFFFFFFFF) [[unlikely]]
+			throw std::runtime_error("input gadget id too large");
+	}
 	SkinnyProv(const SkinnyProv&) = default;
 	SkinnyProv(SkinnyProv&&) = default;
 	SkinnyProv& operator=(const SkinnyProv&) = default;
@@ -31,14 +37,15 @@ public:
 		return output_;
 	}
 	uint64_t input() const {
-		return input_;
+		return input_ & 0x00FFFFFFFFFFFFFF;
 	}
 	EdgeKind kind() const {
-		return kind_;
+		return EdgeKind{numeric_cast<unsigned char>((input_ & 0xFF00000000000000) >> 56)};
 	}
 private:
+	//The EdgeKind is stored in the high byte of input_, because we only check
+	//the input when we've found something.
 	std::uint64_t output_, input_;
-	EdgeKind kind_; //TODO: put in the high bits of the other fields
 };
 bool operator<(const SkinnyProv& a, const SkinnyProv& b) {
 	return a.output() < b.output();
