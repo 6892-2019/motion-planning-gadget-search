@@ -87,6 +87,7 @@
       <in>stopwatch.cpp</in>
       <in>stopwatch.hpp</in>
       <in>stringutils.cpp</in>
+      <in>transform_reduce.hpp</in>
       <in>worker.cpp</in>
     </df>
     <logicalFolder name="ExternalFiles"
@@ -385,6 +386,8 @@
       <item path="src/toggles/toggles-shared.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/toggles-shared.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/transform_reduce.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/worker.cpp" ex="false" tool="1" flavor2="0">
       </item>
