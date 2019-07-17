@@ -4,6 +4,7 @@
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
 #include "intervals.hpp"
+#include "transform_reduce.hpp"
 #include "tsl/ordered_set.h"
 
 using std::vector;
@@ -305,9 +306,65 @@ vector<pair<uint64_t, uint64_t>> find_all_combine_rights(lmdb::env& env) {
 	return std::move(accum).finish();
 }
 
+struct EdgeVisitor {
+	EdgeKind kind;
+	const vector<pair<uint64_t, uint64_t>>* closed;
+	vector<SkinnyProv> followed;
+	//TODO: don't care if this is ordered_set or some other set
+	//vector_ordered_set (could use deque here, I guess)
+	tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
+	template<class Edge>
+	VisitEdgeResult operator()(uint64_t input, const Edge& e) {
+		if (!interval_contains(*closed, e.output) && already_added.insert(e.output).second)
+			followed.emplace_back(e.output, input, kind);
+		return VisitEdgeResult::proceed;
+	}
+};
+
+struct merge_unique_vectors {
+template<typename T>
+vector<T> operator()(vector<T>&& left, vector<T>&& right) const {
+	vector<T> result;
+	merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(result));
+	return result;
+}
+};
+
+vector<pair<uint64_t, uint64_t>> build_output_intervals(const vector<SkinnyProv>& provs, unsigned int num_threads) {
+	vector<pair<std::size_t, std::size_t>> intervalize_tasks;
+	for (std::size_t i = 0; i < provs.size(); i += 30000)
+		intervalize_tasks.emplace_back(i, std::min(i + 30000, provs.size()));
+	return transform_reduce(std::move(intervalize_tasks), num_threads, [&provs](pair<std::size_t, std::size_t> p) {
+		interval_accumulator<uint64_t> accum(512);
+		for (std::size_t i = p.first; i < p.second; ++i)
+			accum(provs[i].output());
+		return std::move(accum).finish();
+	}, [](vector<pair<uint64_t, uint64_t>> left, vector<pair<uint64_t, uint64_t>> right) {
+		return interval_union(left.begin(), left.end(), right.begin(), right.end());
+	});
+}
+
+template<class Edge>
+pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_edges(
+		lmdb::env& env, lmdb::dbi& edge_db, EdgeKind kind, const vector<pair<uint64_t, uint64_t>>& possible,
+		const vector<pair<uint64_t, uint64_t>>& closed, unsigned int num_threads) {
+	auto chunks = interval_chunk(possible.begin(), possible.end(), 10000);
+	vector<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		EdgeVisitor visitor = {.kind = kind, .closed = &closed, .followed = {}, .already_added = {}};
+		visit_edges<Edge>(txn, edge_db, chunk, visitor);
+		txn.commit();
+		std::sort(visitor.followed.begin(), visitor.followed.end());
+		return std::move(visitor.followed);
+	}, merge_unique_vectors());
+	auto discovered = build_output_intervals(provs, num_threads);
+	return {std::move(provs), std::move(discovered)};
+}
+
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-llmdb'}
 	std::string_view db_path = "jbosboom";
 	bool multiplayer = false, combine_all = false;
+	unsigned int num_threads = 1;
 	std::vector<std::string_view> source_specs;
 	for (int i = 1; i < argc; ++i) {
 		if (argv[i] == "--db-path"sv)
@@ -322,6 +379,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			//breaks the generational aspect of the search -- paths with the
 			//fewest combines are no longer assured.
 			combine_all = true;
+		else if (argv[i] == "--db-threads"sv || argv[i] == "--num-threads"sv || argv[i] == "--threads"sv)
+			num_threads = to_uint(argv[++i]);
 		else
 			source_specs.emplace_back(argv[i]);
 	}
@@ -347,12 +406,10 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	TargetStuff target = target_stuff(env);
 	const vector<pair<uint64_t, uint64_t>> possible_combine_rights = find_all_combine_rights(env);
 
-	//Minimal provenance information.  prov.back() is the current generation,
-	//the only vector being appended to.  The other generations are kept sorted
-	//for binary-search-based lookups.  There's no correspondence between the
-	//various vectors and generations; we're mostly just avoiding sorting all
-	//the data over and over, on the assumption that we're printing tracebacks
-	//infrequently.
+	//Minimal provenance information.  All vectors are sorted.  There's no
+	//correspondence between the various vectors and generations; we're mostly
+	//just avoiding sorting all the data over and over, on the assumption that
+	//we're printing tracebacks infrequently.
 	vector<vector<SkinnyProv>> prov;
 	prov.emplace_back();
 	//We store most edges as SkinnyProv, only getting the full edge data when
@@ -387,14 +444,16 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		}
 	};
 
-	auto record_closed = [&](lmdb::txn& txn, const vector<pair<uint64_t, uint64_t>>& discovered) {
+	auto record_closed = [&](const vector<pair<uint64_t, uint64_t>>& discovered) {
 		closed = interval_union(closed.begin(), closed.end(), discovered.cbegin(), discovered.cend());
 
 		vector<pair<uint64_t, uint64_t>> found = interval_intersection(
 				target.intervals.cbegin(), target.intervals.cend(), discovered.cbegin(), discovered.cend());
 		if (!found.empty()) {
-			std::sort(prov.back().begin(), prov.back().end());
+			lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 			fill_cache(txn, edges_combine, edges_connect, edges_close, edges_mirror, found, prov, edge_cache);
+			txn.commit();
+
 			for (const pair<uint64_t, uint64_t>& p : found)
 				for (uint64_t root = p.first; root < p.second; ++root) {
 					fmt::print("Target trace:\n");
@@ -409,24 +468,22 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		//processing.
 	};
 
-	while (!awaiting_closemirror.empty() || !awaiting_connect.empty() || !awaiting_combine.empty()) {
+	auto discover_whats_possible = [&](std::string_view kind, vector<pair<uint64_t, uint64_t>>& intervals) {
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		vector<pair<uint64_t, uint64_t>> possible = intersect_completion(env, txn, completions, kind, intervals);
+		txn.commit();
+		return possible;
+	};
+
+	while (!awaiting_closemirror.empty() || !awaiting_connect.empty() || !awaiting_combine.empty()) {
 		if (!awaiting_closemirror.empty()) {
 			if (!multiplayer) {
-				vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
-						env, txn, completions, "close", awaiting_closemirror);
-				//vector_ordered_set (could use deque here, I guess)
-				tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
-				visit_edges<SimpleEdge>(txn, edges_close, possible, [&](uint64_t input, const SimpleEdge& e) {
-					if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
-						prov.back().emplace_back(e.output, input, EdgeKind::close);
-					return VisitEdgeResult::proceed;
-				});
-				vector<uint64_t> novel = std::move(already_added).values_container();
-				std::sort(novel.begin(), novel.end());
-				vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("close", awaiting_closemirror);
+				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_close, EdgeKind::close, possible, closed, num_threads);
+				if (!provs.empty())
+						prov.push_back(std::move(provs));
 				if (!discovered.empty()) { //avoid copying if nothing found (especially for close)
-					record_closed(txn, discovered);
+					record_closed(discovered);
 					//Outputs of close get mirrored, so put them in closemirror immediately.
 					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
 							discovered.begin(), discovered.end());
@@ -438,20 +495,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				}
 			}
 
-			vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
-						env, txn, completions, "mirror", awaiting_closemirror);
-			//vector_ordered_set (could use deque here, I guess)
-			tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
-			visit_edges<SimpleEdge>(txn, edges_mirror, possible, [&](uint64_t input, const SimpleEdge& e) {
-				if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
-					prov.back().emplace_back(e.output, input, EdgeKind::mirror);
-				return VisitEdgeResult::proceed;
-			});
-			vector<uint64_t> novel = std::move(already_added).values_container();
-			std::sort(novel.begin(), novel.end());
-			vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("mirror", awaiting_closemirror);
+			auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_mirror, EdgeKind::mirror, possible, closed, num_threads);
+			if (!provs.empty())
+				prov.push_back(std::move(provs));
 			if (!discovered.empty()) { //avoid copying if nothing found (should be uncommon for mirror...)
-				record_closed(txn, discovered);
+				record_closed(discovered);
 				awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
 						discovered.cbegin(), discovered.cend());
 				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
@@ -467,29 +516,24 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 						possible_combine_rights.cbegin(), possible_combine_rights.cend());
 				if (rights.empty())
 					throw std::runtime_error(fmt::format("no closemirror-reachable combine rights? possible rights are {}", possible_combine_rights));
-				for (const pair<uint64_t, uint64_t>& p : rights)
+				for (const pair<uint64_t, uint64_t>& p : rights) {
+					auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 					for (uint64_t r = p.first; r < p.second; ++r)
 						edges_combine.emplace_back(r, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", r).c_str()));
+					txn.commit();
+				}
 				//TODO: make tuple comparator a utility function (proj_compare)
 				std::sort(edges_combine.begin(), edges_combine.end(), [](const auto& a, const auto& b) {
 					return std::get<0>(a) < std::get<0>(b);
 				});
 			}
 		} else if (!awaiting_connect.empty()) {
-			vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
-					env, txn, completions, "connect", awaiting_connect);
-			//vector_ordered_set (could use deque here, I guess)
-			tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
-			visit_edges<ConnectEdge>(txn, edges_connect, possible, [&](uint64_t input, const ConnectEdge& e) {
-				if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
-					prov.back().emplace_back(e.output, input, EdgeKind::connect);
-				return VisitEdgeResult::proceed;
-			});
-			vector<uint64_t> novel = std::move(already_added).values_container();
-			std::sort(novel.begin(), novel.end());
-			vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("connect", awaiting_connect);
+			auto [provs, discovered] = discover_through_edges<ConnectEdge>(env, edges_connect, EdgeKind::connect, possible, closed, num_threads);
+			if (!provs.empty())
+				prov.push_back(std::move(provs));
 			if (!discovered.empty()) {
-				record_closed(txn, discovered);
+				record_closed(discovered);
 				awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
 						discovered.begin(), discovered.end());
 				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
@@ -499,20 +543,13 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		} else if (!awaiting_combine.empty()) {
 			vector<pair<uint64_t, uint64_t>> awaiting_combine_next;
 			for (pair<uint64_t, lmdb::dbi>& right : edges_combine) {
-				vector<pair<uint64_t, uint64_t>> possible = intersect_completion(
-					env, txn, completions, fmt::format("combine-{}", right.first), awaiting_combine);
-				//vector_ordered_set (could use deque here, I guess)
-				tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
-				visit_edges<CombineEdge>(txn, right.second, possible, [&](uint64_t input, const CombineEdge& e) {
-					if (!interval_contains(closed, e.output) && already_added.insert(e.output).second)
-						prov.back().emplace_back(e.output, input, EdgeKind::combine);
-					return VisitEdgeResult::proceed;
-				});
-				vector<uint64_t> novel = std::move(already_added).values_container();
-				std::sort(novel.begin(), novel.end());
-				vector<pair<uint64_t, uint64_t>> discovered = maximal_intervals(novel.begin(), novel.end());
+				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible(
+						fmt::format("combine-{}", right.first), awaiting_combine);
+				auto [provs, discovered] = discover_through_edges<CombineEdge>(env, right.second, EdgeKind::combine, possible, closed, num_threads);
+				if (!provs.empty())
+					prov.push_back(std::move(provs));
 				if (!discovered.empty()) {
-					record_closed(txn, discovered);
+					record_closed(discovered);
 					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
 							discovered.begin(), discovered.end());
 					awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
@@ -524,11 +561,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			awaiting_combine = std::move(awaiting_combine_next);
 		} else
 			throw std::logic_error("can't happen: nothing to do?");
-		txn.commit();
-		if (!prov.empty()) {
-			std::sort(prov.back().begin(), prov.back().end());
-			prov.emplace_back();
-		}
 	}
 
 	return 0;

@@ -10,6 +10,8 @@ template<typename Result, class Reducer>
 Result transform_reduce_parallel_merge(Reducer reducer, typename std::vector<Result>::iterator first,
 		typename std::vector<Result>::iterator last, unsigned int threads) {
 	std::size_t size = std::distance(first, last);
+	if (size == 0)
+		return {}; //The transform step already relies on Result being default-constructible.
 	if (size == 1)
 		return std::move(*first);
 	if (size == 2)

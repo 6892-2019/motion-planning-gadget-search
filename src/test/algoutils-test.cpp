@@ -86,3 +86,27 @@ TEST_CASE("AlgoutilsTest_PartitionOnRangeExclusion02") {
 	CHECK_EQ(foo[0], 0);
 	CHECK_EQ(foo[1], 6);
 }
+
+TEST_CASE("AlgoutilsTest_MergeUnique00") {
+	std::initializer_list<int> left = {0, 2, 3}, right = {1, 3, 4};
+	std::vector<int> actual;
+	merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(actual));
+	std::initializer_list<int> expected = {0, 1, 2, 3, 4};
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("AlgoutilsTest_MergeUnique01") {
+	std::initializer_list<int> left = {}, right = {1, 3, 4};
+	std::vector<int> actual;
+	merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(actual));
+	std::initializer_list<int> expected = {1, 3, 4};
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+TEST_CASE("AlgoutilsTest_MergeUnique02") {
+	std::initializer_list<int> left = {0, 2, 3}, right = {};
+	std::vector<int> actual;
+	merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(actual));
+	std::initializer_list<int> expected = {0, 2, 3};
+	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
