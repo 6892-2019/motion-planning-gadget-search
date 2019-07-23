@@ -6,6 +6,8 @@
 #include "intervals.hpp"
 #include "transform_reduce.hpp"
 #include "tsl/ordered_set.h"
+#include "task_parallel.hpp"
+#include <functional>
 
 using std::vector;
 using std::pair;
@@ -361,6 +363,10 @@ pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_edge
 	return {std::move(provs), std::move(discovered)};
 }
 
+void assign_interval_union(vector<pair<uint64_t, uint64_t>>& left, const vector<pair<uint64_t, uint64_t>>& right) {
+	left = interval_union(left.begin(), left.end(), right.begin(), right.end());
+}
+
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-llmdb'}
 	std::string_view db_path = "jbosboom";
 	bool multiplayer = false, combine_all = false;
@@ -482,30 +488,27 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_close, EdgeKind::close, possible, closed, num_threads);
 				if (!provs.empty())
 						prov.push_back(std::move(provs));
-				if (!discovered.empty()) { //avoid copying if nothing found (especially for close)
-					record_closed(discovered);
-					//Outputs of close get mirrored, so put them in closemirror immediately.
-					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
-							discovered.begin(), discovered.end());
-					//They also get connected and combined.
-					awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
-							discovered.cbegin(), discovered.cend());
-					awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
-							discovered.cbegin(), discovered.cend());
-				}
+				if (!discovered.empty()) //avoid copying if nothing found (especially for close)
+					task_parallel(num_threads,
+							std::bind_front(record_closed, std::cref(discovered)),
+							//Outputs of close get mirrored, so put them in closemirror immediately.
+							std::bind_front(assign_interval_union, std::ref(awaiting_closemirror), std::cref(discovered)),
+							//They also get connected and combined.
+							std::bind_front(assign_interval_union, std::ref(awaiting_connect), std::cref(discovered)),
+							std::bind_front(assign_interval_union, std::ref(awaiting_combine), std::cref(discovered))
+					);
 			}
 
 			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("mirror", awaiting_closemirror);
 			auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_mirror, EdgeKind::mirror, possible, closed, num_threads);
 			if (!provs.empty())
 				prov.push_back(std::move(provs));
-			if (!discovered.empty()) { //avoid copying if nothing found (should be uncommon for mirror...)
-				record_closed(discovered);
-				awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
-						discovered.cbegin(), discovered.cend());
-				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
-						discovered.cbegin(), discovered.cend());
-			}
+			if (!discovered.empty()) //avoid copying if nothing found (should be uncommon for mirror...)
+				task_parallel(num_threads,
+						std::bind_front(record_closed, std::cref(discovered)),
+						std::bind_front(assign_interval_union, std::ref(awaiting_connect), std::cref(discovered)),
+						std::bind_front(assign_interval_union, std::ref(awaiting_combine), std::cref(discovered))
+				);
 
 			awaiting_closemirror.clear();
 
@@ -532,13 +535,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			auto [provs, discovered] = discover_through_edges<ConnectEdge>(env, edges_connect, EdgeKind::connect, possible, closed, num_threads);
 			if (!provs.empty())
 				prov.push_back(std::move(provs));
-			if (!discovered.empty()) {
-				record_closed(discovered);
-				awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
-						discovered.begin(), discovered.end());
-				awaiting_combine = interval_union(awaiting_combine.begin(), awaiting_combine.end(),
-						discovered.cbegin(), discovered.cend());
-			}
+			if (!discovered.empty())
+				task_parallel(num_threads,
+						std::bind_front(record_closed, std::cref(discovered)),
+						std::bind_front(assign_interval_union, std::ref(awaiting_closemirror), std::cref(discovered)),
+						std::bind_front(assign_interval_union, std::ref(awaiting_combine), std::cref(discovered))
+				);
 			awaiting_connect = std::move(discovered); //i.e., if empty, clear
 		} else if (!awaiting_combine.empty()) {
 			vector<pair<uint64_t, uint64_t>> awaiting_combine_next;
@@ -548,15 +550,13 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				auto [provs, discovered] = discover_through_edges<CombineEdge>(env, right.second, EdgeKind::combine, possible, closed, num_threads);
 				if (!provs.empty())
 					prov.push_back(std::move(provs));
-				if (!discovered.empty()) {
-					record_closed(discovered);
-					awaiting_closemirror = interval_union(awaiting_closemirror.begin(), awaiting_closemirror.end(),
-							discovered.begin(), discovered.end());
-					awaiting_connect = interval_union(awaiting_connect.begin(), awaiting_connect.end(),
-							discovered.cbegin(), discovered.cend());
-					awaiting_combine_next = interval_union(awaiting_combine_next.begin(), awaiting_combine_next.end(),
-							discovered.cbegin(), discovered.cend());
-				}
+				if (!discovered.empty())
+					task_parallel(num_threads,
+							std::bind_front(record_closed, std::cref(discovered)),
+							std::bind_front(assign_interval_union, std::ref(awaiting_closemirror), std::cref(discovered)),
+							std::bind_front(assign_interval_union, std::ref(awaiting_connect), std::cref(discovered)),
+							std::bind_front(assign_interval_union, std::ref(awaiting_combine_next), std::cref(discovered))
+					);
 			}
 			awaiting_combine = std::move(awaiting_combine_next);
 		} else
