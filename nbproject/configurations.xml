@@ -262,6 +262,10 @@
       </item>
       <item path="src/stringutils.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/task_parallel.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/task_parallel.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/test/algoutils-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/automaton-canonicalize-test.cpp"
