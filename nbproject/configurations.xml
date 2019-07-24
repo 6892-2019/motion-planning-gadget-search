@@ -46,6 +46,7 @@
           <in>msgpack-mode.cpp</in>
           <in>ops.cpp</in>
           <in>provenance.hpp</in>
+          <in>repair-completions-mode.cpp</in>
           <in>selsert-gadget-by-data.cpp</in>
           <in>selsert-gadget-by-data.hpp</in>
           <in>sync.cpp</in>
@@ -362,6 +363,11 @@
       <item path="src/toggles/runner/ops.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/runner/provenance.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/toggles/runner/repair-completions-mode.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
       </item>
       <item path="src/toggles/runner/selsert-gadget-by-data.cpp"
             ex="false"

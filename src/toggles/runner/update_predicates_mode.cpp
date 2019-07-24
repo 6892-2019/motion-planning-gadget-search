@@ -38,10 +38,6 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 		}
 	}
 
-	//TODO: option parsing to select thresd count, maybe limit on how much work to do?
-	//TODO: option to scrap all predicates and recompute (in case they're corrupt)
-	//TODO: should probably also do completion scanning in this mode, it's about the same.
-
 	lmdb::env env = lmdb::env::create();
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
