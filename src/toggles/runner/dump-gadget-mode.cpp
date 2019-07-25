@@ -29,6 +29,10 @@ int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& g
 
 	vector<uint64_t> all_ids = collect_initial_gadget_set(env, gadget_hashtable, gadget_index, names_db, gadget_set);
 	vector<pair<uint64_t, vector<std::byte>>> all_data = select_gadget_id_to_data(env, gadget_hashtable, gadget_index, all_ids);
+	//TODO compare_proj
+	std::sort(all_data.begin(), all_data.end(), [](const auto& a, const auto& b) {
+		return std::get<0>(a) < std::get<0>(b);
+	});
 	for (const pair<uint64_t, vector<std::byte>>& gadget : all_data) {
 		encoding::Stats stats = encoding::stats(gadget.second.data());
 		fmt::print("{}: {} locations, {} states, {} uedges, {} dedges, {} components, {} bytes\n",
