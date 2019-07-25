@@ -368,6 +368,8 @@ void assign_interval_union(vector<pair<uint64_t, uint64_t>>& left, const vector<
 }
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-llmdb'}
+	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
+
 	std::string_view db_path = "jbosboom";
 	bool multiplayer = false, combine_all = false;
 	unsigned int num_threads = 1;

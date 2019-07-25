@@ -986,6 +986,7 @@ private:
 };
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-l:libboost_system.a -llmdb'}
+	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
 	jemalloc_tuning();
 
 	std::string_view db_path, checkpoint_db_path;

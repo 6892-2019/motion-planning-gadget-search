@@ -19,6 +19,7 @@ int repair_completions_mode(std::string_view db_path, const vector<std::string_v
 int msgpack_mode(std::string_view db_path, std::string_view input_file, std::string_view output_file);
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-llmdb -lyaml-cpp'}
+	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
 	jemalloc_tuning();
 
 	std::string_view mode = "unknown-mode";
@@ -54,6 +55,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			fmt::print(stderr, "ERROR: msgpack mode takes no positional arguments, but some passed: {}\n", positionals);
 			std::exit(2);
 		}
+		setvbuf(stdout, nullptr, _IOFBF, 0); //output not human readable -- back to full buffering
 		return msgpack_mode(db_path, input_file, output_file);
 	} else {
 		fmt::print(stderr, "ERROR: unknown mode {}\n", mode);
