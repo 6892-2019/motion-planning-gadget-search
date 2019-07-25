@@ -470,7 +470,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		}
 	};
 
-	interval_accumulator<uint64_t> targets_found(512);
+	vector<std::string> targets_found;
 	auto record_closed = [&](const vector<pair<uint64_t, uint64_t>>& discovered) {
 		closed = interval_union(closed.begin(), closed.end(), discovered.cbegin(), discovered.cend());
 
@@ -483,8 +483,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 
 			for (const pair<uint64_t, uint64_t>& p : found)
 				for (uint64_t root = p.first; root < p.second; ++root) {
-					targets_found(root);
-
 					vector<AnyProv> target_trace = toposort_provs(target.edge_cache, root),
 							source_trace = toposort_provs(edge_cache, root);
 					//There's no need to tell me X builds X.
@@ -494,6 +492,24 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 						fmt::print("Source trace:\n");
 						print_trace(std::move(source_trace));
 						fmt::print("\n");
+
+						std::string suffix = "";
+						for (const AnyProv& q : target_trace)
+							if (q.kind() == EdgeKind::close)
+								suffix += "closed";
+							else if (q.kind() == EdgeKind::mirror) {
+								if (!suffix.empty())
+									suffix += ", ";
+								suffix += "mirrored";
+							}
+						if (!suffix.empty())
+							suffix = " (" + suffix + ")";
+						auto it = target.inv_names.find(target_trace.front().output());
+						if (it == target.inv_names.end())
+							targets_found.push_back(fmt::format("{}{}", root, suffix));
+						else
+							for (const auto& name : it->second)
+								targets_found.push_back(fmt::format("{}{}", name, suffix));
 					}
 				}
 		}
@@ -614,10 +630,14 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		fmt::print("\n");
 	}
 
-//	fmt::print("==> REPORT COMPLETED\n");
-//	std::move(targets_found).finish();
-//	vector<pair<uint64_t, uint64_t>> all_gadgets_mentioned = std::move(printed_in_traces).finish();
-//	fmt::print("--> {}
+	fmt::print("==> REPORT COMPLETED\n");
+	std::sort(targets_found.begin(), targets_found.end());
+	fmt::print("--> {} targets found:\n", targets_found.size());
+	for (const std::string& t : targets_found)
+		fmt::print("   {}\n", t);
+	auto printed_in_traces_intervals = std::move(printed_in_traces).finish();
+	vector<uint64_t> all_gadgets_mentioned = interval_inflate(printed_in_traces_intervals.begin(), printed_in_traces_intervals.end());
+	fmt::print("--> {} gadgets mentioned: {}\n", all_gadgets_mentioned.size(), fmt::join(all_gadgets_mentioned, " "));
 
 	return 0;
 }
