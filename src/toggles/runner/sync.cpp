@@ -213,13 +213,13 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		for (auto it = aliases.begin(); it != aliases.end(); ++it) {
 			std::string source = it->first.as<std::string>(), target = it->second.as<std::string>();
 			if (naming.count(source)) {
-				fmt::print(stderr, "alias {} (intended for {}) in {} already names a gadget", source, target, filename);
+				fmt::print(stderr, "alias {} (intended for {}) in {} already names a gadget\n", source, target, filename);
 				return 1;
 			}
 			if (!naming.count(target)) {
 				//An alias can reference another alias, but only if the referent
 				//is defined first.
-				fmt::print(stderr, "alias target {} (from {}) in {} doesn't name a gadget", target, source, filename);
+				fmt::print(stderr, "alias target {} (from {}) in {} doesn't name a gadget\n", target, source, filename);
 				return 1;
 			}
 			naming[source] = naming[target];
