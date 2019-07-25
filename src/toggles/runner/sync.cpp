@@ -158,6 +158,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		return numeric_cast<std::size_t>(std::distance(canonicals.begin(), it));
 	};
 	tsl::ordered_map<std::string, vector<std::size_t>> naming;
+	vector<pair<std::string, std::string>> deferred_aliases;
 	for (std::string_view filename : files) {
 		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
 		YAML::Node gadgets = toplevel["gadgets"];
@@ -210,22 +211,24 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		}
 
 		YAML::Node aliases = toplevel["aliases"];
-		for (auto it = aliases.begin(); it != aliases.end(); ++it) {
-			std::string source = it->first.as<std::string>(), target = it->second.as<std::string>();
-			if (naming.count(source)) {
-				fmt::print(stderr, "alias {} (intended for {}) in {} already names a gadget\n", source, target, filename);
-				return 1;
-			}
-			if (!naming.count(target)) {
-				//An alias can reference another alias, but only if the referent
-				//is defined first.
-				fmt::print(stderr, "alias target {} (from {}) in {} doesn't name a gadget\n", target, source, filename);
-				return 1;
-			}
-			naming[source] = naming[target];
-		}
+		for (auto it = aliases.begin(); it != aliases.end(); ++it)
+			deferred_aliases.emplace_back(it->first.as<std::string>(), it->second.as<std::string>());
 	}
-	std::size_t canonicals_size = canonicals.size();
+
+	for (const auto& p : deferred_aliases) {
+		const auto& source = p.first, target = p.second;
+		if (naming.count(source)) {
+			fmt::print(stderr, "alias {} (intended for {}) already names a gadget\n", source, target);
+			return 1;
+		}
+		if (!naming.count(target)) {
+			//An alias can reference another alias, but only if the referent
+			//is defined first, to prevent alias cycles.
+			fmt::print(stderr, "alias target {} (from {}) doesn't name a gadget\n", target, source);
+			return 1;
+		}
+		naming[source] = naming[target];
+	}
 
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
@@ -285,6 +288,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		txn.commit();
 	}
 
+	std::size_t canonicals_size = canonicals.size();
 	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(canonicals).values_container());
 	//Punning a bit on this vector: in the map, it's indices into canonicals,
 	//but we're about to remap it to gadget ids.
