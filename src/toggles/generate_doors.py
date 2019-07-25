@@ -49,7 +49,19 @@ location_groups = (
 # all permutations of the appropriate ports (possible gadgets) and find the
 # minimal gadget after circular rotations and reflections.  This is inefficient.
 
-canonicalize_permutations = (
+canonicalize_permutations_5 = (
+    (0, 1, 2, 3, 4),
+    (1, 2, 3, 4, 0),
+    (2, 3, 4, 0, 1),
+    (3, 4, 0, 1, 2),
+    (4, 0, 1, 2, 3),
+    (4, 3, 2, 1, 0),
+    (0, 4, 3, 2, 1),
+    (1, 0, 4, 3, 2),
+    (2, 1, 0, 4, 3),
+    (3, 2, 1, 0, 4),
+)
+canonicalize_permutations_6 = (
     (0, 1, 2, 3, 4, 5),
     (1, 2, 3, 4, 5, 0),
     (2, 3, 4, 5, 0, 1),
@@ -63,10 +75,14 @@ canonicalize_permutations = (
     (3, 2, 1, 0, 5, 4),
     (4, 3, 2, 1, 0, 5),
 )
+canonicalize_permutations = {
+    5: canonicalize_permutations_5,
+    6: canonicalize_permutations_6,
+}
 
 def canonicalize_options(gadget):
     options = []
-    for p in canonicalize_permutations:
+    for p in canonicalize_permutations[len(gadget)]:
         g = list(gadget)
         for i in range(len(p)):
             g[i] = gadget[p[i]]
@@ -74,7 +90,7 @@ def canonicalize_options(gadget):
     return options
 
 survivors = set()
-for open_ports in ((Location.OPEN, Location.OPEN), (Location.OPEN_IN, Location.OPEN_OUT)):
+for open_ports in ((Location.OPEN, Location.OPEN), (Location.OPEN_IN, Location.OPEN_OUT), (Location.OPEN,)):
     for traverse_ports in ((Location.TRAVERSE, Location.TRAVERSE), (Location.TRAVERSE_IN, Location.TRAVERSE_OUT)):
         for close_ports in ((Location.CLOSE, Location.CLOSE), (Location.CLOSE_IN, Location.CLOSE_OUT)):
             ports = open_ports + traverse_ports + close_ports
@@ -99,10 +115,11 @@ def edges_for_ports(ports, optional_open=False):
             port_data[up].directed = True
             directed_types.append(up.name.lower())
             port_data[up].indices = port_index[dp1] + port_index[dp2]
-        ii = port_data[up].indices[0]
-        oi = port_data[up].indices[1]
-        if ((ii + 1) % 6 != oi) and ((ii - 1) % 6 != oi):
-            nonadjacent_count += 1
+        if len(port_data[up].indices) == 2:
+            ii = port_data[up].indices[0]
+            oi = port_data[up].indices[1]
+            if ((ii + 1) % len(ports) != oi) and ((ii - 1) % len(ports) != oi):
+                nonadjacent_count += 1
 
     name_str = 'door-o' if optional_open else 'door-'
     for p in (Location.OPEN, Location.TRAVERSE, Location.CLOSE):
@@ -110,14 +127,19 @@ def edges_for_ports(ports, optional_open=False):
         if d.directed:
             name_str += 'd'
         name_str += str(d.indices[0])
-        name_str += str(d.indices[1])
+        name_str += str(d.indices[1]) if len(d.indices) == 2 else 'x'
 
     uedges = []
     dedges = []
 
     # 0 is the open state, 1 is the closed state.
     d = port_data[Location.OPEN]
-    if not d.directed:
+    if len(d.indices) == 1:
+        uedges.append([0, d.indices[0], d.indices[0], 0])
+        dedges.append([1, d.indices[0], d.indices[0], 0])
+        if optional_open: # only matters in multiplayer: lets you waste a move
+            uedges.append([1, d.indices[0], d.indices[0], 1])
+    elif not d.directed:
         uedges.append([0, d.indices[0], d.indices[1], 0])
         dedges.append([1, d.indices[0], d.indices[1], 0])
         dedges.append([1, d.indices[1], d.indices[0], 0])
@@ -176,4 +198,4 @@ doc = {'gadgets': gadget_subdoc, 'aliases': alias_subdoc}
 
 # Force PyYAML to respect dict order.  https://stackoverflow.com/a/52621703/3614835
 yaml.add_representer(dict, lambda self, data: yaml.representer.SafeRepresenter.represent_dict(self, data.items()))
-print(yaml.dump(doc))
+print(yaml.dump(doc, default_flow_style=None))
