@@ -4,16 +4,7 @@ gadgets:
     uedges: [[0, 0, 1, 0]]
   diode:
     dedges: [[0, 0, 1, 0]]
-  crossover:
-    uedges: [[0, 0, 2, 0], [0, 1, 3, 0]]
-  crossing-wire-diode:
-    uedges: [[0, 1, 3, 0]]
-    dedges: [[0, 0, 2, 0]]
-  crossing-diode-diode:
-    dedges: [[0, 0, 2, 0], [0, 1, 3, 0]]
 
-# We could use Python eval directly here, but I want to preserve flexibility
-# to replace the C++ gadget definitions with this file.
 #for alpha in range(3, 17):
 #  digits = str(len(str(alpha-1)))
 #  format_str = '[0, {:'+digits+'d}, {:'+digits+'d}, 0]'
@@ -279,12 +270,6 @@ gadgets:
              [0,  8,  9, 1], [0,  9, 10, 1], [0, 10, 11, 1], [0, 11, 12, 1],
              [0, 12, 13, 1], [0, 13, 14, 1], [0, 14, 15, 1], [0, 15,  0, 1]]
 
-  1-toggle:
-    uedges: [[0, 0, 1, 1]]
-  parallel-2-toggle:
-    uedges:
-    - [0, 0, 1, 1]
-    - [0, 3, 2, 1]
   parallel-3-toggle:
     uedges:
     - [0, 0, 1, 1]
@@ -330,32 +315,6 @@ gadgets:
     - [0, 11, 6, 1]
     - [0, 10, 7, 1]
     - [0, 9,  8, 1]
-  antiparallel-2-toggle:
-    uedges: [[0, 0, 1, 1], [0, 2, 3, 1]]
-  crossing-2-toggle:
-    uedges: [[0, 0, 2, 1], [0, 3, 1, 1]]
-  noncrossing-tripwire-lock:
-    uedges: [[0, 0, 1, 1], [0, 1, 0, 1], [0, 2, 3, 0]]
-  crossing-tripwire-lock:
-    uedges: [[0, 0, 2, 1], [0, 1, 3, 0], [0, 2, 0, 1]]
-  noncrossing-toggle-lock:
-    uedges: [[0, 0, 1, 1], [0, 2, 3, 0]]
-  crossing-toggle-lock:
-    uedges: [[0, 0, 2, 1], [0, 1, 3, 0]]
-  noncrossing-tripwire-toggle:
-    uedges: [[0, 0, 1, 1], [0, 2, 3, 1], [0, 3, 2, 1]]
-  crossing-tripwire-toggle:
-    uedges: [[0, 0, 2, 1], [0, 1, 3, 1], [0, 3, 1, 1]]
-  parallel-seven-seven:
-    uedges: [[0, 0, 1, 1], [0, 2, 3, 0], [0, 2, 3, 1], [1, 0, 1, 1]]
-  antiparallel-seven-seven:
-    uedges: [[0, 0, 1, 1], [0, 2, 3, 0], [0, 3, 2, 1], [1, 0, 1, 1]]
-  crossing-seven-seven:
-    uedges: [[0, 0, 2, 1], [0, 1, 3, 0], [0, 1, 3, 1], [1, 0, 2, 1]]
-  seven-lock:
-    uedges: [[0, 0, 1, 1], [0, 2, 3, 0], [1, 0, 1, 1]]
-  seven-tripwire:
-    uedges: [[0, 0, 1, 1], [0, 2, 3, 1], [0, 3, 2, 1], [1, 0, 1, 1]]
   locking-2-toggle:
     uedges: [[0, 0, 1, 1], [0, 3, 2, 2]]
   deterministic-split:
@@ -401,10 +360,14 @@ gadgets:
     dedges: [[0, 0, 1, 1], [0, 1, 0, 1], [0, 2, 2, 0], [1, 2, 2, 0]]
 
 aliases:
-  crossing-wire-wire: crossover
+  crossover: crossing-wire-wire
   split: 3-split
   2-split: wire
   2-spinner: wire
-  parallel-1-toggle: 1-toggle
+  1-toggle: toggle
+  parallel-1-toggle: toggle
+  parallel-2-toggle: parallel-toggle-toggle
+  antiparallel-2-toggle: antiparallel-toggle-toggle
+  crossing-2-toggle: crossing-toggle-toggle
   antiparallel-1-toggle: 1-toggle
   dichotomizer: locking-2-toggle
