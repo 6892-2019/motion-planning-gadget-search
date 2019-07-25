@@ -107,6 +107,14 @@ private:
 	std::uint8_t canonicalizePermutation_;
 	//TODO: steal two bits from one of the other fields, or encode using special values of unused fields
 	EdgeKind kind_;
+
+	friend bool operator==(const AnyProv& a, const AnyProv& b) {
+		return a.output1_ == b.output1_ && a.input1_ == b.input1_ &&
+				a.input2_ == b.input2_ && a.splice_ == b.splice_ &&
+				a.rotation_ == b.rotation_ && a.connectPoint_ == b.connectPoint_ &&
+				a.canonicalizePermutation_ == b.canonicalizePermutation_ &&
+				a.kind_ == b.kind_;
+	}
 };
 
 template<>

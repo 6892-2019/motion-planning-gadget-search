@@ -437,19 +437,22 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	closed = maximal_intervals(source_ids.begin(), source_ids.end());
 	awaiting_closemirror = awaiting_connect = awaiting_combine = closed;
 
-	auto print_trace = [&target](const vector<AnyProv>& trace) {
+	interval_accumulator<uint64_t> printed_in_traces(512);
+	auto print_trace = [&target, &printed_in_traces](const vector<AnyProv>& trace) {
 		for (const AnyProv& p : trace) {
 			if (p.kind() == EdgeKind::source) {
 				auto it = target.inv_names.find(p.output());
 				if (it == target.inv_names.end())
-					fmt::print("{} <names not found?>\n", p);
+					fmt::print("  {} <names not found?>\n", p);
 				else
-					fmt::print("{} {}\n", p, target.inv_names.at(p.output()));
+					fmt::print("  {} {}\n", p, target.inv_names.at(p.output()));
 			} else
-				fmt::print("{}\n", p);
+				fmt::print("  {}\n", p);
+			printed_in_traces(p.output());
 		}
 	};
 
+	interval_accumulator<uint64_t> targets_found(512);
 	auto record_closed = [&](const vector<pair<uint64_t, uint64_t>>& discovered) {
 		closed = interval_union(closed.begin(), closed.end(), discovered.cbegin(), discovered.cend());
 
@@ -462,10 +465,18 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 
 			for (const pair<uint64_t, uint64_t>& p : found)
 				for (uint64_t root = p.first; root < p.second; ++root) {
-					fmt::print("Target trace:\n");
-					print_trace(toposort_provs(target.edge_cache, root));
-					fmt::print("Source trace:\n");
-					print_trace(toposort_provs(edge_cache, root));
+					targets_found(root);
+
+					vector<AnyProv> target_trace = toposort_provs(target.edge_cache, root),
+							source_trace = toposort_provs(edge_cache, root);
+					//There's no need to tell me X builds X.
+					if (target_trace != source_trace) {
+						fmt::print("Target trace:\n");
+						print_trace(std::move(target_trace));
+						fmt::print("Source trace:\n");
+						print_trace(std::move(source_trace));
+						fmt::print("\n");
+					}
 				}
 		}
 
@@ -484,7 +495,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return possible;
 	};
 
+	unsigned int step_count = 1;
 	while (!awaiting_closemirror.empty() || !awaiting_connect.empty() || !awaiting_combine.empty()) {
+		Stopwatch stopwatch = Stopwatch::process();
 		if (!awaiting_closemirror.empty()) {
 			if (!multiplayer) {
 				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("close", awaiting_closemirror);
@@ -564,7 +577,29 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			awaiting_combine = std::move(awaiting_combine_next);
 		} else
 			throw std::logic_error("can't happen: nothing to do?");
+
+		Stopwatch::Result elapsed = stopwatch.elapsed();
+		fmt::print("==> Step {}: {} user, {} sys, {} wall ({:.2f}), {:.2f} GiB ({:.2f}, {})\n",
+				step_count++, elapsed.userSeconds(), elapsed.systemSeconds(), elapsed.hms(), elapsed.utilization(),
+				elapsed.absolute().highwaterGibibytes(), elapsed.highwaterGibibytes(), elapsed.hardFaults());
+		fmt::print("-->    closed: {:11d} {:7d} {:7d} KiB\n",
+				interval_size(closed), closed.size(), closed.size() * sizeof(closed.front()) / 1024);
+		fmt::print("--> closemirr: {:11d} {:7d} {:7d} KiB\n",
+				interval_size(awaiting_closemirror), awaiting_closemirror.size(),
+				awaiting_closemirror.size() * sizeof(awaiting_closemirror.front()) / 1024);
+		fmt::print("-->   connect: {:11d} {:7d} {:7d} KiB\n",
+				interval_size(awaiting_connect), awaiting_connect.size(),
+				awaiting_connect.size() * sizeof(awaiting_connect.front()) / 1024);
+		fmt::print("-->   combine: {:11d} {:7d} {:7d} KiB\n",
+				interval_size(awaiting_combine), awaiting_combine.size(),
+				awaiting_combine.size() * sizeof(awaiting_combine.front()) / 1024);
+		fmt::print("\n");
 	}
+
+//	fmt::print("==> REPORT COMPLETED\n");
+//	std::move(targets_found).finish();
+//	vector<pair<uint64_t, uint64_t>> all_gadgets_mentioned = std::move(printed_in_traces).finish();
+//	fmt::print("--> {}
 
 	return 0;
 }
