@@ -183,9 +183,10 @@ std::vector<std::pair<std::uint64_t, V>> select_gadget_id_to_value(
 	});
 	std::vector<std::pair<std::uint64_t, V>> ret;
 	ret.reserve(id_to_hash.size());
+	lmdb::cursor cur = lmdb::cursor::open(txn, gadget_hashtable);
 	for (auto& p : id_to_hash) {
-		std::string_view value;
-		if (!gadget_hashtable.get(txn, lmdb::to_sv(p.second), value))
+		std::string_view key = lmdb::to_sv(p.second), value;
+		if (!cur.get(key, value, MDB_SET))
 			throw std::logic_error(fmt::format("hash {} not found (for id {})", p.second, p.first));
 		//The last 8 bytes are the id.  Check them, then don't return them.
 		uint64_t appended_id = lmdb::from_sv<uint64_t>(value.substr(value.size()-8));
