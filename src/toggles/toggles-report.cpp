@@ -427,8 +427,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	//generational search done by the driver, except that we connect before the
 	//first combine while the driver doesn't.)
 	vector<pair<uint64_t, uint64_t>> closed, awaiting_combine, awaiting_connect, awaiting_closemirror;
-	//For logging purposes only -- not actually controlling anything.
-	unsigned int generation = 0, subgeneration = 0;
 
 	vector<uint64_t> source_ids = collect_initial_gadget_set(env, source_set);
 	std::sort(source_ids.begin(), source_ids.end());
@@ -469,9 +467,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				}
 		}
 
-		//TODO: if combine_all, check for newly-reachable combine rights; put
-		//the new rights in the pool and in a special queue for full closed set
-		//processing.
+		if (combine_all) {
+			//TODO: if combine_all, check for newly-reachable combine rights; put
+			//the new rights in the pool and in a special queue for full closed set
+			//processing.
+			throw std::logic_error("TODO: implement combine_all");
+		}
 	};
 
 	auto discover_whats_possible = [&](std::string_view kind, vector<pair<uint64_t, uint64_t>>& intervals) {
