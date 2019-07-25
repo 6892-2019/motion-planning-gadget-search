@@ -246,10 +246,11 @@ TargetStuff target_stuff(lmdb::env& env) {
 						//We want the dbi's name here, but I don't see how to get it.
 						//The message won't distinguish close and mirror.
 						key, value.size(), sizeof(uint64_t)));
-			const uint64_t* first = reinterpret_cast<const uint64_t*>(value.data());
-			const uint64_t* last = first + value.size() / sizeof(uint64_t);
-			for (const uint64_t* e = first; e != last; ++e)
-				inv_names[*e].push_back(std::string(key));
+			if (value.size() != sizeof(uint64_t))
+				//We only want to report singleton names.  Every gadget has at
+				//least one singleton name (see runner's sync.cpp).
+				continue;
+			inv_names[lmdb::from_sv<uint64_t>(value)].push_back(std::string(key));
 		} while (cur.get(key, value, MDB_NEXT));
 	}
 	vector<uint64_t> stable_iteration;
