@@ -7,6 +7,7 @@
 #include "transform_reduce.hpp"
 #include "tsl/ordered_set.h"
 #include "task_parallel.hpp"
+#include <fmt/chrono.h>
 #include <functional>
 
 using std::vector;
@@ -394,14 +395,11 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			source_specs.emplace_back(argv[i]);
 	}
 
-	GadgetSet source_set = parse_gid_specs(source_specs);
-	fmt::print("Source spec: {}\n", format_gadget_set(source_set));
-
 	lmdb::env env = lmdb::env::create();
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_RDONLY | MDB_NORDAHEAD);
-	lmdb::dbi edges_connect, edges_close, edges_mirror, completions;
+	lmdb::dbi edges_connect, edges_close, edges_mirror, completions, meta_db;
 	vector<pair<uint64_t, lmdb::dbi>> edges_combine; //lazily-initialized later when we know what we're using
 	{
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
@@ -409,8 +407,27 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		edges_close = lmdb::dbi::open(txn, "edges-close");
 		edges_mirror = lmdb::dbi::open(txn, "edges-mirror");
 		completions = lmdb::dbi::open(txn, "completions");
+		meta_db = lmdb::dbi::open(txn, "meta");
 		txn.commit();
 	}
+
+	{
+		std::time_t now = std::time(nullptr);
+		fmt::print("Report on {} started at {:%F %T %Z}\n", db_path, *std::localtime(&now));
+
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		std::string_view database_id, creation_timestamp, creator_hostname;
+		meta_db.get(txn, "id_bytes", database_id);
+		meta_db.get(txn, "creation_timestamp", creation_timestamp);
+		meta_db.get(txn, "creator_hostname", creator_hostname);
+		txn.commit();
+		fmt::print("Database ID {:x}, created on {} at {}\n", lmdb::from_sv<uint64_t>(database_id),
+				creator_hostname, creation_timestamp);
+	}
+
+	GadgetSet source_set = parse_gid_specs(source_specs);
+	fmt::print("Source spec: {}\n", format_gadget_set(source_set));
+	fmt::print("\n");
 
 	TargetStuff target = target_stuff(env);
 	const vector<pair<uint64_t, uint64_t>> possible_combine_rights = find_all_combine_rights(env);
