@@ -4,6 +4,7 @@
 #include "../toggles-shared.hpp"
 #include "../gadget-encoding-stats.hpp"
 #include "intervals.hpp"
+#include "proj_compare.hpp"
 #include "stringutils.hpp"
 #include "ioutils.hpp"
 #include "stopwatch.hpp"
@@ -828,10 +829,7 @@ private:
 		//this is the only such use we don't need to define a select_id_to_stats.
 		vector<pair<uint64_t, vector<std::byte>>> data = select_gadget_id_to_data(
 				database_, gadget_hashtable_, gadget_index_, combine_rights_);
-		//proj_compare
-		std::sort(data.begin(), data.end(), [](const auto& a, const auto& b) {
-			return a.first < b.first;
-		});
+		std::sort(data.begin(), data.end(), proj_less<0>());
 		for (const pair<uint64_t, vector<std::byte>>& p : data)
 			combine_left_locations_.emplace_back(complete_opts_.precision - encoding::locations(p.second.data()));
 		complete_opts_.combine_max_left_locations = std::min(complete_opts_.combine_max_left_locations,

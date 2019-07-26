@@ -4,6 +4,7 @@
 #include "stringutils.hpp"
 #include "tsl/ordered_set.h"
 #include "intervals.hpp"
+#include "proj_compare.hpp"
 #include "transform_reduce.hpp"
 #include <jemalloc/jemalloc.h>
 #include <regex>
@@ -177,10 +178,7 @@ template<class ValueExtractor, class V = decltype(ValueExtractor()(""sv))>
 std::vector<std::pair<std::uint64_t, V>> select_gadget_id_to_value(
 		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& gadget_hashtable,
 		vector<pair<uint64_t, std::size_t>>& id_to_hash) {
-	//TODO: merge with the other std::get-based comparators
-	std::sort(id_to_hash.begin(), id_to_hash.end(), [](const auto& a, const auto& b) {
-		return std::get<1>(a) < std::get<1>(b);
-	});
+	std::sort(id_to_hash.begin(), id_to_hash.end(), proj_less<1>());
 	std::vector<std::pair<std::uint64_t, V>> ret;
 	ret.reserve(id_to_hash.size());
 	lmdb::cursor cur = lmdb::cursor::open(txn, gadget_hashtable);
@@ -392,10 +390,6 @@ PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& p
 	states.reserve(demand.states.size());
 	for (unsigned int i : demand.states)
 		states.emplace_back(i, 1024);
-	auto first_cmp = [](const auto& a, const auto& b) {
-		//not quite proj_compare, but close...
-		return std::get<0>(a) < b;
-	};
 
 	while (demand.beginInclusive < demand.endExclusive) {
 		//Work in batches to keep transactions short.
@@ -415,10 +409,10 @@ PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& p
 		for (const pair<uint64_t, encoding::Stats>& p : stats) {
 			//I tried commoning these with a lambda, but we'd have to work a
 			//pointer-to-data-member into it, so I gave up.
-			auto lit = std::lower_bound(locations.begin(), locations.end(), p.second.locations, first_cmp);
+			auto lit = std::lower_bound(locations.begin(), locations.end(), p.second.locations, coord_less_left<0>());
 			if (lit != locations.end())
 				(lit->second)(p.first);
-			auto sit = std::lower_bound(states.begin(), states.end(), p.second.states, first_cmp);
+			auto sit = std::lower_bound(states.begin(), states.end(), p.second.states, coord_less_left<0>());
 			if (sit != states.end())
 				(sit->second)(p.first);
 		}

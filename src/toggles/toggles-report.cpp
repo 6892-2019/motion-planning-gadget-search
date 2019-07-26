@@ -4,6 +4,7 @@
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
 #include "intervals.hpp"
+#include "proj_compare.hpp"
 #include "transform_reduce.hpp"
 #include "tsl/ordered_set.h"
 #include "task_parallel.hpp"
@@ -575,10 +576,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 						edges_combine.emplace_back(r, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", r).c_str()));
 					txn.commit();
 				}
-				//TODO: make tuple comparator a utility function (proj_compare)
-				std::sort(edges_combine.begin(), edges_combine.end(), [](const auto& a, const auto& b) {
-					return std::get<0>(a) < std::get<0>(b);
-				});
+				std::sort(edges_combine.begin(), edges_combine.end(), proj_less<0>());
 			}
 		} else if (!awaiting_connect.empty()) {
 			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("connect", awaiting_connect);

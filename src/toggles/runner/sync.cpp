@@ -5,6 +5,7 @@
 #include "canonicalize.hpp"
 #include "gadget-encoding.hpp"
 #include "selsert-gadget-by-data.hpp"
+#include "proj_compare.hpp"
 #include "tsl/ordered_set.h"
 #include "tsl/ordered_map.h"
 #include "lmdb++.h"
@@ -84,9 +85,8 @@ vector<pair<vector<std::byte>, optional<vector<std::byte>>>> canonicalize_from_s
 			row = encoding::encode(*p);
 			normals.emplace_back(std::move(p), std::move(row));
 		}
-	std::sort(normals.begin(), normals.end(), [](const auto& l, const auto& r) {return l.second < r.second;});
-	normals.erase(std::unique(normals.begin(), normals.end(),
-			[](const auto& l, const auto& r) {return l.second == r.second;}), normals.end());
+	std::sort(normals.begin(), normals.end(), proj_less<1>());
+	normals.erase(std::unique(normals.begin(), normals.end(), proj_equal<1>()), normals.end());
 
 	//It's plausible that only a subset of the states are chiral.
 	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> mirrors;
@@ -299,11 +299,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 		std::sort(p.second.begin(), p.second.end());
 		p.second.erase(std::unique(p.second.begin(), p.second.end()), p.second.end());
 	}
-	//TODO: this compare-tupleish-by-nth-element also appears in the driver,
-	//and is probably worth elevating to a named utility function/lambda.
-	std::sort(sorted_names.begin(), sorted_names.end(), [](const auto& a, const auto& b) {
-		return std::get<0>(a) < std::get<0>(b);
-	});
+	std::sort(sorted_names.begin(), sorted_names.end(), proj_less<0>());
 
 	{
 		lmdb::txn txn = lmdb::txn::begin(env);
