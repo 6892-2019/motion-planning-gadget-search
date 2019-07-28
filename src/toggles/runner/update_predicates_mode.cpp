@@ -13,13 +13,17 @@ using namespace std::literals::string_view_literals;
 void initialize_predicates_database(lmdb::txn& txn, lmdb::dbi& predicates);
 
 int update_predicates_mode(std::string_view db_path, const vector<std::string_view>& args) {
-	bool update = false, list_all_predicates = false, reinitialize = false;
+	bool list_all_predicates = false, reinitialize = false;
+	uint64_t update = 0;
 	unsigned int num_threads = 1;
 	vector<unsigned int> create_state, delete_state;
 	vector<std::string_view> dump;
 	for (std::size_t i = 0; i < args.size(); ++i) {
 		if (args[i] == "--update"sv)
-			update = true;
+			if (i+1 < args.size() && args[i+1][0] != '-')
+				update = from_string<uint64_t>(args[++i]);
+			else
+				update = std::numeric_limits<uint64_t>::max();
 		else if (args[i] == "--list"sv)
 			list_all_predicates = true;
 		else if (args[i] == "--dump"sv)
@@ -129,8 +133,7 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 	if (update) {
 		Stopwatch stopwatch = Stopwatch::process();
 		//maybe should return the number of gadgets added to the predicates for reporting?
-		if (update_SL_predicates(env, predicates, gadget_hashtable, gadget_index,
-				std::numeric_limits<std::uint64_t>::max(), num_threads))
+		if (update_SL_predicates(env, predicates, gadget_hashtable, gadget_index, update, num_threads))
 			fmt::print("updated predicates in {}\n", stopwatch.elapsed().hms());
 		else
 			fmt::print("predicates already up-to-date\n");
