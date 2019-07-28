@@ -254,6 +254,8 @@ struct CompletenessOptions {
 	unsigned int combine_max_left_locations = std::numeric_limits<unsigned int>::max();
 	unsigned int combine_max_left_states = std::numeric_limits<unsigned int>::max();
 	unsigned int connect_max_states = std::numeric_limits<unsigned int>::max();
+	unsigned int close_max_states = std::numeric_limits<unsigned int>::max();
+	unsigned int mirror_max_states = std::numeric_limits<unsigned int>::max();
 	bool multiplayer = false;
 	bool follow_mirror = true;
 };
@@ -543,7 +545,7 @@ private:
 			phase_ = Phase::discover_needs_mirror;
 			return Control::proceed;
 		}
-		filter_unary("close", state_.subgeneration());
+		filter_unary("close", state_.subgeneration(), {.max_states = complete_opts_.close_max_states});
 		phase_ = Phase::compute_close;
 		return Control::proceed;
 	}
@@ -576,7 +578,7 @@ private:
 	}
 
 	Control discover_needs_mirror() {
-		filter_unary("mirror", state_.subgeneration());
+		filter_unary("mirror", state_.subgeneration(), {.max_states = complete_opts_.mirror_max_states});
 		phase_ = Phase::compute_mirror;
 		return Control::proceed;
 	}
@@ -1012,10 +1014,17 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			completeness_opts.multiplayer = true;
 		else if (argv[i] == "--precision"sv)
 			completeness_opts.precision = to_uint(argv[++i]);
-		else if (argv[i] == "--combine-max-left-states"sv || argv[i] == "--combine-max-left-states"sv)
+		else if (argv[i] == "--max-states"sv)
+			completeness_opts.combine_max_left_states = completeness_opts.connect_max_states
+					= completeness_opts.close_max_states = completeness_opts.mirror_max_states = to_uint(argv[++i]);
+		else if (argv[i] == "--combine-max-left-states"sv || argv[i] == "--combine-left--maxstates"sv)
 			completeness_opts.combine_max_left_states = to_uint(argv[++i]);
 		else if (argv[i] == "--connect-max-states"sv)
 			completeness_opts.connect_max_states = to_uint(argv[++i]);
+		else if (argv[i] == "--close-max-states"sv)
+			completeness_opts.close_max_states = to_uint(argv[++i]);
+		else if (argv[i] == "--mirror-max-states"sv)
+			completeness_opts.mirror_max_states = to_uint(argv[++i]);
 		else if (argv[i] == "--no-follow-mirror"sv)
 			completeness_opts.follow_mirror = false;
 
