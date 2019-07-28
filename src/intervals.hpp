@@ -8,6 +8,7 @@
 #ifndef INTERVALS_HPP
 #define INTERVALS_HPP
 
+#include "farmhash-util.hpp"
 #include "tsl/ordered_map.h"
 #include <vector>
 #include <utility>
@@ -356,26 +357,6 @@ std::vector<std::pair<T, T>> interval_difference(It1 left, It1 left_end, It2 rig
 	return ret;
 }
 
-namespace detail {
-//TODO: before factoring this out, we were using farmhash_hash; we don't want
-//that dependency here if we can avoid it.
-struct interval_agg_hasher {
-	template<typename K>
-	std::size_t operator()(const std::vector<K>& x) const noexcept {
-		std::size_t h = 3;
-		for (const auto& b : x)
-			h = 31*h + std::hash<K>()(b);
-		return h;
-	}
-	std::size_t operator()(const std::vector<std::byte>& x) const noexcept {
-		std::size_t h = 3;
-		for (std::byte b : x)
-			h = 31*h + std::to_integer<unsigned int>(b);
-		return h;
-	}
-};
-}
-
 template<typename T, typename K>
 std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>> interval_aggregate(
 		const std::vector<std::pair<K, std::vector<std::pair<T, T>>>>& intervals) {
@@ -405,7 +386,7 @@ std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>> interval_ag
 	//epilogue is unnecessary because the active set is empty at the end.
 	T cur = 0;
 	//vector_ordered_map
-	tsl::ordered_map<std::vector<K>, std::vector<std::pair<T, T>>, detail::interval_agg_hasher,
+	tsl::ordered_map<std::vector<K>, std::vector<std::pair<T, T>>, farmhash_hash,
 			std::equal_to<std::vector<K>>, std::allocator<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>>,
 			std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>>> result;
 	while (!events.empty()) {

@@ -11,14 +11,6 @@ using encoding::GadgetEdge;
 using std::unique_ptr;
 using std::vector;
 
-//TODO: put this in top-level util file somewhere
-//std::hash<uint64_t> is the identity, and hopscotch doesn't like that.
-struct farmhash_hash {
-	uint64_t operator()(uint64_t x) const noexcept {
-		return farmhash::Fingerprint(x);
-	}
-};
-
 namespace {
 //TODO: put this in numutils.hpp?
 unsigned int minimum_size(unsigned int x) {

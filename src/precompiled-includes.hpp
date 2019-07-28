@@ -31,7 +31,7 @@
 #include <boost/integer.hpp>
 #include "numutils.hpp"
 #include <boost/functional/hash.hpp> //for std::pair/std::tuple hashing
-#include <farmhash/farmhash.h>
+#include "farmhash-util.hpp"
 
 #include <charconv>
 
