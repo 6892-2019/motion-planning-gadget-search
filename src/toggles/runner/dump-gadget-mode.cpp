@@ -33,6 +33,12 @@ auto invert_names(lmdb::env& env, lmdb::dbi& names) {
 	return std::pair(std::move(singletons), std::move(groups));
 }
 
+struct is_nop {
+	bool operator()(const GadgetEdge& e) const noexcept {
+		return e.start == e.end && e.from == e.to;
+	}
+};
+
 int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec) {
 	GadgetSet gadget_set = parse_gid_specs(gadget_spec);
 
@@ -69,11 +75,15 @@ int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& g
 			fmt::print("  groups: {}\n", fmt::join(it->second, ", "));
 
 		pair<vector<GadgetEdge>, vector<GadgetEdge>> slls = encoding::decode_to_slls(gadget.second.data(), gadget.second.size());
-		//TODO: print nop edges on their own line (filter them from uedges)
+		vector<GadgetEdge> nops;
+		std::copy_if(slls.first.begin(), slls.first.end(), std::back_inserter(nops), is_nop());
+		slls.first.erase(std::remove_if(slls.first.begin(), slls.first.end(), is_nop()), slls.first.end());
 		if (slls.first.size())
 			fmt::print("  undirected edges: {}\n", slls.first);
 		if (slls.second.size())
 			fmt::print("  directed edges: {}\n", slls.second);
+		if (nops.size())
+			fmt::print("  nop edges: {}\n", nops);
 
 		vector<pair<uint64_t, uint64_t>> singleton = {{gadget.first, gadget.first+1}};
 		vector<pair<uint64_t, uint64_t>> close_target = follow_edges<SimpleEdge>(env, close_edges, singleton);
