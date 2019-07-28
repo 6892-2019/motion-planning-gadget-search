@@ -2,11 +2,36 @@
 #include "../toggles-shared.hpp"
 #include "gadget-encoding.hpp"
 #include "proj_compare.hpp"
+#include <hopscotch/hopscotch_map.h>
 
 using std::vector;
 using std::uint64_t;
 using std::pair;
 using encoding::GadgetEdge;
+
+auto invert_names(lmdb::env& env, lmdb::dbi& names) {
+	tsl::hopscotch_map<uint64_t, vector<std::string>, farmhash_hash> singletons, groups;
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	lmdb::cursor cur = lmdb::cursor::open(txn, names);
+	std::string_view key, value;
+	if (!cur.get(key, value, MDB_FIRST))
+		throw std::logic_error("no names?");
+	do {
+		//TODO: this was copied from follow_edges; see also unmarshal_reinterpret
+		if (value.size() == 0 || value.size() % sizeof(uint64_t) != 0)
+			throw std::logic_error(fmt::format("name key {} has value length {} (not a multiple of {})",
+					//We want the dbi's name here, but I don't see how to get it.
+					//The message won't distinguish close and mirror.
+					key, value.size(), sizeof(uint64_t)));
+		if (value.size() == sizeof(uint64_t))
+			singletons[lmdb::from_sv<uint64_t>(value)].push_back(std::string(key));
+		else
+			for (std::size_t i = 0; i < value.size(); i += sizeof(uint64_t))
+				groups[lmdb::from_sv<uint64_t>(value.substr(i, sizeof(uint64_t)))].push_back(std::string(key));
+	} while (cur.get(key, value, MDB_NEXT));
+	txn.commit();
+	return std::pair(std::move(singletons), std::move(groups));
+}
 
 int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec) {
 	GadgetSet gadget_set = parse_gid_specs(gadget_spec);
@@ -28,6 +53,7 @@ int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& g
 		txn.commit();
 	}
 
+	auto [singletons, groups] = invert_names(env, names_db);
 	vector<uint64_t> all_ids = collect_initial_gadget_set(env, gadget_hashtable, gadget_index, names_db, gadget_set);
 	vector<pair<uint64_t, vector<std::byte>>> all_data = select_gadget_id_to_data(env, gadget_hashtable, gadget_index, all_ids);
 	std::sort(all_data.begin(), all_data.end(), proj_less<0>());
@@ -37,8 +63,10 @@ int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& g
 				gadget.first, stats.locations, stats.states, stats.undirected_edges,
 				stats.directed_edges, stats.components, gadget.second.size());
 
-		//TODO: inverse names lookup (maybe sync mode should generate that map,
-		//as we're using it in a couple places now)
+		if (auto it = singletons.find(gadget.first); it != singletons.end())
+			fmt::print("  names: {}\n", fmt::join(it->second, ", "));
+		if (auto it = groups.find(gadget.first); it != groups.end())
+			fmt::print("  groups: {}\n", fmt::join(it->second, ", "));
 
 		pair<vector<GadgetEdge>, vector<GadgetEdge>> slls = encoding::decode_to_slls(gadget.second.data(), gadget.second.size());
 		//TODO: print nop edges on their own line (filter them from uedges)
