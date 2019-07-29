@@ -10,11 +10,56 @@
 #include "stopwatch.hpp"
 #include "tsl/ordered_map.h"
 #include "lmdb++.h"
+#include <boost/process/child.hpp>
+#include <boost/process/io.hpp>
 
 using std::vector;
 using std::pair;
 using std::uint64_t;
 using namespace std::literals::string_view_literals;
+
+namespace {
+std::string make_temp_filename() {
+	const char* directory = std::getenv("XDG_RUNTIME_DIR");
+	directory = directory ? directory : "/tmp";
+	auto pid = getpid();
+	auto time = std::time(nullptr);
+	return fmt::format("{}/toggles-socat-{}-{}.err", directory, pid, time);
+}
+
+pair<boost::process::child, unsigned short> launch_own_socat_process(std::string_view db_path) {
+	if (db_path.find(' ') != std::string_view::npos)
+		throw std::logic_error("db path contains space (TODO discover and implement socat quoting rules)");
+	//socat will find toggles-runner.exe from PATH.
+	std::string arg2 = fmt::format("EXEC:\"toggles-runner.exe msgpack --db-path {}\",nofork", db_path);
+	//We're racing other processes for the ports.  socat will exit eagerly if
+	//the port is in use, so we will wait briefly for it.  Reading stderr
+	//through a pipe without deadlocking is apparently impossible
+	//https://www.boost.org/doc/libs/1_70_0/doc/html/boost_process/faq.html#boost_process.faq.closep
+	//so we will redirect to a temporary file using our PID and the current time
+	//(which should be unique).
+	std::string stderr_log = make_temp_filename();
+	for (unsigned short port = 5000; port < 5100; ++port) {
+		std::string arg1 = fmt::format("TCP-LISTEN:{},fork,range=127.0.0.1/32,reuseaddr,linger=10,linger2=10,backlog=80", port);
+		//hardcoding the path to socat instead of using boost::process::search_path
+		//to avoid linking against Boost.Filesystem.
+		boost::process::child proc("/usr/bin/socat", arg1, arg2,
+				boost::process::std_err > stderr_log);
+		using namespace std::literals::chrono_literals;
+		if (!proc.wait_for(500ms))
+			return {std::move(proc), port};
+
+		vector<std::string> lines = readAllLines(stderr_log);
+		if (lines.empty())
+			throw std::runtime_error(fmt::format("socat failed with code {} but didn't log errors?", proc.exit_code()));
+		if (lines[0].find("Address already in use"))
+			continue;
+		throw std::runtime_error(fmt::format("socat failed with code {}, temp file {}, errors: \n{}",
+				proc.exit_code(), stderr_log, fmt::join(lines, "\n")));
+	}
+	throw std::runtime_error("couldn't find a free port?");
+}
+} //anonymous namespace
 
 template<class Edge>
 pair<vector<pair<uint64_t, uint64_t>>, vector<pair<uint64_t, uint64_t>>> follow_edges_with_inputs(
@@ -990,6 +1035,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	jemalloc_tuning();
 
 	std::string_view db_path, checkpoint_db_path;
+	unsigned int worker_threads = 0;
 	std::vector<std::string> worker_addrs; //or @foo for response files
 	std::vector<std::string_view> gid_specs;
 	CompletenessOptions completeness_opts;
@@ -999,6 +1045,10 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			db_path = argv[++i];
 		else if (argv[i] == "--checkpoint-db-path"sv)
 			checkpoint_db_path = argv[++i];
+		else if (argv[i] == "--threads"sv)
+			worker_threads = runtime_opts.db_threads = to_uint(argv[++i]);
+		else if (argv[i] == "--worker-threads"sv || argv[i] == "--runner-threads"sv)
+			worker_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--db-threads"sv)
 			runtime_opts.db_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--worker"sv)
@@ -1063,7 +1113,17 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return 1;
 	}
 
-	//TODO: if the batch task thresholds are all 0, it's fine to have no workers
+	if (worker_threads && !worker_addrs.empty())
+		fmt::print("warning: using {} worker threads and {} worker addresses\n", worker_threads, worker_addrs.size());
+	std::optional<boost::process::child> socat;
+	if (worker_threads) {
+		unsigned short port;
+		std::tie(socat, port) = launch_own_socat_process(db_path);
+		std::string addr = fmt::format("127.0.0.1:{}", port);
+		for (unsigned int i = 0; i < worker_threads; ++i)
+			worker_addrs.push_back(addr);
+	}
+
 	if (worker_addrs.empty()) {
 		fmt::print("ERROR: no worker address arguments given, exiting\n");
 		return 1;
@@ -1142,6 +1202,10 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 //			write_buffer(buf, std::string(suspend_checkpoint));
 //		}
 	}
+
+	//It'll get killed when we exit anyway, but may as well clean up properly.
+	if (socat)
+		socat->terminate();
 
 	return 0;
 }
