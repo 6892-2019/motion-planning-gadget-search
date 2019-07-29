@@ -10,6 +10,7 @@
 #include "stopwatch.hpp"
 #include "tsl/ordered_map.h"
 #include "lmdb++.h"
+#include <fmt/chrono.h>
 #include <boost/process/child.hpp>
 #include <boost/process/io.hpp>
 
@@ -1108,6 +1109,21 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			gid_specs.emplace_back(argv[i]);
 	}
 
+	std::time_t now = std::time(nullptr);
+	fmt::print("Driver started at {:%F %T %Z}\n", *std::localtime(&now));
+	//Rather than dump out all the settings, we'll just print the whole command
+	//line.  That does mean we aren't logging the defaults, which could
+	//theoretically be a problem if we change them later.
+	fmt::print("Command line:");
+	for (int i = 1; i < argc; ++i) {
+		fmt::print(" ");
+		if (strchr(argv[i], ' ')) //if you put a tab in an arg, whatever
+			fmt::print("'{}'", argv[i]);
+		else
+			fmt::print(argv[i]);
+	}
+	fmt::print("\n");
+
 	if (db_path.empty()) {
 		fmt::print("ERROR: must specify --db-path\n");
 		return 1;
@@ -1122,6 +1138,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		std::string addr = fmt::format("127.0.0.1:{}", port);
 		for (unsigned int i = 0; i < worker_threads; ++i)
 			worker_addrs.push_back(addr);
+		fmt::print("Launched socat PID {}\n", socat->id());
 	}
 
 	if (worker_addrs.empty()) {
@@ -1144,6 +1161,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	data_env.set_max_dbs(64);
 	data_env.open(std::string(db_path).c_str(), MDB_NORDAHEAD); //TODO: flags?
 	uint64_t database_id = 0;
+	std::string_view creator_hostname, creation_timestamp;
 	{
 		lmdb::txn txn = lmdb::txn::begin(data_env, nullptr, MDB_RDONLY);
 		lmdb::dbi meta = lmdb::dbi::open(txn, "meta");
@@ -1152,9 +1170,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			fmt::print("ERROR: database {} doesn't have an id?\n", db_path);
 			return 1;
 		}
+		meta.get(txn, "creator_hostname", creator_hostname);
+		meta.get(txn, "creation_timestamp", creation_timestamp);
 		database_id = lmdb::from_sv<uint64_t>(id_target);
 		txn.commit();
 	}
+	fmt::print("Database ID {:x}, created on {} at {}\n", database_id, creator_hostname, creation_timestamp);
 
 	std::optional<Search> search; //just for lazy init
 	if (!checkpoint_db_path.empty()) {
