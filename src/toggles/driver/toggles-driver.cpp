@@ -562,8 +562,11 @@ private:
 		Stopwatch stopwatch = Stopwatch::process();
 
 		vector<vector<pair<uint64_t, uint64_t>>> incoming;
+		//This applies parallelism only within each database.  Ideally we'd get
+		//started on the next edge database as soon as there are idle threads.
+		//Tasks would be pairs of a chunk of unary_needs and an edge database.
 		for (auto& p : edges_combine_)
-			incoming.push_back(follow_edges<CombineEdge>(database_, p.second, unary_needs_));
+			incoming.push_back(follow_edges<CombineEdge>(database_, p.second, unary_needs_, runtime_opts_.db_threads));
 		//binary merge tree
 		//TODO: move this to intervals.hpp as multiway union?  but we also want
 		//fork-join-ish stuff here and that won't generalize well
@@ -777,7 +780,7 @@ private:
 	using FollowEdgeFunc = decltype(&follow_edges<SimpleEdge>);
 	void follow_unary_simple(FollowEdgeFunc follow_func, lmdb::dbi& edge_db, const vector<pair<uint64_t, uint64_t>>& intervals, std::string_view log_name) {
 		Stopwatch stopwatch = Stopwatch::process();
-		vector<pair<uint64_t, uint64_t>> targets = follow_func(database_, edge_db, intervals);
+		vector<pair<uint64_t, uint64_t>> targets = follow_func(database_, edge_db, intervals, runtime_opts_.db_threads);
 		fmt::print("Followed {} edges to {} gadgets in {}\n", log_name, interval_size(targets), stopwatch.elapsed().hms());
 		state_(std::move(targets));
 	}

@@ -749,10 +749,11 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
 
 
 
+namespace {
 template<class Edge>
-std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env,
+std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges0(lmdb::env& env,
 		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources) {
-	interval_accumulator<uint64_t> accum(256);
+	interval_accumulator<uint64_t> accum(512);
 	visit_edges<Edge>(env, edge_db, sources, [&](uint64_t, const Edge& e) {
 		accum(e.output);
 		return VisitEdgeResult::proceed;
@@ -760,10 +761,40 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env
 	return std::move(accum).finish();
 }
 
+auto make_follow_edges_tasks(const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads) {
+	std::size_t task_size = std::clamp<std::size_t>(interval_size(sources) / (threads*4), 5000, 25000);
+	return interval_chunk(sources.begin(), sources.end(), task_size);
+}
+
+//TODO: actual interval_union(Range, Range) overload; this appears in several
+//places as a merge lambda
+struct interval_union_vector {
+	std::vector<std::pair<std::uint64_t, std::uint64_t>> operator()(
+			std::vector<std::pair<std::uint64_t, std::uint64_t>> left,
+			std::vector<std::pair<std::uint64_t, std::uint64_t>> right) const {
+		return interval_union(left.begin(), left.end(), right.begin(), right.end());
+	}
+};
+}//anonymous namespace
+
+template<class Edge>
+std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges(lmdb::env& env,
+		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads) {
+	if (threads <= 1)
+		return follow_edges0<Edge>(env, edge_db, sources);
+	else {
+		std::vector<std::vector<std::pair<std::uint64_t, std::uint64_t>>> tasks
+				= make_follow_edges_tasks(sources, threads);
+		return transform_reduce(std::move(tasks), threads,
+				std::bind_front(follow_edges0<Edge>, std::ref(env), std::ref(edge_db)),
+				interval_union_vector());
+	}
+}
+
 //explicitly instantiate the three we need
 template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<CombineEdge>(
-		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads);
 template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<ConnectEdge>(
-		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads);
 template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<SimpleEdge>(
-		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources);
+		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads);
