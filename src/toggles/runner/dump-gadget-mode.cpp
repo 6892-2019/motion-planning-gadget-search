@@ -1,5 +1,7 @@
 #include "precompiled.hpp"
 #include "../toggles-shared.hpp"
+#include "../select-by-id.hpp"
+#include "../gadget-set.hpp"
 #include "gadget-encoding.hpp"
 #include "proj_compare.hpp"
 #include <hopscotch/hopscotch_map.h>

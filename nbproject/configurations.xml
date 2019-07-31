@@ -333,7 +333,19 @@
             tool="3"
             flavor2="0">
       </item>
+      <item path="src/toggles/gadget-set.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/gadget-set.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/toggles/gadgets.yaml" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/toggles/lmdb-interval-list.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/lmdb-interval-list.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/toggles/predicates.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/predicates.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
       </item>
@@ -392,6 +404,10 @@
             ex="false"
             tool="1"
             flavor2="0">
+      </item>
+      <item path="src/toggles/select-by-id.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/select-by-id.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/toggles-report.cpp" ex="false" tool="1" flavor2="0">
       </item>

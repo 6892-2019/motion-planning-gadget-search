@@ -1,6 +1,5 @@
 #include "precompiled.hpp"
 #include "ops.hpp"
-#include "../toggles-shared.hpp"
 
 using namespace automaton;
 using std::uint64_t;

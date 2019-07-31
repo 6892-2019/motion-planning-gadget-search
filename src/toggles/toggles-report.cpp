@@ -1,5 +1,5 @@
 #include "precompiled.hpp"
-#include "toggles-shared.hpp"
+#include "gadget-set.hpp"
 #include "anyprov.hpp"
 #include "stringutils.hpp"
 #include "stopwatch.hpp"

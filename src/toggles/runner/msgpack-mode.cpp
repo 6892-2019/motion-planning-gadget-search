@@ -6,6 +6,7 @@
 #include "provenance.hpp"
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
+#include "../select-by-id.hpp"
 #include "intervals.hpp"
 #include "hopscotch/hopscotch_map.h"
 #include <boost/container/static_vector.hpp>

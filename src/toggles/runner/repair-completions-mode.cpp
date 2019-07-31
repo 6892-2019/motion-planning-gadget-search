@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
-#include "../toggles-shared.hpp"
+#include "../select-by-id.hpp"
+#include "../predicates.hpp"
 #include "intervals.hpp"
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
