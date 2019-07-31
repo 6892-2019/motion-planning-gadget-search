@@ -134,12 +134,8 @@ PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env,
 				update_SL_predicates_basecase_batch_size);
 		vector<pair<uint64_t, uint64_t>> batch = {{demand.beginInclusive, demand.beginInclusive + batch_size}};
 
-		//We could (should?) be using abort/renew here, but they're awkward to
-		//use with the lmdbxx wrapper.
-		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		vector<pair<uint64_t, encoding::Stats>> stats = select_gadget_id_to_stats(
 				env, gadget_hashtable, gadget_index, batch);
-		txn.commit();
 
 		for (const pair<uint64_t, encoding::Stats>& p : stats)
 			accum(p.first, p.second);
@@ -190,6 +186,7 @@ PredicateUpdateResult update_SL_predicates_sequential(lmdb::env& env, lmdb::dbi&
 					accum(id, encoding::stats(reinterpret_cast<const std::byte*>(gadget.data())));
 				if (!cur.get(hash, gadget, MDB_NEXT)) break;
 			}
+		txn.commit();
 		return std::move(accum).finish();
 	}, PredicateUpdateResult::merge);
 }
