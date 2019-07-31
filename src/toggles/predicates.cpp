@@ -63,7 +63,6 @@ PredicateDemand update_SL_predicates_discover(lmdb::env& env, lmdb::dbi& predica
 	return {validity, valid_before, std::move(locations), std::move(states)};
 }
 
-const std::size_t update_SL_predicates_basecase_batch_size = 10000;
 struct PredicateUpdateResult {
 	vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> locations, states;
 	static PredicateUpdateResult merge(PredicateUpdateResult&& left, PredicateUpdateResult&& right) {
@@ -84,16 +83,51 @@ struct PredicateUpdateResult {
 		return ret;
 	}
 };
+
+struct PredicateUpdateAccumulator {
+	PredicateUpdateAccumulator(const PredicateDemand& demand) {
+		locations.reserve(demand.locations.size());
+		for (unsigned int i : demand.locations)
+			locations.emplace_back(i, 1024);
+		states.reserve(demand.states.size());
+		for (unsigned int i : demand.states)
+			states.emplace_back(i, 1024);
+	};
+	void operator()(uint64_t gadget_id, const encoding::Stats& stats) {
+		//I tried commoning these with a lambda, but we'd have to work a
+		//pointer-to-data-member into it, so I gave up.
+		auto lit = std::lower_bound(locations.begin(), locations.end(), stats.locations, coord_less_left<0>());
+		if (lit != locations.end())
+			(lit->second)(gadget_id);
+		auto sit = std::lower_bound(states.begin(), states.end(), stats.states, coord_less_left<0>());
+		if (sit != states.end())
+			(sit->second)(gadget_id);
+	}
+	PredicateUpdateResult finish() && {
+		PredicateUpdateResult ret;
+		convert_to_less_than(ret.locations, locations);
+		convert_to_less_than(ret.states, states);
+		return ret;
+	}
+	static void convert_to_less_than(vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>>& ret,
+			vector<pair<unsigned int, interval_accumulator<uint64_t>>>& accum) {
+		//We accumulated equality above, but our predicates are <=, so we need to
+		//union each set with the smaller sets.
+		ret.reserve(accum.size());
+		for (std::size_t i = 0; i < accum.size(); ++i) {
+			ret.emplace_back(accum[i].first, std::move(accum[i].second).finish());
+			if (i > 0)
+				ret[i].second = interval_union(ret[i-1].second.cbegin(), ret[i-1].second.cend(),
+						ret[i].second.begin(), ret[i].second.end());
+		}
+	}
+	vector<pair<unsigned int, interval_accumulator<uint64_t>>> locations, states;
+};
+
+const std::size_t update_SL_predicates_basecase_batch_size = 10000;
 PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& predicates,
 		lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, PredicateDemand demand) {
-	vector<pair<unsigned int, interval_accumulator<uint64_t>>> locations, states;
-	locations.reserve(demand.locations.size());
-	for (unsigned int i : demand.locations)
-		locations.emplace_back(i, 1024);
-	states.reserve(demand.states.size());
-	for (unsigned int i : demand.states)
-		states.emplace_back(i, 1024);
-
+	PredicateUpdateAccumulator accum(demand);
 	while (demand.beginInclusive < demand.endExclusive) {
 		//Work in batches to keep transactions short.
 		std::size_t batch_size = std::min(demand.endExclusive - demand.beginInclusive,
@@ -107,34 +141,11 @@ PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& p
 				env, gadget_hashtable, gadget_index, batch);
 		txn.commit();
 
-		for (const pair<uint64_t, encoding::Stats>& p : stats) {
-			//I tried commoning these with a lambda, but we'd have to work a
-			//pointer-to-data-member into it, so I gave up.
-			auto lit = std::lower_bound(locations.begin(), locations.end(), p.second.locations, coord_less_left<0>());
-			if (lit != locations.end())
-				(lit->second)(p.first);
-			auto sit = std::lower_bound(states.begin(), states.end(), p.second.states, coord_less_left<0>());
-			if (sit != states.end())
-				(sit->second)(p.first);
-		}
+		for (const pair<uint64_t, encoding::Stats>& p : stats)
+			accum(p.first, p.second);
 		demand.beginInclusive += batch_size;
 	}
-
-	PredicateUpdateResult ret;
-	//We accumulated equality above, but our predicates are <=, so we need to
-	//union each set with the smaller sets.
-	auto convert_to_less_than = [](auto& ret, auto& accum) {
-		ret.reserve(accum.size());
-		for (std::size_t i = 0; i < accum.size(); ++i) {
-			ret.emplace_back(accum[i].first, std::move(accum[i].second).finish());
-			if (i > 0)
-				ret[i].second = interval_union(ret[i-1].second.cbegin(), ret[i-1].second.cend(),
-						ret[i].second.begin(), ret[i].second.end());
-		}
-	};
-	convert_to_less_than(ret.locations, locations);
-	convert_to_less_than(ret.states, states);
-	return ret;
+	return std::move(accum).finish();
 }
 
 bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t speculative_value_before,
