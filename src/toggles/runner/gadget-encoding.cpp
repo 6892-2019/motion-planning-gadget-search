@@ -33,8 +33,8 @@ auto reachable_accept_components(const AutomatonBase& a, const SCCs& sccs) {
 	std::vector<unsigned int> ret;
 	tsl::hopscotch_set<unsigned int, farmhash_hash> closed;
 	circular_deque<unsigned int, 32> worklist;
-	closed.insert(0);
-	worklist.push_back(0);
+	closed.insert(state_to_comp[0]);
+	worklist.push_back(state_to_comp[0]);
 	while (!worklist.empty()) {
 		unsigned int cur = worklist.pop_front();
 		//even if we aren't an accepting component, we can still reach other accepting components
