@@ -304,6 +304,8 @@ struct CompletenessOptions {
 	unsigned int mirror_max_states = std::numeric_limits<unsigned int>::max();
 	bool multiplayer = false;
 	bool follow_mirror = true;
+	bool compute_close = true; //ignored if multiplayer
+	bool compute_mirror = true;
 };
 
 /**
@@ -590,6 +592,9 @@ private:
 		if (complete_opts_.multiplayer) {
 			phase_ = Phase::discover_needs_mirror;
 			return Control::proceed;
+		} else if (!complete_opts_.compute_close) {
+			phase_ = Phase::follow_close;
+			return Control::proceed;
 		}
 		filter_unary("close", state_.subgeneration(), {.max_states = complete_opts_.close_max_states});
 		phase_ = Phase::compute_close;
@@ -624,6 +629,10 @@ private:
 	}
 
 	Control discover_needs_mirror() {
+		if (!complete_opts_.compute_mirror) {
+			phase_ = Phase::follow_mirror;
+			return Control::proceed;
+		}
 		filter_unary("mirror", state_.subgeneration(), {.max_states = complete_opts_.mirror_max_states});
 		phase_ = Phase::compute_mirror;
 		return Control::proceed;
@@ -1078,6 +1087,10 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			completeness_opts.mirror_max_states = to_uint(argv[++i]);
 		else if (argv[i] == "--no-follow-mirror"sv)
 			completeness_opts.follow_mirror = false;
+		else if (argv[i] == "--skip-close"sv)
+			completeness_opts.compute_close = false;
+		else if (argv[i] == "--skip-mirror"sv)
+			completeness_opts.compute_mirror = false;
 
 		else if (argv[i] == "--gadgets-per-task"sv)
 			runtime_opts.combine_pairs_per_task = runtime_opts.connect_gadgets_per_task
