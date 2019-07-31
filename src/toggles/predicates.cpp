@@ -125,8 +125,8 @@ struct PredicateUpdateAccumulator {
 };
 
 const std::size_t update_SL_predicates_basecase_batch_size = 10000;
-PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& predicates,
-		lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, PredicateDemand demand) {
+PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env,
+		lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, PredicateDemand&& demand) {
 	PredicateUpdateAccumulator accum(demand);
 	while (demand.beginInclusive < demand.endExclusive) {
 		//Work in batches to keep transactions short.
@@ -146,6 +146,52 @@ PredicateUpdateResult update_SL_predicates_basecase(lmdb::env& env, lmdb::dbi& p
 		demand.beginInclusive += batch_size;
 	}
 	return std::move(accum).finish();
+}
+
+PredicateUpdateResult update_SL_predicates_random_access(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, unsigned int threads, const PredicateDemand& demand) {
+	if (threads <= 1 || demand.size() < 4*update_SL_predicates_basecase_batch_size)
+		return update_SL_predicates_basecase(env, gadget_hashtable, gadget_index, PredicateDemand(demand));
+	else {
+		vector<pair<uint64_t, uint64_t>> demanded_interval = {{demand.beginInclusive, demand.endExclusive}};
+		//TODO: We could avoid some allocations here by making chunks a vector
+		//of pairs (or PredicateDemands) instead of a vector of vectors of pairs.
+		auto chunks = interval_chunk(demanded_interval.begin(), demanded_interval.end(), update_SL_predicates_basecase_batch_size);
+		return transform_reduce(std::move(chunks), threads,
+				[&](vector<pair<uint64_t, uint64_t>> chunk) -> PredicateUpdateResult {
+					assert(chunk.size() == 1);
+					PredicateDemand task = demand;
+					task.beginInclusive = chunk[0].first;
+					task.endExclusive = chunk[0].second;
+					return update_SL_predicates_basecase(env, gadget_hashtable, gadget_index, std::move(task));
+				}, PredicateUpdateResult::merge);
+	}
+}
+
+PredicateUpdateResult update_SL_predicates_sequential(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		unsigned int threads, const PredicateDemand& demand) {
+	//Scan all of gadget_hashtable in parallel.
+	std::size_t chunk_size = std::numeric_limits<std::size_t>::max() / threads;
+	vector<pair<std::size_t, std::size_t>> hash_ranges; //inclusive!
+	for (unsigned int i = 0; i < threads; ++i)
+		hash_ranges.emplace_back(chunk_size*i, chunk_size*(i+1)-1);
+	//Ensure we cover the whole space even if it didn't divide evenly.
+	hash_ranges.back().second = std::numeric_limits<std::size_t>::max();
+
+	return transform_reduce(std::move(hash_ranges), threads, [&](pair<std::size_t, std::size_t> range) {
+		PredicateUpdateAccumulator accum(demand);
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		lmdb::cursor cur = lmdb::cursor::open(txn, gadget_hashtable);
+		std::string_view hash = lmdb::to_sv(range.first), gadget;
+		if (cur.get(hash, gadget, MDB_SET_RANGE))
+			while (lmdb::from_sv<uint64_t>(hash) <= range.second) {//yes, inclusive
+				uint64_t id = lmdb::from_sv<uint64_t>(gadget.substr(gadget.size()-8, gadget.size()));
+				if (demand.beginInclusive <= id && id < demand.endExclusive)
+					accum(id, encoding::stats(reinterpret_cast<const std::byte*>(gadget.data())));
+				if (!cur.get(hash, gadget, MDB_NEXT)) break;
+			}
+		return std::move(accum).finish();
+	}, PredicateUpdateResult::merge);
 }
 
 bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t speculative_value_before,
@@ -212,24 +258,19 @@ bool meet_update_demand(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget
 		lmdb::dbi& gadget_index, unsigned int threads, PredicateDemand demand) {
 	if (demand.size() <= 0) return false;
 
-	if (threads <= 1 || demand.size() < 4*update_SL_predicates_basecase_batch_size) {
-		PredicateUpdateResult result = update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, demand);
-		return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
-	} else {
-		vector<pair<uint64_t, uint64_t>> demanded_interval = {{demand.beginInclusive, demand.endExclusive}};
-		//TODO: We could avoid some allocations here by making chunks a vector
-		//of pairs (or PredicateDemands) instead of a vector of vectors of pairs.
-		auto chunks = interval_chunk(demanded_interval.begin(), demanded_interval.end(), update_SL_predicates_basecase_batch_size);
-		PredicateUpdateResult result = transform_reduce(std::move(chunks), threads,
-				[&](vector<pair<uint64_t, uint64_t>> chunk) -> PredicateUpdateResult {
-					assert(chunk.size() == 1);
-					PredicateDemand task = demand;
-					task.beginInclusive = chunk[0].first;
-					task.endExclusive = chunk[0].second;
-					return update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, task);
-				}, PredicateUpdateResult::merge);
-		return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
-	}
+	PredicateUpdateResult result;
+	//If we're going to touch most of the hashtable leaves anyway, we might as
+	//well scan the whole table, so we are sequential and also bypass the index.
+	//TODO: do the math to find the expected fraction of leaves touched based on
+	//items per page and the demand size
+	//TODO: both update_SL_predicates_discover and create_state_predicate have a
+	//txn to get the max id inside, instead of this small one; could stash it in
+	//the demand
+	if (demand.size() >= get_current_max_gadget_id(env, gadget_index)/8)
+		result = update_SL_predicates_sequential(env, gadget_hashtable, threads, demand);
+	else
+		result = update_SL_predicates_random_access(env, gadget_hashtable, gadget_index, threads, demand);
+	return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
 }
 }//anonymous namespace
 
