@@ -196,12 +196,9 @@ bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t
 	txn.commit();
 	return updated;
 }
-}//anonymous namespace
 
-//update SL predicates through given id (default max) using N threads (or using given executor)
-bool update_SL_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable,
-		lmdb::dbi& gadget_index, uint64_t valid_before, unsigned int threads) {
-	PredicateDemand demand = update_SL_predicates_discover(env, predicates, gadget_index, valid_before);
+bool meet_update_demand(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, unsigned int threads, PredicateDemand demand) {
 	if (demand.size() <= 0) return false;
 
 	if (threads <= 1 || demand.size() < 4*update_SL_predicates_basecase_batch_size) {
@@ -223,6 +220,14 @@ bool update_SL_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadg
 		return update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result));
 	}
 }
+}//anonymous namespace
+
+//update SL predicates through given id (default max) using N threads (or using given executor)
+bool update_SL_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, uint64_t valid_before, unsigned int threads) {
+	return meet_update_demand(env, predicates, gadget_hashtable, gadget_index, threads,
+			update_SL_predicates_discover(env, predicates, gadget_index, valid_before));
+}
 
 //create and update new state predicate to current validity using N threads
 //It would be easy to create multiple predicates at once should we need that.
@@ -240,10 +245,8 @@ bool create_state_predicate(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& ga
 	uint64_t valid_before = lmdb::from_sv<uint64_t>(value);
 	txn.commit();
 
-	PredicateDemand demand = {1, valid_before, {}, {less_than_or_equal_to}};
-	//TODO: threads
-	PredicateUpdateResult result = update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, demand);
-	if (!update_SL_predicates_commit(env, predicates, demand.endExclusive, std::move(result)))
+	if (!meet_update_demand(env, predicates, gadget_hashtable, gadget_index, threads,
+			{1, valid_before, {}, {less_than_or_equal_to}}))
 		//We could get the new valid_before and scan just a bit more, then union
 		//with the previous result (if we don't move it).  We should also check
 		//the other process didn't already create the key, too.
