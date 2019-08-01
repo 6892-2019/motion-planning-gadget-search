@@ -30,9 +30,18 @@ struct SortStats {
 	unsigned int local_index;
 };
 bool operator<(const SortStats& a, const SortStats& b) noexcept {
-	//TODO: also try to group uedges == 0 and dedges == 0.
-	return std::tie(a.stats.locations, a.stats.states, a.hash) <
-			std::tie(b.stats.locations, b.stats.states, b.hash);
+	//std::tie doesn't bind rvalues, so we have to explicitly compute some things.
+	//Single out uedges == 0 and dedges == 0 because those are natural queries;
+	//the rest of the edge sorts aren't super useful.  These are reversed because
+	//false sorts before true.
+	bool a_undirected = a.stats.directed_edges != 0,
+			a_directed = a.stats.undirected_edges != 0,
+			b_undirected = b.stats.directed_edges != 0,
+			b_directed = b.stats.undirected_edges != 0;
+	auto a_total_edges = a.stats.undirected_edges + a.stats.directed_edges,
+			b_total_edges = b.stats.undirected_edges + b.stats.directed_edges;
+	return std::tie(a.stats.locations, a.stats.states, a.stats.components, a_undirected, a_directed, a.stats.undirected_edges, a.stats.directed_edges, a_total_edges, a.hash) <
+			std::tie(b.stats.locations, b.stats.states, b.stats.components, b_undirected, b_directed, b.stats.undirected_edges, b.stats.directed_edges, b_total_edges, b.hash);
 }
 
 vector<ProposedInsert> hash_and_move(vector<vector<std::byte>>&& gadgets) {
