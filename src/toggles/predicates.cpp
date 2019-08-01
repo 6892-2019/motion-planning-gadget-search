@@ -363,6 +363,17 @@ bool create_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_
 			demand.add(p.second, p.first);
 	txn.commit();
 
+	if (demand.endExclusive == 1) {
+		//We've never updated predicates, so we don't have to fill in anything.
+		//We just want to create any missing keys (with empty values).
+		value = ""sv;
+		auto txn = lmdb::txn::begin(env);
+		for (std::pair<unsigned int, PredicateKind> p : less_than_or_equal_to)
+			predicates.put(txn, fmt::format("{}<={}", p.second, p.first), value, MDB_NOOVERWRITE);
+		txn.commit();
+		return true;
+	}
+
 	if (demand.empty())
 		return false;
 	if (!meet_update_demand(env, predicates, gadget_hashtable, gadget_index, threads, demand))
