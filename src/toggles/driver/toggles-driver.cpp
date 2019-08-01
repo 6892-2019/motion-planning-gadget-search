@@ -520,8 +520,8 @@ private:
 				uint64_t r = combine_rights_[i];
 				vector<pair<uint64_t, uint64_t>> undone = filter_completion(database_, txn,
 						completions_, fmt::format("combine-{}", r), unary_needs_);
-				vector<pair<uint64_t, uint64_t>> possible = intersect_location_predicate(txn, predicates_,
-						combine_left_locations_[i], std::move(undone));
+				vector<pair<uint64_t, uint64_t>> possible = intersect_predicate(txn, predicates_,
+						PredicateKind::locations, combine_left_locations_[i], std::move(undone));
 				intervals.emplace_back(r, std::move(possible));
 			}
 			txn.commit();
@@ -736,7 +736,7 @@ private:
 			return;
 		}
 
-		update_predicates(candidates.back().second);
+		do_update_predicates(candidates.back().second);
 
 		auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
 		//We filter with predicates first to get more informative stats, but if
@@ -918,8 +918,8 @@ private:
 	void ensure_predicates() {
 		auto ensure_predicate = [&](unsigned int max_states) {
 			Stopwatch stopwatch = Stopwatch::process();
-			if (create_state_predicate(database_, predicates_, gadget_hashtable_, gadget_index_,
-					max_states, runtime_opts_.db_threads)) {
+			if (create_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
+					{{max_states, PredicateKind::states}}, runtime_opts_.db_threads)) {
 				Stopwatch::Result elapsed = stopwatch.elapsed();
 				fmt::print("Created predicate states<={} using {} threads in {} ({})\n",
 						max_states, runtime_opts_.db_threads, elapsed.hms(), elapsed.utilization());
@@ -940,19 +940,19 @@ private:
 		//from unary_needs_, but that might be an expensive copy.
 		const vector<pair<uint64_t, uint64_t>>* source = &candidates;
 		if (preds.min_locations) {
-			unary_needs_ = subtract_location_predicate(txn, predicates_, preds.min_locations-1, *source);
+			unary_needs_ = subtract_predicate(txn, predicates_, PredicateKind::locations, preds.min_locations-1, *source);
 			source = &unary_needs_;
 		}
 		if (preds.max_locations != std::numeric_limits<unsigned int>::max()) {
-			unary_needs_ = intersect_location_predicate(txn, predicates_, preds.max_locations, *source);
+			unary_needs_ = intersect_predicate(txn, predicates_, PredicateKind::locations, preds.max_locations, *source);
 			source = &unary_needs_;
 		}
 		if (preds.min_states) {
-			unary_needs_ = subtract_state_predicate(txn, predicates_, preds.min_states-1, *source);
+			unary_needs_ = subtract_predicate(txn, predicates_, PredicateKind::states, preds.min_states-1, *source);
 			source = &unary_needs_;
 		}
 		if (preds.max_states != std::numeric_limits<unsigned int>::max()) {
-			unary_needs_ = intersect_state_predicate(txn, predicates_, preds.max_states, *source);
+			unary_needs_ = intersect_predicate(txn, predicates_, PredicateKind::states, preds.max_states, *source);
 			source = &unary_needs_;
 		}
 	}
@@ -962,9 +962,9 @@ private:
 		txn.commit();
 	}
 
-	void update_predicates(uint64_t interval_back_second) {
+	void do_update_predicates(uint64_t interval_back_second) {
 		Stopwatch stopwatch = Stopwatch::process();
-		if (update_SL_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
+		if (update_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
 				interval_back_second, runtime_opts_.db_threads)) {
 			//TODO: more informative update_SL_predicates return value
 			auto elapsed = stopwatch.elapsed();

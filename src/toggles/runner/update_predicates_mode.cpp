@@ -124,7 +124,7 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 
 	for (unsigned int state : create_state) {
 		Stopwatch stopwatch = Stopwatch::process();
-		if (create_state_predicate(env, predicates, gadget_hashtable, gadget_index, state, num_threads))
+		if (create_predicates(env, predicates, gadget_hashtable, gadget_index, {{state, PredicateKind::states}}, num_threads))
 			fmt::print("created states<={} in {}\n", state, stopwatch.elapsed().hms());
 		else
 			fmt::print("states<={} already exists\n", state);
@@ -133,7 +133,7 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 	if (update) {
 		Stopwatch stopwatch = Stopwatch::process();
 		//maybe should return the number of gadgets added to the predicates for reporting?
-		if (update_SL_predicates(env, predicates, gadget_hashtable, gadget_index, update, num_threads))
+		if (update_predicates(env, predicates, gadget_hashtable, gadget_index, update, num_threads))
 			fmt::print("updated predicates in {}\n", stopwatch.elapsed().hms());
 		else
 			fmt::print("predicates already up-to-date\n");

@@ -180,12 +180,12 @@ int repair_completions_mode(std::string_view db_path, const vector<std::string_v
 
 		Stopwatch pred_watch = Stopwatch::process();
 		//We are also complete for any gadget with state size <= 3.
-		if (update_SL_predicates(env, predicates, gadget_hashtable, gadget_index,
+		if (update_predicates(env, predicates, gadget_hashtable, gadget_index,
 				std::numeric_limits<uint64_t>::max(), num_threads)) {
 			Stopwatch::Result elapsed = pred_watch.elapsed();
 			fmt::print("updated SL predicates in {} ({:.2f})\n", elapsed.hms(), elapsed.utilization());
 		}
-		vector<pair<uint64_t, uint64_t>> too_small = get_location_predicate(env, predicates, 3);
+		vector<pair<uint64_t, uint64_t>> too_small = get_predicate(env, predicates, PredicateKind::locations, 3);
 		result = interval_union(result.begin(), result.end(), too_small.begin(), too_small.end());
 
 		lmdb::txn txn = lmdb::txn::begin(env); //write txn
