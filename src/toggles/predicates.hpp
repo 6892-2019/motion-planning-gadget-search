@@ -13,6 +13,9 @@ bool update_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_
 enum class PredicateKind {
 	locations, states, uedges, dedges, total_edges, components
 };
+inline bool operator<(PredicateKind a, PredicateKind b) {
+	return static_cast<int>(a) < static_cast<int>(b);
+}
 template<>
 struct fmt::formatter<PredicateKind> : formatter<string_view> {
 	template<typename FormatContext>
