@@ -11,19 +11,6 @@ using std::uint64_t;
 using std::pair;
 using namespace std::literals::string_view_literals;
 
-//vector<pair<uint64_t, uint64_t>> demanded_interval = {{demand.beginInclusive, demand.endExclusive}};
-//		//TODO: We could avoid some allocations here by making chunks a vector
-//		//of pairs (or PredicateDemands) instead of a vector of vectors of pairs.
-//		auto chunks = interval_chunk(demanded_interval.begin(), demanded_interval.end(), update_SL_predicates_basecase_batch_size);
-//		PredicateUpdateResult result = transform_reduce(std::move(chunks), threads,
-//				[&](vector<pair<uint64_t, uint64_t>> chunk) -> PredicateUpdateResult {
-//					assert(chunk.size() == 1);
-//					PredicateDemand task = demand;
-//					task.beginInclusive = chunk[0].first;
-//					task.endExclusive = chunk[0].second;
-//					return update_SL_predicates_basecase(env, predicates, gadget_hashtable, gadget_index, task);
-//				}, PredicateUpdateResult::merge);
-
 vector<pair<uint64_t, uint64_t>> read_all_keys(lmdb::env& env, lmdb::dbi& database, unsigned int threads) {
 	uint64_t endExclusive;
 	{
