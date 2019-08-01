@@ -13,6 +13,22 @@ using std::pair;
 using std::uint64_t;
 using namespace std::literals::string_view_literals;
 
+PredicateKind predicate_kind_from_string(std::string_view s) {
+	if (s == "location" || s == "locations")
+		return PredicateKind::locations;
+	if (s == "state" || s == "states")
+		return PredicateKind::states;
+	if (s == "uedge" || s == "uedges")
+		return PredicateKind::uedges;
+	if (s == "dedge" || s == "dedges")
+		return PredicateKind::dedges;
+	if (s == "tedge" || s == "tedges" || s == "edge" || s == "edges")
+		return PredicateKind::total_edges;
+	if (s == "component" || s == "components")
+		return PredicateKind::components;
+	throw std::runtime_error("predicate_kind_from_string: "+std::string(s));
+}
+
 namespace {
 struct PredicateDemand {
 	uint64_t beginInclusive, endExclusive;

@@ -29,6 +29,7 @@ struct fmt::formatter<PredicateKind> : formatter<string_view> {
 		return fmt::formatter<string_view>::format(name, ctx);
 	}
 };
+PredicateKind predicate_kind_from_string(std::string_view s);
 
 //create and update new predicates to current validity using N threads
 bool create_predicates(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,

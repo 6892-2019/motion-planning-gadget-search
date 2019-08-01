@@ -16,7 +16,7 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 	bool list_all_predicates = false, reinitialize = false;
 	uint64_t update = 0;
 	unsigned int num_threads = 1;
-	vector<unsigned int> create_state, delete_state;
+	vector<pair<unsigned int, PredicateKind>> to_create, to_delete;
 	vector<std::string_view> dump;
 	for (std::size_t i = 0; i < args.size(); ++i) {
 		if (args[i] == "--update"sv)
@@ -30,11 +30,13 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 			dump.push_back(args[++i]);
 		else if (args[i] == "--reinitialize"sv)
 			reinitialize = true;
-		else if (args[i] == "--delete-state"sv)
-			delete_state.push_back(from_string<unsigned int>(args[++i]));
-		else if (args[i] == "--create-state"sv)
-			create_state.push_back(from_string<unsigned int>(args[++i]));
-		else if (args[i] == "--threads"sv)
+		else if (args[i].find("--delete-") == 0) {//ersatz starts_with
+			to_delete.emplace_back(to_uint(args[i+1]), predicate_kind_from_string(args[i].substr(9)));
+			++i;
+		} else if (args[i].find("--create-") == 0) {
+			to_create.emplace_back(to_uint(args[i+1]), predicate_kind_from_string(args[i].substr(9)));
+			++i;
+		} else if (args[i] == "--threads"sv)
 			num_threads = from_string<unsigned int>(args[++i]);
 		else {
 			fmt::print(stderr, "ERROR: unknown option {}\n", args[i]);
@@ -114,20 +116,20 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 		txn.commit();
 	}
 
-	for (unsigned int state : delete_state) {
+	for (auto p : to_delete) {
 		lmdb::txn txn = lmdb::txn::begin(env);
-		if (!predicates.del(txn, fmt::format("states<={}", state)))
-			fmt::print("states<={} not deleted because it does not exist\n", state);
+		if (!predicates.del(txn, fmt::format("{}<={}", p.second, p.first)))
+			fmt::print("{}<={} not deleted because it does not exist\n", p.second, p.first);
 		txn.commit();
-		fmt::print("deleted states<={}\n", state);
+		fmt::print("deleted {}<={}\n", p.second, p.first);
 	}
 
-	for (unsigned int state : create_state) {
+	if (!to_create.empty()) {
 		Stopwatch stopwatch = Stopwatch::process();
-		if (create_predicates(env, predicates, gadget_hashtable, gadget_index, {{state, PredicateKind::states}}, num_threads))
-			fmt::print("created states<={} in {}\n", state, stopwatch.elapsed().hms());
+		if (create_predicates(env, predicates, gadget_hashtable, gadget_index, to_create, num_threads))
+			fmt::print("created predicates in {}\n", stopwatch.elapsed().hms());
 		else
-			fmt::print("states<={} already exists\n", state);
+			fmt::print("skipped creating predicates (nothing to do)\n");
 	}
 
 	if (update) {
