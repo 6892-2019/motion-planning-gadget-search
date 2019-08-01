@@ -17,12 +17,14 @@ namespace {
 struct PredicateDemand {
 	uint64_t beginInclusive, endExclusive;
 	vector<unsigned int> locations, states;
+	uint64_t max_gadget_id;
 	std::size_t size() const {return endExclusive - beginInclusive;}
 };
 PredicateDemand update_SL_predicates_discover(lmdb::env& env, lmdb::dbi& predicates,
 		lmdb::dbi& gadget_index, uint64_t valid_before) {
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-	valid_before = std::min(valid_before, get_current_max_gadget_id(txn, gadget_index)+1);
+	uint64_t max_gadget_id = get_current_max_gadget_id(txn, gadget_index);
+	valid_before = std::min(valid_before, max_gadget_id+1);
 
 	lmdb::cursor cur = lmdb::cursor::open(txn, predicates);
 	std::string_view key = "valid_before", value = "";
@@ -30,7 +32,7 @@ PredicateDemand update_SL_predicates_discover(lmdb::env& env, lmdb::dbi& predica
 		throw std::runtime_error("missing predicates valid_before key (corrupt database?)");
 	uint64_t validity = lmdb::from_sv<uint64_t>(value);
 	if (valid_before <= validity)
-		return {0, 0, {}, {}};
+		return {0, 0, {}, {}, max_gadget_id};
 	//update interval is [validity, valid_before).
 
 	//TODO: probably goes in stringutils.hpp?
@@ -60,7 +62,7 @@ PredicateDemand update_SL_predicates_discover(lmdb::env& env, lmdb::dbi& predica
 
 	std::sort(locations.begin(), locations.end());
 	std::sort(states.begin(), states.end());
-	return {validity, valid_before, std::move(locations), std::move(states)};
+	return {validity, valid_before, std::move(locations), std::move(states), max_gadget_id};
 }
 
 struct PredicateUpdateResult {
@@ -260,10 +262,7 @@ bool meet_update_demand(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& gadget
 	//well scan the whole table, so we are sequential and also bypass the index.
 	//TODO: do the math to find the expected fraction of leaves touched based on
 	//items per page and the demand size
-	//TODO: both update_SL_predicates_discover and create_state_predicate have a
-	//txn to get the max id inside, instead of this small one; could stash it in
-	//the demand
-	if (demand.size() >= get_current_max_gadget_id(env, gadget_index)/8)
+	if (demand.size() >= demand.max_gadget_id / 8)
 		result = update_SL_predicates_sequential(env, gadget_hashtable, threads, demand);
 	else
 		result = update_SL_predicates_random_access(env, gadget_hashtable, gadget_index, threads, demand);
@@ -292,10 +291,11 @@ bool create_state_predicate(lmdb::env& env, lmdb::dbi& predicates, lmdb::dbi& ga
 	if (!predicates.get(txn, "valid_before", value))
 		throw std::runtime_error("missing predicates valid_before key (corrupt database?)");
 	uint64_t valid_before = lmdb::from_sv<uint64_t>(value);
+	uint64_t max_gadget_id = get_current_max_gadget_id(txn, gadget_index);
 	txn.commit();
 
 	if (!meet_update_demand(env, predicates, gadget_hashtable, gadget_index, threads,
-			{1, valid_before, {}, {less_than_or_equal_to}}))
+			{1, valid_before, {}, {less_than_or_equal_to}, max_gadget_id}))
 		//We could get the new valid_before and scan just a bit more, then union
 		//with the previous result (if we don't move it).  We should also check
 		//the other process didn't already create the key, too.
