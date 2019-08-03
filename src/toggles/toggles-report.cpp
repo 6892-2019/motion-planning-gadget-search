@@ -438,7 +438,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	//just avoiding sorting all the data over and over, on the assumption that
 	//we're printing tracebacks infrequently.
 	vector<vector<SkinnyProv>> prov;
-	prov.emplace_back();
 	//We store most edges as SkinnyProv, only getting the full edge data when
 	//we're going to print a derivation.
 	EdgeCache edge_cache;
@@ -538,7 +537,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("close", awaiting_closemirror);
 				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_close, EdgeKind::close, possible, closed, num_threads);
 				if (!provs.empty())
-						prov.push_back(std::move(provs));
+					prov.push_back(std::move(provs));
 				if (!discovered.empty()) //avoid copying if nothing found (especially for close)
 					task_parallel(num_threads,
 							std::bind_front(record_closed, std::cref(discovered)),
@@ -614,17 +613,29 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		fmt::print("==> Step {}: {} user, {} sys, {} wall ({:.2f}), {:.2f} GiB ({:.2f}, {})\n",
 				step_count++, elapsed.userSeconds(), elapsed.systemSeconds(), elapsed.hms(), elapsed.utilization(),
 				elapsed.absolute().highwaterGibibytes(), elapsed.highwaterGibibytes(), elapsed.hardFaults());
-		fmt::print("-->    closed: {:11d} {:7d} {:7d} KiB\n",
-				interval_size(closed), closed.size(), closed.size() * sizeof(closed.front()) / 1024);
-		fmt::print("--> closemirr: {:11d} {:7d} {:7d} KiB\n",
-				interval_size(awaiting_closemirror), awaiting_closemirror.size(),
-				awaiting_closemirror.size() * sizeof(awaiting_closemirror.front()) / 1024);
-		fmt::print("-->   connect: {:11d} {:7d} {:7d} KiB\n",
-				interval_size(awaiting_connect), awaiting_connect.size(),
-				awaiting_connect.size() * sizeof(awaiting_connect.front()) / 1024);
-		fmt::print("-->   combine: {:11d} {:7d} {:7d} KiB\n",
-				interval_size(awaiting_combine), awaiting_combine.size(),
-				awaiting_combine.size() * sizeof(awaiting_combine.front()) / 1024);
+		auto print_stats_line = [&](const auto& list, std::string_view name) {
+			std::size_t size = interval_size(list), count = list.size();
+			double avg_width = ((double)size)/((double)count); //cast both to avoid imprecision warning
+			std::string width_field = std::isnan(avg_width) ? "" : fmt::format("{:5.1f}", avg_width);
+			if (width_field.size() > 5) width_field = "big";
+			fmt::print("--> {:>9}: {:11d} {:11d} {:>5} {:7d} MiB\n",
+					name, size, count, width_field, size * sizeof(list.front()) / (1024*1024));
+		};
+		print_stats_line(closed, "closed");
+		print_stats_line(awaiting_closemirror, "closemirr");
+		print_stats_line(awaiting_connect, "connect");
+		print_stats_line(awaiting_combine, "combine");
+
+		std::size_t prov_total_bytes = 0, prov_total_capacity = 0;
+		for (const auto& p : prov) {
+			prov_total_bytes += p.size() * sizeof(p.front());
+			prov_total_capacity += p.capacity() * sizeof(p.front());
+		}
+		fmt::print("--> provenance: {:6.2f} GiB {:6.2f} GiB {:.2f}\n",
+				((double)prov_total_bytes) / (1024*1024*1024),
+				((double)prov_total_capacity) / (1024*1024*1024),
+				((double)prov_total_bytes) / ((double)prov_total_capacity));
+
 		fmt::print("\n");
 	}
 
