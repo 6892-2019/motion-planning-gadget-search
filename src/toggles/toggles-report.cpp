@@ -475,6 +475,11 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		}
 	};
 
+	//We might not use a particular input for anything, but we still consider it
+	//"mentioned" for reporting purposes.
+	for (uint64_t i : source_ids)
+		printed_in_traces(i);
+
 	vector<std::string> targets_found;
 	auto record_closed = [&](const vector<pair<uint64_t, uint64_t>>& discovered) {
 		closed = interval_union(closed.begin(), closed.end(), discovered.cbegin(), discovered.cend());
