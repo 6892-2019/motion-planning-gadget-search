@@ -81,11 +81,11 @@ int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& g
 		std::copy_if(slls.first.begin(), slls.first.end(), std::back_inserter(nops), is_nop());
 		slls.first.erase(std::remove_if(slls.first.begin(), slls.first.end(), is_nop()), slls.first.end());
 		if (slls.first.size())
-			fmt::print("  undirected edges: {}\n", slls.first);
+			fmt::print("  undirected edges: {}\n", fmt::join(slls.first, ", "));
 		if (slls.second.size())
-			fmt::print("  directed edges: {}\n", slls.second);
+			fmt::print("  directed edges: {}\n", fmt::join(slls.second, ", "));
 		if (nops.size())
-			fmt::print("  nop edges: {}\n", nops);
+			fmt::print("  nop edges: {}\n", fmt::join(nops, ", "));
 
 		vector<pair<uint64_t, uint64_t>> singleton = {{gadget.first, gadget.first+1}};
 		vector<pair<uint64_t, uint64_t>> close_target = follow_edges<SimpleEdge>(env, close_edges, singleton);
