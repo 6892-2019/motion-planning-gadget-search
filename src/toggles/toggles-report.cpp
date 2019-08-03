@@ -330,6 +330,11 @@ struct merge_unique_vectors {
 template<typename T>
 vector<T> operator()(vector<T>&& left, vector<T>&& right) const {
 	vector<T> result;
+	//This is an overestimate, but at most by max(left.size(), right.size()),
+	//because we know each vector is already uniqued.  Empirically, this
+	//improved utilization from ~.75 to ~.95 without requiring a big vector copy
+	//(as in shrink_to_fit()).
+	result.reserve(left.size() + right.size());
 	merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(result));
 	return result;
 }
