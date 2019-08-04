@@ -40,8 +40,21 @@ inline bool operator<(const GadgetEdge& l, const GadgetEdge& r) {
 	return std::tie(l.start, l.from, l.to, l.end) < std::tie(r.start, r.from, r.to, r.end);
 }
 
-std::unique_ptr<automaton::WorkingAutomaton> inflate_slls(const std::vector<GadgetEdge>& uedges,
-		const std::vector<GadgetEdge>& dedges, unsigned int alphabetSize = 0);
+class GadgetBuilder {
+public:
+	GadgetBuilder(unsigned int alphabet_size, automaton::WorkingAutomaton::state_type gadget_state_estimate = 1);
+	GadgetBuilder& trans(automaton::WorkingAutomaton::state_type start, automaton::WorkingAutomaton::symbol_type from,
+			automaton::WorkingAutomaton::symbol_type to, automaton::WorkingAutomaton::state_type end);
+	std::pair<std::unique_ptr<automaton::WorkingAutomaton>, unsigned int> build() const &;
+	std::pair<std::unique_ptr<automaton::WorkingAutomaton>, unsigned int> build() &&;
+	unsigned int size() const {return numeric_cast<unsigned int>(gadgetStateToAutomatonState.size());}
+	std::vector<unsigned int> initialComponentGadgetStates() const;
+	void setGadgetState(unsigned int newInitial);
+private:
+	std::unique_ptr<automaton::WorkingAutomaton> gadget;
+	std::vector<automaton::WorkingAutomaton::state_type> gadgetStateToAutomatonState;
+	automaton::WorkingAutomaton::state_type translateState(automaton::WorkingAutomaton::state_type gadgetState);
+};
 
 
 

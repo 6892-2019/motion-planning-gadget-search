@@ -1180,6 +1180,16 @@ public:
 	auto end(unsigned int component) const {
 		return components_.begin() + indices_[component+1];
 	}
+	auto component(unsigned int component) const {
+		return make_range_for_pair(begin(component), end(component));
+	}
+	unsigned int find(AutomatonBase::state_type state) {
+		for (unsigned int c : xrange(size()))
+			for (unsigned int s : component(c))
+				if (s == state)
+					return c;
+		throw std::out_of_range(fmt::format("SCCs::find failed: {} {} {}", state, components_.size(), size()));
+	}
 private:
 	using state_type = AutomatonBase::state_type;
 	std::vector<AutomatonBase::state_type> components_;

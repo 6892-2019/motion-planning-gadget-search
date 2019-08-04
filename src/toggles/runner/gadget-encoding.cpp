@@ -8,8 +8,72 @@ using namespace automaton;
 using automaton::detail::PackReader;
 using automaton::detail::PackWriter;
 using encoding::GadgetEdge;
+using encoding::GadgetBuilder;
 using std::unique_ptr;
 using std::vector;
+
+namespace encoding {
+GadgetBuilder::GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type gadget_state_estimate)
+		: gadget(make_working(alphabet_size)) {
+	//Every gadget has at least one state, and it's important that automaton
+	//state 0 correspond to a gadget state (to accept the empty string).
+	//For other states we can freely intermix the states that correspond to
+	//gadget states and those that don't.
+	gadget_state_estimate = std::max(gadget_state_estimate, 1u);
+	for (WorkingAutomaton::state_type i = 0; i < gadget_state_estimate; ++i)
+		translateState(i);
+}
+
+GadgetBuilder& GadgetBuilder::trans(WorkingAutomaton::state_type start, WorkingAutomaton::symbol_type from,
+		WorkingAutomaton::symbol_type to, WorkingAutomaton::state_type end) {
+	start = translateState(start);
+	end = translateState(end);
+	assert(gadget->accept(start));
+	assert(gadget->accept(end));
+	WorkingAutomaton::state_type t = gadget->addState();
+	gadget->addTrans(start, from, t);
+	gadget->addTrans(t, to, end);
+	return *this;
+}
+
+std::pair<unique_ptr<automaton::WorkingAutomaton>, unsigned int> GadgetBuilder::build() const & {
+	unique_ptr<WorkingAutomaton> p = gadget->clone();
+	unsigned int rotation = canonicalize(*p, p->active_alphabet_size(), false);
+	return {std::move(p), rotation};
+}
+
+std::pair<unique_ptr<automaton::WorkingAutomaton>, unsigned int> GadgetBuilder::build() && {
+	gadget->minimize();
+	unsigned int rotation = canonicalize(*gadget, gadget->active_alphabet_size(), false);
+	return {std::move(gadget), rotation};
+}
+
+vector<unsigned int> GadgetBuilder::initialComponentGadgetStates() const {
+	vector<unsigned int> ret;
+	SCCs sccs = automaton::find_components(*gadget);
+	for (auto state : sccs.component(sccs.find(0)))
+		if (gadget->accept(state)) {
+			auto it = std::find(gadgetStateToAutomatonState.begin(), gadgetStateToAutomatonState.end(), state);
+			assert(it != gadgetStateToAutomatonState.end());
+			ret.push_back(numeric_cast<unsigned int>(std::distance(gadgetStateToAutomatonState.begin(), it)));
+		}
+	return ret;
+}
+
+void GadgetBuilder::setGadgetState(unsigned int newInitial) {
+	gadget->swapStateNumbers(0, gadgetStateToAutomatonState.at(newInitial));
+	std::swap(gadgetStateToAutomatonState[newInitial],
+			*std::find(gadgetStateToAutomatonState.begin(), gadgetStateToAutomatonState.end(), 0));
+}
+
+WorkingAutomaton::state_type GadgetBuilder::translateState(WorkingAutomaton::state_type gadgetState) {
+	while (gadgetState >= gadgetStateToAutomatonState.size()) {
+		gadgetStateToAutomatonState.push_back(gadget->addState());
+		gadget->setAccept(gadgetStateToAutomatonState.back());
+	}
+	return gadgetStateToAutomatonState[gadgetState];
+}
+} //namespace encoding
 
 namespace {
 //TODO: put this in numutils.hpp?
@@ -53,46 +117,6 @@ auto reachable_accept_components(const AutomatonBase& a, const SCCs& sccs) {
 	return ret;
 }
 
-
-class GadgetBuilder {
-public:
-	GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type gadget_state_estimate = 1) : gadget(make_working(alphabet_size)) {
-		//Every gadget has at least one state, and it's important that automaton
-		//state 0 correspond to a gadget state (to accept the empty string).
-		//For other states we can freely intermix the states that correspond to
-		//gadget states and those that don't.
-		gadget_state_estimate = std::max(gadget_state_estimate, 1u);
-		for (WorkingAutomaton::state_type i = 0; i < gadget_state_estimate; ++i)
-			translateState(i);
-	}
-	GadgetBuilder& trans(WorkingAutomaton::state_type start, WorkingAutomaton::symbol_type from,
-			WorkingAutomaton::symbol_type to, WorkingAutomaton::state_type end) {
-		start = translateState(start);
-		end = translateState(end);
-		assert(gadget->accept(start));
-		assert(gadget->accept(end));
-		WorkingAutomaton::state_type t = gadget->addState();
-		gadget->addTrans(start, from, t);
-		gadget->addTrans(t, to, end);
-		return *this;
-	}
-	unique_ptr<WorkingAutomaton> build() {
-		gadget->minimize();
-		canonicalize(*gadget, gadget->active_alphabet_size(), false);
-		return std::move(gadget);
-	}
-private:
-	unique_ptr<WorkingAutomaton> gadget;
-	vector<WorkingAutomaton::state_type> gadgetStateToAutomatonState;
-
-	WorkingAutomaton::state_type translateState(WorkingAutomaton::state_type gadgetState) {
-		while (gadgetState >= gadgetStateToAutomatonState.size()) {
-			gadgetStateToAutomatonState.push_back(gadget->addState());
-			gadget->setAccept(gadgetStateToAutomatonState.back());
-		}
-		return gadgetStateToAutomatonState[gadgetState];
-	}
-};
 
 std::pair<std::vector<GadgetEdge>, std::vector<GadgetEdge>> deflate_slls(const AutomatonBase& a) {
 	assert(a.canonical());
@@ -228,33 +252,6 @@ void read_compressed(PackReader& reader, unsigned int count, const EdgeCoder& co
 
 
 namespace encoding {
-
-std::unique_ptr<WorkingAutomaton> inflate_slls(const std::vector<GadgetEdge>& uedges,
-		const std::vector<GadgetEdge>& dedges, unsigned int alphabetSize) {
-	unsigned int states = 0;
-	if (!alphabetSize) {
-		//Size-to-fit by finding the largest used symbol.
-		for (auto e : uedges) {
-			alphabetSize = std::max({alphabetSize, e.from, e.to});
-			states = std::max({states, e.start, e.end});
-		}
-		for (auto e : dedges) {
-			alphabetSize = std::max({alphabetSize, e.from, e.to});
-			states = std::max({states, e.start, e.end});
-		}
-		++alphabetSize;
-		++states;
-	}
-	GadgetBuilder b(alphabetSize, states);
-	for (auto e : uedges)
-		b.trans(e.start, e.from, e.to, e.end).trans(e.end, e.to, e.from, e.start);
-	for (auto e : dedges)
-		b.trans(e.start, e.from, e.to, e.end);
-	return b.build();
-}
-
-
-
 namespace detail {
 //See the comment in gadget-encoding-stats.hpp for the definition of this header.
 auto build_header(Stats s) {
@@ -346,7 +343,7 @@ std::unique_ptr<automaton::WorkingAutomaton> decode(const std::byte* encoded_gad
 	read_compressed<true>(reader, stats.directed_edges, coder, builder);
 	assert(reader.tell() == encoded_gadget + length);
 	assert(!reader.overflow());
-	return builder.build();
+	return std::move(builder).build().first;
 }
 
 std::pair<std::vector<GadgetEdge>, std::vector<GadgetEdge>> decode_to_slls(const std::byte* encoded_gadget, std::size_t length) {

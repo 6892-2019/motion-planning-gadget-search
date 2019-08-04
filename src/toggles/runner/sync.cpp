@@ -13,12 +13,16 @@
 #include <yaml-cpp/yaml.h>
 #include <ctime>
 #include <sys/random.h>
+#include <variant>
 
 using namespace automaton;
+using encoding::GadgetEdge;
+using encoding::GadgetBuilder;
 using std::uint64_t;
 using std::size_t;
 using std::pair;
 using std::optional;
+using std::variant;
 using std::vector;
 using std::unique_ptr;
 using std::string_view;
@@ -49,72 +53,77 @@ vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(vector<std::uint64_t>&
 	return maximal_intervals(ensure_memory_is_freed.begin(), ensure_memory_is_freed.end());
 }
 
-////TODO: make this SCCs::find
-unsigned int component_for_state(SCCs sccs, AutomatonBase::state_type state) {
-	for (unsigned int c : xrange(sccs.size()))
-		for (unsigned int s : make_range_for_pair(sccs.begin(c), sccs.end(c))) //TODO: add SCCs::range (name TBD)
-			if (s == state)
-				return c;
-	//TODO: add an SCCs method giving the number of states, so we can report here
-	throw std::logic_error(fmt::format("component_for_state failed: {} {}", state, sccs.size()));
+GadgetBuilder inflate_slls(const std::vector<GadgetEdge>& uedges,
+		const std::vector<GadgetEdge>& dedges, unsigned int alphabetSize = 0) {
+	unsigned int states = 0;
+	if (!alphabetSize) {
+		//Size-to-fit by finding the largest used symbol.
+		for (auto e : uedges) {
+			alphabetSize = std::max({alphabetSize, e.from, e.to});
+			states = std::max({states, e.start, e.end});
+		}
+		for (auto e : dedges) {
+			alphabetSize = std::max({alphabetSize, e.from, e.to});
+			states = std::max({states, e.start, e.end});
+		}
+		++alphabetSize;
+		++states;
+	}
+	GadgetBuilder b(alphabetSize, states);
+	for (auto e : uedges)
+		b.trans(e.start, e.from, e.to, e.end).trans(e.end, e.to, e.from, e.start);
+	for (auto e : dedges)
+		b.trans(e.start, e.from, e.to, e.end);
+	return b;
 }
 
-/**
- * Canonicalizes a gadget in SLLS format, returning in database row format.
- * Intended for use when loading human-readable gadget definitions into the
- * database.
- */
-vector<pair<vector<std::byte>, optional<vector<std::byte>>>> canonicalize_from_slls(
-		vector<encoding::GadgetEdge> uedges, vector<encoding::GadgetEdge> dedges) {
-	unique_ptr<WorkingAutomaton> a = encoding::inflate_slls(uedges, dedges);
-	vector<std::byte> row = encoding::encode(*a);
-	//just computed these in encoding::encode, could try to save them
-	SCCs sccs = automaton::find_components(*a);
-	auto activealpha = a->active_alphabet_size();
-
-	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> normals;
-	normals.emplace_back(std::move(a), std::move(row));
-	//When initializing the database with named gadgets, we want to try all
-	//initial states in the initial connected component.
-	unsigned int initial_component = component_for_state(sccs, 0);
-	for (auto state : make_range_for_pair(sccs.begin(initial_component), sccs.end(initial_component))) //TODO: SCCs::range
-		if (normals.front().first->accept(state)) {
-			unique_ptr<WorkingAutomaton> p = normals.front().first->clone();
-			p->swapStateNumbers(0, state);
-			canonicalize(*p, activealpha, false); //no mirroring
-			row = encoding::encode(*p);
-			normals.emplace_back(std::move(p), std::move(row));
+struct CanonicalizeRecord {
+	unsigned int gadget_state;
+	variant<std::size_t, vector<std::byte>> normal;
+	unsigned int normal_rotation;
+	optional<variant<std::size_t, vector<std::byte>>> mirror;
+	unsigned int mirror_rotation;
+	bool initial_component;
+};
+vector<CanonicalizeRecord> canonicalize_from_slls(
+		vector<GadgetEdge> uedges, vector<GadgetEdge> dedges) {
+	GadgetBuilder b = inflate_slls(uedges, dedges);
+	vector<unsigned int> initial_component = b.initialComponentGadgetStates();
+	vector<CanonicalizeRecord> ret;
+	//We build all states of the gadget.  We generally only add names for states
+	//in the initial component, but that's up to the caller.
+	for (unsigned int state : xrange(b.size())) {
+		CanonicalizeRecord r;
+		r.gadget_state = state;
+		b.setGadgetState(state);
+		pair<unique_ptr<WorkingAutomaton>, unsigned int> normal = b.build();
+		if (!normal.first->active_alphabet_size())
+			//Gadgets with components often have an empty state, which we'll
+			//minimize into a 0-location gadget.  We can't represent that in the
+			//encoding, so we have to pretend that state doesn't exist.  (The
+			//parent gadget still has the right number of states and components.)
+			continue;
+		r.normal = encoding::encode(*normal.first);
+		r.normal_rotation = normal.second;
+		pair<unique_ptr<WorkingAutomaton>, unsigned int> mirror = ::mirror(*normal.first);
+		r.mirror = encoding::encode(*mirror.first);
+		r.mirror_rotation = mirror.second;
+		if (r.normal == *r.mirror) {
+			r.mirror.reset();
+			r.mirror_rotation = std::numeric_limits<unsigned int>::max();
 		}
-	std::sort(normals.begin(), normals.end(), proj_less<1>());
-	normals.erase(std::unique(normals.begin(), normals.end(), proj_equal<1>()), normals.end());
-
-	//It's plausible that only a subset of the states are chiral.
-	vector<pair<unique_ptr<WorkingAutomaton>, vector<std::byte>>> mirrors;
-	for (const auto& n : normals) {
-		//We don't return the rotation, but we won't add a mirror provenance edge
-		//either, so the usual mirror machinery will fill it in later.  We just
-		//need the gadget up front so we can give it an appropriate name.
-		unique_ptr<WorkingAutomaton> p = mirror(*n.first).first;
-		row = encoding::encode(*p);
-		mirrors.emplace_back(std::move(p), std::move(row));
+		r.initial_component = std::find(initial_component.begin(), initial_component.end(), r.gadget_state) != initial_component.end();
+		ret.push_back(std::move(r));
 	}
-
-	//Mirror order is the same as the normal order (mirrors aren't sorted).
-	//We're also just taking the first enantiomorph as 'normal', rather than
-	//the lexicographically lesser one.
-	vector<pair<vector<std::byte>, optional<vector<std::byte>>>> retval;
-	for (auto i : xrange(normals.size()))
-		if (normals[i].second != mirrors[i].second)
-			retval.emplace_back(std::move(normals[i].second), std::move(mirrors[i].second));
-		else
-			retval.emplace_back(std::move(normals[i].second), std::nullopt);
-	return retval;
+	//We might want to deduplicate the records by r.normal, to prevent generating
+	//names for the two identical states of, e.g., crossing-disemitripwire-one-way-tripwire.
+	return ret;
 }
 
 namespace YAML {
 template<>
-struct convert<encoding::GadgetEdge> {
-	static Node encode(const encoding::GadgetEdge& e) {
+struct convert<GadgetEdge> {
+	static Node encode(const GadgetEdge& e) {
 		Node node;
 		node.push_back(e.start);
 		node.push_back(e.from);
@@ -122,7 +131,7 @@ struct convert<encoding::GadgetEdge> {
 		node.push_back(e.end);
 		return node;
 	}
-	static bool decode(const Node& node, encoding::GadgetEdge& e) {
+	static bool decode(const Node& node, GadgetEdge& e) {
 		if (!node.IsSequence() || node.size() != 4)
 			return false;
 		e.start = node[0].as<unsigned int>();
@@ -159,55 +168,113 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 	};
 	tsl::ordered_map<std::string, vector<std::size_t>> naming;
 	vector<pair<std::string, std::string>> deferred_aliases;
+	vector<vector<CanonicalizeRecord>> drawing_data; //used to construct data we need for automatic graph drawing
 	for (std::string_view filename : files) {
 		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
 		YAML::Node gadgets = toplevel["gadgets"];
 		for (auto it = gadgets.begin(); it != gadgets.end(); ++it) {
 			std::string gadget_name = it->first.as<std::string>();
-			vector<encoding::GadgetEdge> uedges, dedges;
-			if (it->second["uedges"])
-				uedges = it->second["uedges"].as<vector<encoding::GadgetEdge>>();
-			if (it->second["dedges"])
-				dedges = it->second["dedges"].as<vector<encoding::GadgetEdge>>();
+			YAML::Node data = it->second;
+			vector<GadgetEdge> uedges, dedges;
+			if (data["uedges"])
+				uedges = data["uedges"].as<vector<GadgetEdge>>();
+			if (data["dedges"])
+				dedges = data["dedges"].as<vector<GadgetEdge>>();
 			if (uedges.empty() && dedges.empty()) {
 				fmt::print(stderr, "no edges for gadget {} in {}\n", gadget_name, filename);
 				return 1;
 			}
 
-			vector<pair<vector<std::byte>, optional<vector<std::byte>>>> morphs =
-					canonicalize_from_slls(std::move(uedges), std::move(dedges));
-			//We are chiral if any state has enantiomorphs.
-			bool chiral = std::any_of(morphs.begin(), morphs.end(), [](const auto& q){return q.second.has_value();});
-			vector<std::size_t> whole_group_indices;
-			if (morphs.size() == 1 && !chiral) {
-				whole_group_indices.push_back(register_gadget(std::move(morphs[0].first)));
-				//singleton group -- we'll install the usual group name later
-			} else if (morphs.size() == 1 && chiral) {
-				auto& p = morphs[0];
-				naming["r-"+gadget_name] = {register_gadget(std::move(p.first))};
-				naming["s-"+gadget_name] = {register_gadget(std::move(*p.second))};
-				whole_group_indices = {naming["r-"+gadget_name].front(), naming["s-"+gadget_name].front()};
-			} else if (morphs.size() > 1 && !chiral)
-				for (std::size_t i = 0; i < morphs.size(); ++i) {
-					std::size_t number = register_gadget(std::move(morphs[i].first));
-					naming[fmt::format("{}-{}", gadget_name, i)] = {number};
-					whole_group_indices.push_back(number);
+			drawing_data.push_back(canonicalize_from_slls(std::move(uedges), std::move(dedges)));
+			vector<CanonicalizeRecord>& morphs = drawing_data.back();
+			for (CanonicalizeRecord& r : morphs) {
+				r.normal = register_gadget(std::move(std::get<1>(r.normal)));
+				if (r.mirror)
+					r.mirror = register_gadget(std::move(std::get<1>(*r.mirror)));
+			}
+
+			tsl::ordered_map<unsigned int, std::string> state_names;
+			//By default, we generate names for all states in the initial
+			//connected component and their mirrors, if any.  But the YAML file
+			//can explicitly ask for all states to be generated, or specify
+			//custom names.
+			bool custom_names = false;
+			if (data["state-names"] && data["state-names"].IsMap()) {
+				custom_names = true;
+				for (auto nit = data["state-names"].begin(); nit != data["state-names"].end(); ++nit) {
+					unsigned int number = nit->first.as<unsigned int>();
+					if (!(number <= morphs.size()))
+						throw std::runtime_error(fmt::format("state-names problem {} {} {}\n", gadget_name, number, morphs.size()));
+					state_names[number] = nit->second.as<std::string>();
 				}
-			else if (morphs.size() > 1 && chiral)
-				for (std::size_t i = 0; i < morphs.size(); ++i) {
-					std::size_t number = register_gadget(std::move(morphs[i].first));
-					naming[fmt::format("r-{}-{}", gadget_name, i)] = {number};
-					whole_group_indices.push_back(number);
-					if (morphs[i].second) {
-						number = register_gadget(std::move(*morphs[i].second));
-						naming[fmt::format("s-{}-{}", gadget_name, i)] = {number};
-						whole_group_indices.push_back(number);
+			}
+			//could allow a sequence of integers specifying states to give the default integer names to
+			else if (data["state-names"] && data["state-names"].IsScalar()) {
+				std::string maybe = data.as<std::string>();
+				if (maybe == "all")
+					for (unsigned int i = 0; i < morphs.size(); ++i)
+						state_names[i] = std::to_string(i);
+				else
+					throw std::runtime_error(fmt::format("state-names problem {} {}\n", gadget_name, maybe));
+			} else
+				for (const CanonicalizeRecord& r : morphs)
+					if (r.initial_component)
+						state_names[r.gadget_state] = std::to_string(r.gadget_state);
+
+			//We want chirality markers in names if one of the named states has enantiomorphs.
+			bool chiral = std::any_of(morphs.begin(), morphs.end(), [&](const CanonicalizeRecord& r) {
+				return state_names.count(r.gadget_state) && r.mirror.has_value();
+			});
+
+			if (!custom_names && state_names.size() == 1) {
+				auto record_it = std::find_if(morphs.begin(), morphs.end(),
+						[number=state_names.front().first](const CanonicalizeRecord& r){return r.gadget_state == number;});
+				if (record_it->mirror) {
+					naming[fmt::format("{}-r", gadget_name)] = {std::get<0>(record_it->normal)};
+					naming[fmt::format("{}-s", gadget_name)] = {std::get<0>(*record_it->mirror)};
+					naming[fmt::format("{}", gadget_name)] = {std::get<0>(record_it->normal), std::get<0>(*record_it->mirror)};
+				} else
+					naming[gadget_name] = {std::get<0>(record_it->normal)};
+			} else {
+				vector<std::size_t> whole_group_indices;
+				vector<std::size_t> chiral_r, chiral_s;
+				for (const CanonicalizeRecord& r : morphs) {
+					auto name_it = state_names.find(r.gadget_state);
+					//We register these gadgets, but don't generate names for them.
+					if (name_it == state_names.end()) continue;
+					const std::string& state_name = name_it->second;
+
+					std::size_t normal = std::get<0>(r.normal);
+					optional<std::size_t> mirror;
+					if (r.mirror)
+						mirror = std::get<0>(*r.mirror);
+
+					whole_group_indices.push_back(normal);
+					if (mirror)
+						whole_group_indices.push_back(*mirror);
+
+					if (chiral) {
+						naming[fmt::format("{}-{}-r", gadget_name, state_name)] = {normal};
+						//Some states may be achiral, but we still generate the -s
+						//name so the -r and -s groups have the same size.
+						if (mirror) {
+							naming[fmt::format("{}-{}-s", gadget_name, state_name)] = {*mirror};
+							naming[fmt::format("{}-{}", gadget_name, state_name)]  = {normal, *mirror};
+						} else {
+							naming[fmt::format("{}-{}-s", gadget_name, state_name)] = {normal};
+							naming[fmt::format("{}-{}", gadget_name, state_name)]  = {normal};
+						}
+						chiral_r.push_back(normal);
+						chiral_s.push_back(mirror ? *mirror : normal);
 					} else
-						naming[fmt::format("s-{}-{}", gadget_name, i)] = naming.at(fmt::format("r-{}-{}", gadget_name, i));
+						naming[fmt::format("{}-{}", gadget_name, state_name)] = {normal};
 				}
-			else
-				throw std::logic_error("empty morphs somehow?");
-			naming[gadget_name] = std::move(whole_group_indices);
+				if (chiral) {
+					naming[fmt::format("{}-r", gadget_name)] = std::move(chiral_r);
+					naming[fmt::format("{}-s", gadget_name)] = std::move(chiral_s);
+				}
+				naming[gadget_name] = std::move(whole_group_indices);
+			}
 		}
 
 		YAML::Node aliases = toplevel["aliases"];
