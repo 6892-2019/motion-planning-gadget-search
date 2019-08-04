@@ -169,6 +169,7 @@ def edges_for_ports(ports, optional_open=False):
         'uedges': uedges, 'dedges': dedges,
         'planar': nonadjacent_count < 2, 'directed': directed_types,
         'optional-open': optional_open,
+        'state-names': {0: 'open', 1: 'closed'},
     }
 
 
@@ -185,7 +186,10 @@ def gadget_keyfunc(g):
 gadgets = []
 for s in survivors:
     gadgets.append(edges_for_ports(s))
-    gadgets.append(edges_for_ports(s, True))
+    # There's no point to optional open doors for the gadget search, because in
+    # singleplayer there's no reason not to open a door.  Optional close doors
+    # are similarly pointless.
+    #gadgets.append(edges_for_ports(s, True))
 
 gadgets = sorted(gadgets, key=gadget_keyfunc)
 gadget_subdoc = {}
