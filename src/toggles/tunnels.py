@@ -2,7 +2,12 @@
 
 import functools
 import itertools
-import sys, yaml
+import sys
+import yaml
+try:
+    from yaml import CLoader as Loader, CSafeDumper as Dumper
+except ImportError:
+    from yaml import SafeLoader as Loader, SafeDumper as Dumper
 from itertools import starmap
 from operator import methodcaller
 from enum import Enum
@@ -155,10 +160,10 @@ def do_state_flips(first: Gadget, second: Gadget) -> StateFlip:
     return StateFlip.SECOND
 
 if __name__ == '__main__':
-    tunnel_specs = yaml.safe_load(open(sys.argv[1], 'r'))
+    tunnel_specs = yaml.load(open(sys.argv[1], 'r'), Loader=Loader)
     tunnels: Dict[str, Gadget] = {k: Gadget.make(v.get('uedges', []), v.get('dedges', []), v.get('state-size'), v.get('state-names'))
             for k, v in tunnel_specs.items()}
-    fallback_specs = yaml.safe_load(open(sys.argv[2], 'r'))
+    fallback_specs = yaml.load(open(sys.argv[2], 'r'), Loader=Loader)
     fallback: Dict[str, Gadget] = {k: Gadget.make(v.get('uedges', []), v.get('dedges', []), v.get('state-size'), v.get('state-names'))
             for k, v in fallback_specs.items()}
 
@@ -279,6 +284,5 @@ if __name__ == '__main__':
 
 
 
-    # Force PyYAML to respect dict order.  https://stackoverflow.com/a/52621703/3614835
-    yaml.add_representer(dict, lambda self, data: yaml.representer.SafeRepresenter.represent_dict(self, data.items()))
-    print(yaml.dump(document, default_flow_style=None))
+
+    print(yaml.dump(document, default_flow_style=None, Dumper=Dumper, sort_keys=False))

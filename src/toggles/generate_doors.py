@@ -5,6 +5,10 @@
 
 import itertools
 import yaml
+try:
+    from yaml import CLoader as Loader, CSafeDumper as Dumper
+except ImportError:
+    from yaml import SafeLoader as Loader, SafeDumper as Dumper
 from enum import Enum
 from types import SimpleNamespace
 
@@ -200,6 +204,4 @@ for g in gadgets:
 alias_subdoc = {}
 doc = {'gadgets': gadget_subdoc, 'aliases': alias_subdoc}
 
-# Force PyYAML to respect dict order.  https://stackoverflow.com/a/52621703/3614835
-yaml.add_representer(dict, lambda self, data: yaml.representer.SafeRepresenter.represent_dict(self, data.items()))
-print(yaml.dump(doc, default_flow_style=None))
+print(yaml.dump(doc, default_flow_style=None, Dumper=Dumper, sort_keys=False))
