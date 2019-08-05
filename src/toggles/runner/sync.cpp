@@ -158,6 +158,34 @@ void initialize_predicates_database(lmdb::txn& txn, lmdb::dbi& predicates) {
 		throw std::logic_error("can't happen: failed to put predicate valid_before key?");
 }
 
+struct GadgetPragma {
+	//By default, we throw if a named state was pruned (identical to some other
+	//state).  This is what we want for human-written definitions, because it
+	//indicates an error in the gadget or in the names.  But for machine-
+	//generated definitions, we may not know if any states will be pruned, so we
+	//can't just omit names.
+	bool allow_pruning_named_states = false;
+};
+GadgetPragma parse_gadget_pragma(YAML::Node pragma_node, std::string_view gadget_name, std::string_view filename) {
+	if (!pragma_node) return {}; //if not present, defaults
+
+	vector<std::string> pragmas;
+	if (pragma_node.IsSequence())
+		pragmas = pragma_node.as<vector<std::string>>();
+	else if (pragma_node.IsScalar())
+		pragmas = {pragma_node.as<std::string>()};
+	else
+		throw std::runtime_error(fmt::format("unexpected pragma type for {} in {}", gadget_name, filename));
+
+	GadgetPragma ret;
+	for (const std::string& p : pragmas)
+		if (p == "allow-pruning-named-states"sv)
+			ret.allow_pruning_named_states = true;
+		else
+			throw std::runtime_error(fmt::format("unrecognized pragma \"{}\" for {} in {}", p, gadget_name, filename));
+	return ret;
+}
+
 int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 	//vector_ordered_set
 	tsl::ordered_set<vector<std::byte>, farmhash_hash, std::equal_to<vector<std::byte>>,
@@ -184,6 +212,8 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				fmt::print(stderr, "no edges for gadget {} in {}\n", gadget_name, filename);
 				return 1;
 			}
+
+			GadgetPragma pragma = parse_gadget_pragma(data["pragma"], gadget_name, filename);
 
 			drawing_data.push_back(canonicalize_from_slls(std::move(uedges), std::move(dedges)));
 			vector<CanonicalizeRecord>& morphs = drawing_data.back();
@@ -213,7 +243,6 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 					r.mirror.reset();
 
 			//If state change is equivalent to rotation, drop the extra names.
-			//TODO: this might be a problem for explicitly-named states?
 			for (std::size_t i = morphs.size(); i-- > 0;)
 				for (std::size_t j = i; j-- > 0;)
 					if (morphs[i].normal == morphs[j].normal) {
@@ -231,10 +260,11 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				custom_names = true;
 				for (auto nit = data["state-names"].begin(); nit != data["state-names"].end(); ++nit) {
 					unsigned int number = nit->first.as<unsigned int>();
-					if (std::find_if(morphs.begin(), morphs.end(),
-							[number](const CanonicalizeRecord& r){return r.gadget_state == number;}) == morphs.end())
-						throw std::runtime_error(fmt::format("state-names problem {} {} {}\n", gadget_name, number, morphs.size()));
 					state_names[number] = nit->second.as<std::string>();
+					if (!pragma.allow_pruning_named_states && std::find_if(morphs.begin(), morphs.end(),
+							[number](const CanonicalizeRecord& r){return r.gadget_state == number;}) == morphs.end())
+						throw std::runtime_error(fmt::format("named state was pruned {} {} {} {}",
+									gadget_name, number, state_names[number], morphs.size()));
 				}
 			}
 			//could allow a sequence of integers specifying states to give the default integer names to
@@ -244,7 +274,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 					for (unsigned int i = 0; i < morphs.size(); ++i)
 						state_names[i] = std::to_string(morphs[i].gadget_state);
 				else
-					throw std::runtime_error(fmt::format("state-names problem {} {}\n", gadget_name, maybe));
+					throw std::runtime_error(fmt::format("unrecognized state-names scalar {} {}", gadget_name, maybe));
 			} else
 				for (const CanonicalizeRecord& r : morphs)
 					if (r.initial_component)

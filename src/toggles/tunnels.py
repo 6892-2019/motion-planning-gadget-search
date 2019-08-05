@@ -283,6 +283,9 @@ if __name__ == '__main__':
                 document['gadgets'][name] = gadget.prepare_yaml()
 
 
+    # All of our state names are optional.
+    for gdata in document['gadgets'].values():
+        gdata['pragma'] = 'allow-pruning-named-states'
 
 
     print(yaml.dump(document, default_flow_style=None, Dumper=Dumper, sort_keys=False))
