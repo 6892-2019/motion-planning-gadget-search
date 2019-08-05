@@ -373,13 +373,4 @@ gadgets:
   undirected-self-closing-door:
     dedges: [[0, 0, 1, 1], [0, 1, 0, 1], [0, 2, 2, 0], [1, 2, 2, 0]]
 
-aliases:
-  crossover: crossing-wire-wire
-  split: 3-split
-  2-split: wire
-  2-spinner: wire
-  1-toggle: toggle
-  parallel-2-toggle: parallel-toggle-toggle
-  antiparallel-2-toggle: antiparallel-toggle-toggle
-  crossing-2-toggle: crossing-toggle-toggle
-  dichotomizer: locking-2-toggle
+aliases: {}
