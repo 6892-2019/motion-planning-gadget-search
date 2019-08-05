@@ -513,13 +513,13 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 								suffix += "mirrored";
 							}
 						if (!suffix.empty())
-							suffix = " (" + suffix + ")";
+							suffix = " [" + suffix + "]";
 						auto it = target.inv_names.find(target_trace.front().output());
 						if (it == target.inv_names.end())
-							targets_found.push_back(fmt::format("{}{}", root, suffix));
+							targets_found.push_back(fmt::format("{}{} ({})", root, suffix, root));
 						else
 							for (const auto& name : it->second)
-								targets_found.push_back(fmt::format("{}{}", name, suffix));
+								targets_found.push_back(fmt::format("{}{} ({})", name, suffix, root));
 					}
 				}
 		}
