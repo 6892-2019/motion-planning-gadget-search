@@ -187,6 +187,13 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 
 			drawing_data.push_back(canonicalize_from_slls(std::move(uedges), std::move(dedges)));
 			vector<CanonicalizeRecord>& morphs = drawing_data.back();
+			if (morphs.empty()) {
+				//e.g., all states have no edges?
+				fmt::print(stderr, "warning: no morphs for {} from {}\n", gadget_name, filename);
+				drawing_data.pop_back();
+				continue;
+			}
+
 			vector<std::size_t> all_normals, all_mirrors;
 			for (CanonicalizeRecord& r : morphs) {
 				r.normal = register_gadget(std::move(std::get<1>(r.normal)));
