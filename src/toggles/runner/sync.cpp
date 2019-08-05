@@ -187,11 +187,23 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 
 			drawing_data.push_back(canonicalize_from_slls(std::move(uedges), std::move(dedges)));
 			vector<CanonicalizeRecord>& morphs = drawing_data.back();
+			vector<std::size_t> all_normals, all_mirrors;
 			for (CanonicalizeRecord& r : morphs) {
 				r.normal = register_gadget(std::move(std::get<1>(r.normal)));
-				if (r.mirror)
+				all_normals.push_back(std::get<0>(r.normal));
+				if (r.mirror) {
 					r.mirror = register_gadget(std::move(std::get<1>(*r.mirror)));
+					all_mirrors.push_back(std::get<0>(*r.mirror));
+				}
 			}
+			//If all mirrors are also normals, reflection just changes the state,
+			//so we aren't really chiral.  foo-r and foo-s would name the same
+			//set of gadgets.
+			std::sort(all_normals.begin(), all_normals.end());
+			std::sort(all_mirrors.begin(), all_mirrors.end());
+			if (std::includes(all_normals.begin(), all_normals.end(), all_mirrors.begin(), all_mirrors.end()))
+				for (CanonicalizeRecord& r : morphs)
+					r.mirror.reset();
 
 			tsl::ordered_map<unsigned int, std::string> state_names;
 			//By default, we generate names for all states in the initial
