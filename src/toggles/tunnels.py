@@ -73,6 +73,8 @@ class Gadget:
     def __eq__(self, other):
         return (self.location_size, self.state_size, self.edges) ==\
                (other.location_size, other.state_size, other.edges)
+    def __hash__(self):
+        return hash((self.location_size, self.state_size, frozenset(self.edges)))
     def __str__(self):
         return '[{}, {}, {}]'.format(self.location_size, self.state_size, self.edges)
     def __repr__(self):
@@ -156,6 +158,20 @@ if __name__ == '__main__':
     tunnel_specs = yaml.safe_load(open(sys.argv[1], 'r'))
     tunnels: Dict[str, Gadget] = {k: Gadget.make(v.get('uedges', []), v.get('dedges', []), v.get('state-size'), v.get('state-names'))
             for k, v in tunnel_specs.items()}
+    fallback_specs = yaml.safe_load(open(sys.argv[2], 'r'))
+    fallback: Dict[str, Gadget] = {k: Gadget.make(v.get('uedges', []), v.get('dedges', []), v.get('state-size'), v.get('state-names'))
+            for k, v in fallback_specs.items()}
+
+    tunnel_blockers = {v: k for k, v in tunnels.items()}
+    tunnel_blockers.update({v.renumber_states({0: 1, 1: 0}): k for k, v in tunnels.items()})
+    tunnel_blockers.update({v.renumber_locs({0: 1, 1: 0}): k for k, v in tunnels.items()})
+    tunnel_blockers.update({v.renumber({0: 1, 1: 0}, {0: 1, 1: 0}): k for k, v in tunnels.items()})
+    for fname, fgadget in fallback.items():
+        blocker = tunnel_blockers.get(fgadget)
+        if blocker:
+            print(blocker, 'blocked', fname, file=sys.stderr)
+        else:
+            tunnels[fname] = fgadget
 
     document = {'gadgets': dict(), 'aliases': dict()}
     for name, gadget in tunnels.items():

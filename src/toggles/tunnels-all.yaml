@@ -1,0 +1,307 @@
+# based on Joshua Ani's Coauthor post
+
+# This empty gadget isn't useful.
+#2st_0:
+#  dedges: []
+#  uedges: []
+#  state-size: 2
+2st_1:
+  dedges: [[0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_2:
+  dedges: [[0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_3:
+  dedges: [[0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_4:
+  dedges: [[1, 0, 1, 0], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_5:
+  dedges: [[1, 0, 1, 1], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_6:
+  dedges: []
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_7:
+  dedges: [[0, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_8:
+  dedges: [[1, 1, 0, 0], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_9:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_10:
+  dedges: [[1, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_11:
+  dedges: [[0, 1, 0, 1], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_12:
+  dedges: []
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_13:
+  dedges: [[1, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_14:
+  dedges: [[1, 0, 1, 1], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_15:
+  dedges: [[0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_16:
+  dedges: [[0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_17:
+  dedges: [[0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_18:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_19:
+  dedges: [[1, 0, 1, 0]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_20:
+  dedges: [[0, 0, 1, 0]]
+  uedges: [[1, 0, 1, 0]]
+  state-size: 2
+2st_21:
+  dedges: [[1, 1, 0, 0], [1, 0, 1, 0], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_22:
+  dedges: [[1, 1, 0, 1], [1, 0, 1, 0], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_23:
+  dedges: [[1, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_24:
+  dedges: [[1, 0, 1, 1], [0, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_25:
+  dedges: [[1, 1, 0, 0], [0, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_26:
+  dedges: [[0, 0, 1, 1]]
+  uedges: [[1, 0, 1, 0]]
+  state-size: 2
+2st_27:
+  dedges: [[1, 0, 1, 1], [1, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_28:
+  dedges: [[1, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_29:
+  dedges: [[0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: [[1, 0, 1, 0]]
+  state-size: 2
+2st_30:
+  dedges: [[1, 0, 1, 0], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_31:
+  dedges: [[1, 1, 0, 1], [1, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_32:
+  dedges: [[1, 0, 1, 1], [0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_33:
+  dedges: [[1, 0, 1, 1], [0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_34:
+  dedges: [[1, 0, 1, 1], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_35:
+  dedges: [[0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: [[1, 1, 0, 1]]
+  state-size: 2
+2st_36:
+  dedges: [[0, 1, 0, 1], [0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_37:
+  dedges: []
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 0]]
+  state-size: 2
+2st_38:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_39:
+  dedges: [[0, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_40:
+  dedges: [[1, 1, 0, 1], [0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: []
+  state-size: 2
+2st_41:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_42:
+  dedges: [[1, 1, 0, 0], [1, 0, 1, 0]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_43:
+  dedges: [[1, 1, 0, 1], [1, 0, 1, 0]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_44:
+  dedges: [[1, 1, 0, 0], [0, 0, 1, 0]]
+  uedges: [[1, 0, 1, 0]]
+  state-size: 2
+2st_45:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: [[1, 0, 1, 0]]
+  state-size: 2
+2st_46:
+  dedges: []
+  uedges: [[1, 1, 0, 1], [0, 1, 0, 0]]
+  state-size: 2
+2st_47:
+  dedges: [[1, 1, 0, 0], [1, 0, 1, 1], [0, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: []
+  state-size: 2
+2st_48:
+  dedges: []
+  uedges: [[1, 1, 0, 0], [1, 0, 1, 0]]
+  state-size: 2
+2st_49:
+  dedges: [[1, 0, 1, 0], [0, 0, 1, 1], [1, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_50:
+  dedges: [[0, 0, 1, 1], [1, 0, 1, 1], [0, 0, 1, 0]]
+  uedges: [[0, 1, 0, 1]]
+  state-size: 2
+2st_51:
+  dedges: [[0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_52:
+  dedges: [[1, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 0]]
+  state-size: 2
+2st_53:
+  dedges: [[1, 1, 0, 1], [1, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_54:
+  dedges: [[0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_55:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 1], [0, 0, 1, 0]]
+  uedges: [[0, 1, 0, 1]]
+  state-size: 2
+2st_56:
+  dedges: [[1, 1, 0, 1], [1, 0, 1, 0], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_57:
+  dedges: [[0, 0, 1, 1], [1, 0, 1, 1], [0, 1, 0, 1]]
+  uedges: [[0, 1, 0, 0]]
+  state-size: 2
+2st_58:
+  dedges: [[1, 0, 1, 1]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 0]]
+  state-size: 2
+2st_59:
+  dedges: [[0, 0, 1, 1]]
+  uedges: [[1, 1, 0, 1], [0, 1, 0, 0]]
+  state-size: 2
+2st_60:
+  dedges: [[1, 0, 1, 1], [0, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0]]
+  state-size: 2
+2st_61:
+  dedges: [[0, 0, 1, 1], [0, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 1]]
+  state-size: 2
+2st_62:
+  dedges: [[0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 1], [1, 1, 0, 0]]
+  state-size: 2
+2st_63:
+  dedges: [[0, 0, 1, 1], [1, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_64:
+  dedges: [[1, 0, 1, 0], [1, 0, 1, 1]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 0]]
+  state-size: 2
+2st_65:
+  dedges: [[1, 0, 1, 0], [0, 0, 1, 1]]
+  uedges: [[1, 1, 0, 1], [0, 1, 0, 0]]
+  state-size: 2
+2st_66:
+  dedges: [[1, 0, 1, 1], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_67:
+  dedges: []
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_68:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 1]]
+  uedges: [[0, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_69:
+  dedges: [[1, 1, 0, 1], [1, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 0]]
+  state-size: 2
+2st_70:
+  dedges: [[1, 1, 0, 1], [0, 0, 1, 0]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_71:
+  dedges: [[0, 0, 1, 1], [0, 1, 0, 1]]
+  uedges: [[1, 1, 0, 1], [0, 1, 0, 0]]
+  state-size: 2
+2st_72:
+  dedges: []
+  uedges: [[1, 1, 0, 1], [1, 1, 0, 0], [0, 1, 0, 0]]
+  state-size: 2
+2st_73:
+  dedges: [[1, 0, 1, 1]]
+  uedges: [[1, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_74:
+  dedges: [[0, 0, 1, 1]]
+  uedges: [[1, 1, 0, 1], [0, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
+2st_75:
+  dedges: []
+  uedges: [[1, 1, 0, 1], [1, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 1]]
+  state-size: 2
