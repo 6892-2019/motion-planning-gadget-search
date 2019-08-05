@@ -212,6 +212,15 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				for (CanonicalizeRecord& r : morphs)
 					r.mirror.reset();
 
+			//If state change is equivalent to rotation, drop the extra names.
+			//TODO: this might be a problem for explicitly-named states?
+			for (std::size_t i = morphs.size(); i-- > 0;)
+				for (std::size_t j = i; j-- > 0;)
+					if (morphs[i].normal == morphs[j].normal) {
+						morphs.erase(morphs.begin()+i);
+						break; //continue the outer loop
+					}
+
 			tsl::ordered_map<unsigned int, std::string> state_names;
 			//By default, we generate names for all states in the initial
 			//connected component and their mirrors, if any.  But the YAML file
@@ -222,7 +231,8 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				custom_names = true;
 				for (auto nit = data["state-names"].begin(); nit != data["state-names"].end(); ++nit) {
 					unsigned int number = nit->first.as<unsigned int>();
-					if (!(number <= morphs.size()))
+					if (std::find_if(morphs.begin(), morphs.end(),
+							[number](const CanonicalizeRecord& r){return r.gadget_state == number;}) == morphs.end())
 						throw std::runtime_error(fmt::format("state-names problem {} {} {}\n", gadget_name, number, morphs.size()));
 					state_names[number] = nit->second.as<std::string>();
 				}
@@ -232,7 +242,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				std::string maybe = data.as<std::string>();
 				if (maybe == "all")
 					for (unsigned int i = 0; i < morphs.size(); ++i)
-						state_names[i] = std::to_string(i);
+						state_names[i] = std::to_string(morphs[i].gadget_state);
 				else
 					throw std::runtime_error(fmt::format("state-names problem {} {}\n", gadget_name, maybe));
 			} else
