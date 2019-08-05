@@ -283,16 +283,15 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 						whole_group_indices.push_back(*mirror);
 
 					if (chiral) {
-						naming[fmt::format("{}-{}-r", gadget_name, state_name)] = {normal};
-						//Some states may be achiral, but we still generate the -s
-						//name so the -r and -s groups have the same size.
+						//If a state is achiral, we don't generate -r and -s
+						//names for it, but that gadget still goes in the -r and
+						//-s groups (so they represent all states of the gadget).
 						if (mirror) {
+							naming[fmt::format("{}-{}-r", gadget_name, state_name)] = {normal};
 							naming[fmt::format("{}-{}-s", gadget_name, state_name)] = {*mirror};
 							naming[fmt::format("{}-{}", gadget_name, state_name)]  = {normal, *mirror};
-						} else {
-							naming[fmt::format("{}-{}-s", gadget_name, state_name)] = {normal};
+						} else
 							naming[fmt::format("{}-{}", gadget_name, state_name)]  = {normal};
-						}
 						chiral_r.push_back(normal);
 						chiral_s.push_back(mirror ? *mirror : normal);
 					} else
