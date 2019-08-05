@@ -188,6 +188,9 @@ if __name__ == '__main__':
 
         if gadget.connectivity != Connectivity.DISCONNECTED:
             document['gadgets'][name] = gadget.prepare_yaml()
+            if gadget.state_names == {0: '0', 1: '1'}:
+                # let toggles-runner generate these default names as required
+                del document['gadgets'][name]['state-names']
         else:
             print('skipped singleton', name, gadget, file=sys.stderr)
 
