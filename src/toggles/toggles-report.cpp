@@ -468,7 +468,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				if (it == target.inv_names.end())
 					fmt::print("  {} <names not found?>\n", p);
 				else
-					fmt::print("  {} {}\n", p, target.inv_names.at(p.output()));
+					fmt::print("  {} {{{}}}\n", p, fmt::join(target.inv_names.at(p.output()), ", "));
 			} else
 				fmt::print("  {}\n", p);
 			printed_in_traces(p.output());
