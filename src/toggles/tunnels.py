@@ -45,15 +45,20 @@ class GadgetEdge:
         return [self.state1, self.loc1, self.loc2, self.state2]
 
 class Gadget:
-    def __init__(self, edges: Iterable[GadgetEdge], state_size=None):
+    def __init__(self, edges: Iterable[GadgetEdge], state_size=None, state_names=None):
         self.edges: Set[GadgetEdge] = set(edges)
         empirical_state_size = max(max(e.states()) for e in self.edges) + 1
         if state_size and state_size < empirical_state_size:
             raise ValueError('bad explicit state size')
         self.state_size = state_size if state_size else empirical_state_size
         self.location_size = max(max(e.locations()) for e in self.edges) + 1
+        if not state_names:
+            state_names = {i: str(i) for i in range(self.state_size)}
+        if sorted(state_names.keys()) != sorted(range(self.state_size)):
+            raise ValueError('bad state names {} {}'.format(self.state_size, state_names))
+        self.state_names = state_names
     @staticmethod
-    def make(uedges, dedges, state_size=None):
+    def make(uedges, dedges, state_size=None, state_names=None):
         edges: Set[GadgetEdge] = set()
         for e in uedges:
             if not isinstance(e, GadgetEdge):
@@ -64,7 +69,7 @@ class Gadget:
             if not isinstance(e, GadgetEdge):
                 e = GadgetEdge(*e)
             edges.add(e)
-        return Gadget(edges, state_size=state_size)
+        return Gadget(edges, state_size=state_size, state_names=state_names)
     def __eq__(self, other):
         return (self.location_size, self.state_size, self.edges) ==\
                (other.location_size, other.state_size, other.edges)
@@ -95,6 +100,7 @@ class Gadget:
             yaml['uedges'] = sorted(map(methodcaller('prepare_yaml'), uedges))
         if dedges:
             yaml['dedges'] = sorted(map(methodcaller('prepare_yaml'), dedges))
+        yaml['state-names'] = self.state_names
         return yaml
 
 class Connectivity(Enum):
@@ -148,7 +154,7 @@ def do_state_flips(first: Gadget, second: Gadget) -> StateFlip:
 
 if __name__ == '__main__':
     tunnel_specs = yaml.safe_load(open(sys.argv[1], 'r'))
-    tunnels: Dict[str, Gadget] = {k: Gadget.make(v.get('uedges', []), v.get('dedges', []), v.get('state-size'))
+    tunnels: Dict[str, Gadget] = {k: Gadget.make(v.get('uedges', []), v.get('dedges', []), v.get('state-size'), v.get('state-names'))
             for k, v in tunnel_specs.items()}
 
     document = {'gadgets': dict(), 'aliases': dict()}
@@ -192,13 +198,18 @@ if __name__ == '__main__':
         if gadget1.states_identical and gadget2.states_identical and \
                 gadget1.connectivity == Connectivity.DISCONNECTED and \
                 gadget2.connectivity == Connectivity.DISCONNECTED:
+            # Gadget.renumber_states should really do this for us, but eh...
+            oldnames1 = gadget1.state_names
             gadget1 = gadget1.renumber_states({0: 0, 1: 0})
+            gadget1.state_names = {0: oldnames1[0]}
             gadget1.state_size = 1
             gadget1.connectivity = Connectivity.STRONG_CONNECTED
             gadget1.rotatability = determine_rotatability(gadget1)
             assert gadget1.rotatability != Rotatability.FLIPS_STATE
             gadget1.states_identical = True
+            oldnames2 = gadget2.state_names
             gadget2 = gadget2.renumber_states({0: 0, 1: 0})
+            gadget2.state_names = {0: oldnames2[0]}
             gadget2.state_size = 1
             gadget2.connectivity = Connectivity.STRONG_CONNECTED
             gadget2.rotatability = determine_rotatability(gadget2)
@@ -225,23 +236,26 @@ if __name__ == '__main__':
                 for prefix, map1, map2 in loc_maps:
                     edges1 = gadget1.renumber_locs(map1).edges
                     edges2 = gadget2.renumber(map2, state_map).edges
-                    gadget = Gadget(edges1 | edges2, max(gadget1.state_size, gadget2.state_size))
-                    name = '{}-{}-{}-{}'.format(superprefix, prefix, name1, name2)
+                    state_names = {s: '{}-{}'.format(gadget1.state_names[s], gadget2.state_names[state_map[s]]) for s in range(max(gadget1.state_size, gadget2.state_size))}
+                    gadget = Gadget(edges1 | edges2, max(gadget1.state_size, gadget2.state_size), state_names)
+                    name = '{}-{}-{}-{}'.format(name1, name2, prefix, superprefix)
                     document['gadgets'][name] = gadget.prepare_yaml()
         elif desired_flip == StateFlip.FIRST:
             for superprefix, state_map in state_maps:
                 for prefix, map1, map2 in loc_maps:
                     edges1 = gadget1.renumber(map1, state_map).edges
                     edges2 = gadget2.renumber_locs(map2).edges
-                    gadget = Gadget(edges1 | edges2, max(gadget1.state_size, gadget2.state_size))
-                    name = '{}-{}-{}-{}'.format(superprefix, prefix, name1, name2)
+                    state_names = {s: '{}-{}'.format(gadget1.state_names[state_map[s]], gadget2.state_names[s]) for s in range(max(gadget1.state_size, gadget2.state_size))}
+                    gadget = Gadget(edges1 | edges2, max(gadget1.state_size, gadget2.state_size), state_names)
+                    name = '{}-{}-{}-{}'.format(name1, name2, prefix, superprefix)
                     document['gadgets'][name] = gadget.prepare_yaml()
         else:
             for prefix, map1, map2 in loc_maps:
                 edges1 = gadget1.renumber_locs(map1).edges
                 edges2 = gadget2.renumber_locs(map2).edges
-                gadget = Gadget(edges1 | edges2, max(gadget1.state_size, gadget2.state_size))
-                name = '{}-{}-{}'.format(prefix, name1, name2)
+                state_names = {s: '{}-{}'.format(gadget1.state_names[s], gadget2.state_names[s]) for s in range(max(gadget1.state_size, gadget2.state_size))}
+                gadget = Gadget(edges1 | edges2, max(gadget1.state_size, gadget2.state_size), state_names)
+                name = '{}-{}-{}'.format(name1, name2, prefix)
                 document['gadgets'][name] = gadget.prepare_yaml()
 
 
