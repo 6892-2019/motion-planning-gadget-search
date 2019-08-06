@@ -379,7 +379,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
 
 	std::string_view db_path = "jbosboom";
-	bool multiplayer = false, combine_all = false;
+	bool multiplayer = false, skip_mirror = false, combine_all = false;
 	unsigned int num_threads = 1;
 	std::vector<std::string_view> source_specs;
 	for (int i = 1; i < argc; ++i) {
@@ -387,6 +387,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			db_path = argv[++i];
 		else if (argv[i] == "--multiplayer"sv)
 			multiplayer = true;
+		else if (argv[i] == "--skip-mirror"sv)
+			skip_mirror = true;
 		else if (argv[i] == "--combine-all"sv)
 			//Combine against any reachable gadget, not just the initial set.
 			//When we reach a new gadget that's been used as the right operand
@@ -559,16 +561,18 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 					);
 			}
 
-			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("mirror", awaiting_closemirror);
-			auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_mirror, EdgeKind::mirror, possible, closed, num_threads);
-			if (!provs.empty())
-				prov.push_back(std::move(provs));
-			if (!discovered.empty()) //avoid copying if nothing found (should be uncommon for mirror...)
-				task_parallel(num_threads,
-						std::bind_front(record_closed, std::cref(discovered)),
-						std::bind_front(assign_interval_union, std::ref(awaiting_connect), std::cref(discovered)),
-						std::bind_front(assign_interval_union, std::ref(awaiting_combine), std::cref(discovered))
-				);
+			if (!skip_mirror) {
+				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("mirror", awaiting_closemirror);
+				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_mirror, EdgeKind::mirror, possible, closed, num_threads);
+				if (!provs.empty())
+					prov.push_back(std::move(provs));
+				if (!discovered.empty()) //avoid copying if nothing found (should be uncommon for mirror...)
+					task_parallel(num_threads,
+							std::bind_front(record_closed, std::cref(discovered)),
+							std::bind_front(assign_interval_union, std::ref(awaiting_connect), std::cref(discovered)),
+							std::bind_front(assign_interval_union, std::ref(awaiting_combine), std::cref(discovered))
+					);
+			}
 
 			awaiting_closemirror.clear();
 
