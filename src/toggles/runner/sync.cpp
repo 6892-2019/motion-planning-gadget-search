@@ -186,7 +186,25 @@ GadgetPragma parse_gadget_pragma(YAML::Node pragma_node, std::string_view gadget
 	return ret;
 }
 
-int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
+struct SynclogRecord {
+	//work around emplace_back being broken with aggregates
+	SynclogRecord(const std::string& a, const std::string& b, unsigned int c, unsigned int d, std::optional<unsigned int> e)
+	: name(a), base_name(b), gadget_state(c), normal_rotation(d), mirror_rotation(e) {}
+	std::string name, base_name;
+	unsigned int gadget_state;
+	unsigned int normal_rotation;
+	std::optional<unsigned int> mirror_rotation; //after normal_rotation and mirroring applied, else absent
+};
+
+int sync_mode(std::string_view db_path, const vector<std::string_view>& positionals) {
+	vector<std::string_view> files;
+	std::string_view synclog_path;
+	for (std::size_t i = 0; i < positionals.size(); ++i)
+		if (positionals[i] == "--log"sv)
+			synclog_path = positionals[++i];
+		else
+			files.push_back(positionals[i]);
+
 	//vector_ordered_set
 	tsl::ordered_set<vector<std::byte>, farmhash_hash, std::equal_to<vector<std::byte>>,
 			std::allocator<vector<std::byte>>, std::vector<vector<std::byte>>> canonicals;
@@ -196,7 +214,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 	};
 	tsl::ordered_map<std::string, vector<std::size_t>> naming;
 	vector<pair<std::string, std::string>> deferred_aliases;
-	vector<vector<CanonicalizeRecord>> drawing_data; //used to construct data we need for automatic graph drawing
+	vector<SynclogRecord> synclog; //data we need for automatic graph drawing
 	for (std::string_view filename : files) {
 		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
 		YAML::Node gadgets = toplevel["gadgets"];
@@ -215,12 +233,10 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 
 			GadgetPragma pragma = parse_gadget_pragma(data["pragma"], gadget_name, filename);
 
-			drawing_data.push_back(canonicalize_from_slls(std::move(uedges), std::move(dedges)));
-			vector<CanonicalizeRecord>& morphs = drawing_data.back();
+			vector<CanonicalizeRecord> morphs = canonicalize_from_slls(std::move(uedges), std::move(dedges));
 			if (morphs.empty()) {
 				//e.g., all states have no edges?
 				fmt::print(stderr, "warning: no morphs for {} from {}\n", gadget_name, filename);
-				drawing_data.pop_back();
 				continue;
 			}
 
@@ -289,11 +305,16 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 				auto record_it = std::find_if(morphs.begin(), morphs.end(),
 						[number=state_names.front().first](const CanonicalizeRecord& r){return r.gadget_state == number;});
 				if (record_it->mirror) {
-					naming[fmt::format("{}-r", gadget_name)] = {std::get<0>(record_it->normal)};
-					naming[fmt::format("{}-s", gadget_name)] = {std::get<0>(*record_it->mirror)};
-					naming[fmt::format("{}", gadget_name)] = {std::get<0>(record_it->normal), std::get<0>(*record_it->mirror)};
-				} else
+					std::string normal_name = fmt::format("{}-r", gadget_name), mirror_name = fmt::format("{}-s", gadget_name);
+					naming[normal_name] = {std::get<0>(record_it->normal)};
+					naming[mirror_name] = {std::get<0>(*record_it->mirror)};
+					naming[gadget_name] = {std::get<0>(record_it->normal), std::get<0>(*record_it->mirror)};
+					synclog.emplace_back(normal_name, gadget_name, record_it->gadget_state, record_it->normal_rotation, std::nullopt);
+					synclog.emplace_back(mirror_name, gadget_name, record_it->gadget_state, record_it->normal_rotation, record_it->mirror_rotation);
+				} else {
 					naming[gadget_name] = {std::get<0>(record_it->normal)};
+					synclog.emplace_back(gadget_name, gadget_name, record_it->gadget_state, record_it->normal_rotation, std::nullopt);
+				}
 			} else {
 				vector<std::size_t> whole_group_indices;
 				vector<std::size_t> chiral_r, chiral_s;
@@ -317,15 +338,25 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 						//names for it, but that gadget still goes in the -r and
 						//-s groups (so they represent all states of the gadget).
 						if (mirror) {
-							naming[fmt::format("{}-{}-r", gadget_name, state_name)] = {normal};
-							naming[fmt::format("{}-{}-s", gadget_name, state_name)] = {*mirror};
+							std::string normal_name = fmt::format("{}-{}-r", gadget_name, state_name),
+									mirror_name = fmt::format("{}-{}-s", gadget_name, state_name);
+							naming[normal_name] = {normal};
+							naming[mirror_name] = {*mirror};
 							naming[fmt::format("{}-{}", gadget_name, state_name)]  = {normal, *mirror};
-						} else
-							naming[fmt::format("{}-{}", gadget_name, state_name)]  = {normal};
+							synclog.emplace_back(normal_name, gadget_name, r.gadget_state, r.normal_rotation, std::nullopt);
+							synclog.emplace_back(mirror_name, gadget_name, r.gadget_state, r.normal_rotation, r.mirror_rotation);
+						} else {
+							std::string normal_name = fmt::format("{}-{}", gadget_name, state_name);
+							naming[normal_name] = {normal};
+							synclog.emplace_back(normal_name, gadget_name, r.gadget_state, r.normal_rotation, std::nullopt);
+						}
 						chiral_r.push_back(normal);
 						chiral_s.push_back(mirror ? *mirror : normal);
-					} else
-						naming[fmt::format("{}-{}", gadget_name, state_name)] = {normal};
+					} else {
+						std::string normal_name = fmt::format("{}-{}", gadget_name, state_name);
+						naming[normal_name] = {normal};
+						synclog.emplace_back(normal_name, gadget_name, r.gadget_state, r.normal_rotation, std::nullopt);
+					}
 				}
 				if (chiral) {
 					naming[fmt::format("{}-r", gadget_name)] = std::move(chiral_r);
@@ -459,6 +490,19 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files) {
 			env, gadget_hashtable, gadget_index, mirror_edges, completions);
 	fmt::print("mirror: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
 			mirror_stats.pruned_locally, mirror_stats.pruned_database, mirror_stats.novel_gadgets, mirror_stats.edges);
+
+	if (!synclog_path.empty()) {
+		FILE* synclog_file = std::fopen(std::string(synclog_path).c_str(), "w");
+		if (!synclog_file) {
+			std::perror("error opening synclog");
+			return 1;
+		}
+		for (const SynclogRecord& r : synclog)
+			fmt::print(synclog_file, "{} {} {} {} {}\n", r.name, r.base_name, r.gadget_state, r.normal_rotation,
+					r.mirror_rotation ? static_cast<int>(*r.mirror_rotation) : -1);
+		std::fclose(synclog_file);
+		fmt::print("wrote {} entries to synclog\n", synclog.size());
+	}
 
 	return 0;
 }
