@@ -633,7 +633,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			std::string width_field = std::isnan(avg_width) ? "" : fmt::format("{:5.1f}", avg_width);
 			if (width_field.size() > 5) width_field = "big";
 			fmt::print("--> {:>9}: {:11d} {:11d} {:>5} {:7d} MiB\n",
-					name, size, count, width_field, size * sizeof(list.front()) / (1024*1024));
+					name, size, count, width_field, count * sizeof(list.front()) / (1024*1024));
 		};
 		print_stats_line(closed, "closed");
 		print_stats_line(awaiting_closemirror, "closemirr");
