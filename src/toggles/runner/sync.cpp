@@ -96,7 +96,7 @@ vector<CanonicalizeRecord> canonicalize_from_slls(
 		CanonicalizeRecord r;
 		r.gadget_state = state;
 		b.setGadgetState(state);
-		pair<unique_ptr<WorkingAutomaton>, unsigned int> normal = b.build();
+		pair<unique_ptr<WorkingAutomaton>, unsigned int> normal = b.build({.compress_alphabet = true});
 		if (!normal.first->active_alphabet_size())
 			//Gadgets with components often have an empty state, which we'll
 			//minimize into a 0-location gadget.  We can't represent that in the

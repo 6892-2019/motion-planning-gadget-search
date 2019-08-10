@@ -40,16 +40,23 @@ inline bool operator<(const GadgetEdge& l, const GadgetEdge& r) {
 	return std::tie(l.start, l.from, l.to, l.end) < std::tie(r.start, r.from, r.to, r.end);
 }
 
+//Can't nest this in GadgetBuilder due to GCC bug.  See also ActivePredicates in
+//toggles-driver.cpp.
+struct GadgetBuilderBuildArgs {
+	bool compress_alphabet = false;
+	bool mirror = false;
+};
+
 class GadgetBuilder {
 public:
 	GadgetBuilder(unsigned int alphabet_size, automaton::WorkingAutomaton::state_type gadget_state_estimate = 1);
 	GadgetBuilder& trans(automaton::WorkingAutomaton::state_type start, automaton::WorkingAutomaton::symbol_type from,
 			automaton::WorkingAutomaton::symbol_type to, automaton::WorkingAutomaton::state_type end);
-	std::pair<std::unique_ptr<automaton::WorkingAutomaton>, unsigned int> build() const &;
-	std::pair<std::unique_ptr<automaton::WorkingAutomaton>, unsigned int> build() &&;
 	unsigned int size() const {return numeric_cast<unsigned int>(gadgetStateToAutomatonState.size());}
 	std::vector<unsigned int> initialComponentGadgetStates() const;
 	void setGadgetState(unsigned int newInitial);
+	std::pair<std::unique_ptr<automaton::WorkingAutomaton>, unsigned int> build(GadgetBuilderBuildArgs kwargs = {}) const &;
+	std::pair<std::unique_ptr<automaton::WorkingAutomaton>, unsigned int> build(GadgetBuilderBuildArgs kwargs = {}) &&;
 private:
 	std::unique_ptr<automaton::WorkingAutomaton> gadget;
 	std::vector<automaton::WorkingAutomaton::state_type> gadgetStateToAutomatonState;

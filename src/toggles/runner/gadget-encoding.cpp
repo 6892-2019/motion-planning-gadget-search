@@ -18,6 +18,44 @@ using encoding::GadgetBuilder;
 using std::unique_ptr;
 using std::vector;
 
+namespace {
+//renumberAlphabet can't be virtualized because it's templated on the iterator type, argh.
+void renumberAlphabet(WorkingAutomaton& p, unsigned int* renumbering) {
+	switch (p.alphabet_size()) {
+		case  2: static_cast<Automaton< 2>&>(p).renumberAlphabet(renumbering); break;
+		case  3: static_cast<Automaton< 3>&>(p).renumberAlphabet(renumbering); break;
+		case  4: static_cast<Automaton< 4>&>(p).renumberAlphabet(renumbering); break;
+		case  5: static_cast<Automaton< 5>&>(p).renumberAlphabet(renumbering); break;
+		case  6: static_cast<Automaton< 6>&>(p).renumberAlphabet(renumbering); break;
+		case  7: static_cast<Automaton< 7>&>(p).renumberAlphabet(renumbering); break;
+		case  8: static_cast<Automaton< 8>&>(p).renumberAlphabet(renumbering); break;
+		case  9: static_cast<Automaton< 9>&>(p).renumberAlphabet(renumbering); break;
+		case 10: static_cast<Automaton<10>&>(p).renumberAlphabet(renumbering); break;
+		case 11: static_cast<Automaton<11>&>(p).renumberAlphabet(renumbering); break;
+		case 12: static_cast<Automaton<12>&>(p).renumberAlphabet(renumbering); break;
+		case 13: static_cast<Automaton<13>&>(p).renumberAlphabet(renumbering); break;
+		case 14: static_cast<Automaton<14>&>(p).renumberAlphabet(renumbering); break;
+		case 15: static_cast<Automaton<15>&>(p).renumberAlphabet(renumbering); break;
+		case 16: static_cast<Automaton<16>&>(p).renumberAlphabet(renumbering); break;
+		default:
+			throw std::logic_error(fmt::format("bad renumberAlphabet size {}", p.alphabet_size()));
+	}
+}
+void compress_alphabet(WorkingAutomaton& p) {
+	//Compare similar code in ops.cpp's connect_at.
+	auto active = p.activeAlphabet();
+	active.sort();
+	if (!active.empty() && active.back() != active.size()-1) {
+		if (p.alphabet_size() > 16)
+			throw std::logic_error(fmt::format("GadgetBuilder::build too big {}", p.alphabet_size()));
+		std::array<WorkingAutomaton::symbol_type, 16> compression;
+		std::copy(active.begin(), active.end(), compression.begin());
+		std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<WorkingAutomaton::symbol_type>::max());
+		renumberAlphabet(p, compression.begin());
+	}
+}
+}//anonymous namespace
+
 namespace encoding {
 GadgetBuilder::GadgetBuilder(unsigned int alphabet_size, WorkingAutomaton::state_type gadget_state_estimate)
 		: gadget(make_working(alphabet_size)) {
@@ -42,16 +80,40 @@ GadgetBuilder& GadgetBuilder::trans(WorkingAutomaton::state_type start, WorkingA
 	return *this;
 }
 
-std::pair<unique_ptr<automaton::WorkingAutomaton>, unsigned int> GadgetBuilder::build() const & {
+std::pair<unique_ptr<WorkingAutomaton>, unsigned int> GadgetBuilder::build(GadgetBuilderBuildArgs kwargs) const & {
 	unique_ptr<WorkingAutomaton> p = gadget->clone();
-	unsigned int rotation = canonicalize(*p, p->active_alphabet_size(), false);
-	return {std::move(p), rotation};
+	p->minimize();
+	if (kwargs.compress_alphabet)
+		compress_alphabet(*p);
+
+	//The empty gadget.  The caller will probably discard it.
+	if (p->state_size() == 1 && p->transition_size() == 0)
+		return {std::move(p), std::numeric_limits<unsigned int>::max()};
+
+	if (kwargs.mirror)
+		//Awkwardly, this copies the gadget again, despite us having cloned it earlier.
+		return ::mirror(*p);
+	else {
+		unsigned int rotation = canonicalize(*p, p->active_alphabet_size(), false);
+		return {std::move(p), rotation};
+	}
 }
 
-std::pair<unique_ptr<automaton::WorkingAutomaton>, unsigned int> GadgetBuilder::build() && {
+std::pair<unique_ptr<WorkingAutomaton>, unsigned int> GadgetBuilder::build(GadgetBuilderBuildArgs kwargs) && {
 	gadget->minimize();
-	unsigned int rotation = canonicalize(*gadget, gadget->active_alphabet_size(), false);
-	return {std::move(gadget), rotation};
+	if (kwargs.compress_alphabet)
+		compress_alphabet(*gadget);
+
+	//The empty gadget.  The caller will probably discard it.
+	if (gadget->state_size() == 1 && gadget->transition_size() == 0)
+		return {std::move(gadget), std::numeric_limits<unsigned int>::max()};
+
+	if (kwargs.mirror)
+		return ::mirror(*gadget);
+	else {
+		unsigned int rotation = canonicalize(*gadget, gadget->active_alphabet_size(), false);
+		return {std::move(gadget), rotation};
+	}
 }
 
 vector<unsigned int> GadgetBuilder::initialComponentGadgetStates() const {
