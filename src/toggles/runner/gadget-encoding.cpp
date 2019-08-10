@@ -4,6 +4,12 @@
 #include "pack-detail.hpp"
 #include <boost/container/static_vector.hpp>
 
+#ifndef NDEBUG
+static constexpr bool assertions_enabled = true;
+#else
+static constexpr bool assertions_enabled = false;
+#endif
+
 using namespace automaton;
 using automaton::detail::PackReader;
 using automaton::detail::PackWriter;
@@ -171,10 +177,25 @@ struct LLSSEdgeCoder {
 	unsigned int locations, states;
 	LLSSEdgeCoder(unsigned int location, unsigned int state) : locations(location), states(state) {}
 	std::uint64_t encode(const GadgetEdge& e) const {
+		if constexpr (assertions_enabled) {
+			if (!(e.from < locations && e.to < locations && e.start < states && e.end < states)) {
+				fmt::print(stderr, "edge too large to encode: {}, coding for {} locations, {} states\n",
+						e, locations, states);
+				std::terminate();
+			}
+		}
 		std::uint64_t i = ((std::uint64_t)e.from * locations * states * states) +
 				(e.to * states * states) +
 				(e.start * states) +
 				e.end;
+		if constexpr (assertions_enabled) {
+			//This is an error in the coder logic, not the caller.
+			if (!(i < max_value())) {
+				fmt::print(stderr, "can't happen: coded edge too large? {} from {}, coding for {} locations, {} states\n",
+						i, e, locations, states);
+				std::terminate();
+			}
+		}
 		assert(i < max_value());
 		return i;
 	}
