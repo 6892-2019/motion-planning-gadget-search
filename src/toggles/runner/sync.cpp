@@ -105,7 +105,7 @@ vector<CanonicalizeRecord> canonicalize_from_slls(
 			continue;
 		r.normal = encoding::encode(*normal.first);
 		r.normal_rotation = normal.second;
-		pair<unique_ptr<WorkingAutomaton>, unsigned int> mirror = ::mirror(*normal.first);
+		pair<unique_ptr<WorkingAutomaton>, unsigned int> mirror = b.build({.compress_alphabet = true, .mirror = true});
 		r.mirror = encoding::encode(*mirror.first);
 		r.mirror_rotation = mirror.second;
 		if (r.normal == *r.mirror) {
