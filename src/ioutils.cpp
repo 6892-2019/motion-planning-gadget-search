@@ -41,3 +41,11 @@ std::vector<std::string> processFilenameArgs(std::vector<std::string> queue) {
 	}
 	return result;
 }
+
+std::string make_temp_filename(std::string_view base) {
+	const char* directory = std::getenv("XDG_RUNTIME_DIR");
+	directory = directory ? directory : "/tmp";
+	auto pid = getpid();
+	auto time = std::time(nullptr);
+	return fmt::format("{}/{}-{}-{}.err", directory, base, pid, time);
+}

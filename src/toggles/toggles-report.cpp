@@ -8,6 +8,7 @@
 #include "transform_reduce.hpp"
 #include "tsl/ordered_set.h"
 #include "task_parallel.hpp"
+#include "ioutils.hpp"
 #include <fmt/chrono.h>
 #include <functional>
 
@@ -63,6 +64,7 @@ bool operator<(const SkinnyProv& a, uint64_t b) {
 }
 
 using EdgeCache = tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>;
+using DeletedLocationsCache = tsl::hopscotch_map<uint64_t, vector<unsigned int>, farmhash_hash>;
 
 vector<AnyProv> toposort_provs(const EdgeCache& prov, uint64_t root) {
 	tsl::hopscotch_map<uint64_t, uint64_t, farmhash_hash> needs;
@@ -130,13 +132,14 @@ std::optional<Edge> search_for_edge(lmdb::txn& txn, lmdb::dbi& edges, uint64_t i
 void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges,
 		lmdb::dbi& connect_edges, lmdb::dbi& close_edges, lmdb::dbi& mirror_edges,
 		const vector<pair<uint64_t, uint64_t>>& roots, const vector<vector<SkinnyProv>>& prov,
-		EdgeCache& edge_cache) {
+		EdgeCache& edge_cache, DeletedLocationsCache& delloc, std::string_view db_path) {
 	//This batching logic was quite helpful for postgres, but is probably less
 	//helpful with lmdb because queries are local.
 	vector<uint64_t> frontier = interval_inflate(roots.begin(), roots.end());
 	//We don't need to know the other end for close and mirror lookups, but it
 	//avoids special-casing in search_for_edge and adds some error-checking.
 	vector<SkinnyProv> combine_batch, connect_batch, close_batch, mirror_batch;
+	vector<AnyProv> newly_cached_connects; //also combines because those include a connect
 	while (!frontier.empty()) {
 		combine_batch.clear();
 		connect_batch.clear();
@@ -183,12 +186,14 @@ void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges
 				if (!e)
 					throw std::logic_error(fmt::format("no combine edge for {}/{}", p.input(), p.output()));
 				edges.push_back(AnyProv::combine(p.input(), input2, *e));
+				newly_cached_connects.push_back(AnyProv::combine(p.input(), input2, *e));
 			}
 			for (const SkinnyProv& p : connect_batch) {
 				std::optional<ConnectEdge> e = search_for_edge<ConnectEdge>(txn, connect_edges, p.input(), p.output());
 				if (!e)
 					throw std::logic_error(fmt::format("no connect edge for {}/{}", p.input(), p.output()));
 				edges.push_back(AnyProv::connect(p.input(), *e));
+				newly_cached_connects.push_back(AnyProv::connect(p.input(), *e));
 			}
 			for (const SkinnyProv& p : close_batch) {
 				std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, close_edges, p.input(), p.output());
@@ -214,6 +219,44 @@ void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges
 			}
 			std::sort(frontier.begin(), frontier.end());
 			frontier.erase(std::unique(frontier.begin(), frontier.end()), frontier.end());
+		}
+	}
+
+	if (!newly_cached_connects.empty()) {
+		//See if any had deleted locations.
+		vector<std::string> lines;
+		for (AnyProv& p : newly_cached_connects)
+			if (p.kind() == EdgeKind::connect)
+				lines.push_back(fmt::format("{},connect,{},{}", p.output(), p.input1(), p.connectPoint()));
+			else if (p.kind() == EdgeKind::combine)
+				lines.push_back(fmt::format("{},combine,{},{},{},{},{}", p.output(), p.input1(), p.input2(), p.splice(), p.rotation(), p.connectPoint()));
+			else
+				throw std::logic_error("can't happen bad edge kind");
+
+		std::string temp_to = make_temp_filename("toggles-report-delloc-request"),
+				temp_from = make_temp_filename("toggles-report-delloc-response");
+		writeAllLines(temp_to, lines);
+		std::string cmdline = fmt::format("toggles-runner.exe deleted-locations --db-path {} -i {} -o {}",
+				db_path, temp_to, temp_from);
+		int retcode = std::system(cmdline.c_str());
+		if (retcode)
+			throw std::runtime_error("deleted-locations failure");
+		lines = readAllLines(temp_from);
+
+		for (std::string l : lines) {
+			auto delim = l.find(' ');
+			uint64_t output = to_uint64(l.substr(0, delim));
+			vector<unsigned int> locs;
+			while (delim != std::string::npos) {
+				auto start = delim;
+				delim = l.find(' ', start);
+				locs.push_back(to_int(l.substr(start, delim)));
+			}
+			locs.push_back(to_int(l.substr(delim+1)));
+			auto pair = delloc.try_emplace(output, locs);
+			if (!pair.second)
+				throw std::runtime_error(fmt::format("dellocs conflict for {}: {} {}",
+						output, *pair.first, locs));
 		}
 	}
 }
@@ -448,6 +491,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	//We store most edges as SkinnyProv, only getting the full edge data when
 	//we're going to print a derivation.
 	EdgeCache edge_cache;
+	DeletedLocationsCache dellocs;
 	//The closed set and intervals of gadgets pending processing.  We always
 	//close and mirror if anything is awaiting such, then connect, and only if
 	//neither is possible do we combine.  (This is nearly equivalent to the
@@ -463,7 +507,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	awaiting_closemirror = awaiting_connect = awaiting_combine = closed;
 
 	interval_accumulator<uint64_t> printed_in_traces(512);
-	auto print_trace = [&target, &printed_in_traces](const vector<AnyProv>& trace) {
+	auto print_trace = [&target, &dellocs, &printed_in_traces](const vector<AnyProv>& trace) {
 		for (const AnyProv& p : trace) {
 			if (p.kind() == EdgeKind::source) {
 				auto it = target.inv_names.find(p.output());
@@ -471,8 +515,19 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 					fmt::print("  {} <names not found?>\n", p);
 				else
 					fmt::print("  {} {{{}}}\n", p, fmt::join(target.inv_names.at(p.output()), ", "));
-			} else
-				fmt::print("  {}\n", p);
+			} else {
+				//Strictly speaking, consulting dellocs is only valid for source
+				//traces, but target traces will never have combines or connects
+				//so we'll never notice.
+				auto dels = dellocs.find(p.output());
+				if (dels != dellocs.end()) {
+					const vector<unsigned int>& deletions = dels->second;
+					std::string line = fmt::to_string(p);
+					line.insert(line.find('@'), fmt::format("delete {} ", fmt::join(deletions, ",")));
+					fmt::print("  {}\n", line);
+				} else
+					fmt::print("  {}\n", p);
+			}
 			printed_in_traces(p.output());
 		}
 	};
@@ -490,7 +545,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				target.intervals.cbegin(), target.intervals.cend(), discovered.cbegin(), discovered.cend());
 		if (!found.empty()) {
 			lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-			fill_cache(txn, edges_combine, edges_connect, edges_close, edges_mirror, found, prov, edge_cache);
+			fill_cache(txn, edges_combine, edges_connect, edges_close, edges_mirror, found, prov, edge_cache, dellocs, db_path);
 			txn.commit();
 
 			for (const pair<uint64_t, uint64_t>& p : found)

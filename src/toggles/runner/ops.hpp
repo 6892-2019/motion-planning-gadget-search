@@ -41,5 +41,7 @@ void connect(const automaton::AutomatonBase& a, std::uint64_t input1, Finisher<C
 Finisher<CombineProvenance> do_combine(std::vector<std::pair<std::uint64_t, std::vector<std::byte>>>&& left_data,
 		std::vector<std::pair<std::uint64_t, std::vector<std::byte>>>&& right_data, unsigned int precision);
 
+automaton::AutomatonBase::SymbolSet connect_deleted_symbols(const automaton::AutomatonBase& a, unsigned int connectPoint);
+
 #endif /* OPS_HPP */
 

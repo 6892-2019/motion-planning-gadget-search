@@ -40,6 +40,7 @@
         </df>
         <df name="runner">
           <in>canonicalize.cpp</in>
+          <in>deleted-locations-mode.cpp</in>
           <in>dump-gadget-mode.cpp</in>
           <in>gadget-encoding.cpp</in>
           <in>incoming-edges-mode.cpp</in>
@@ -350,6 +351,11 @@
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/runner/canonicalize.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/deleted-locations-mode.cpp"
             ex="false"
             tool="1"
             flavor2="0">

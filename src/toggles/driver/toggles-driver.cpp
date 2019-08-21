@@ -23,14 +23,6 @@ using std::uint64_t;
 using namespace std::literals::string_view_literals;
 
 namespace {
-std::string make_temp_filename() {
-	const char* directory = std::getenv("XDG_RUNTIME_DIR");
-	directory = directory ? directory : "/tmp";
-	auto pid = getpid();
-	auto time = std::time(nullptr);
-	return fmt::format("{}/toggles-socat-{}-{}.err", directory, pid, time);
-}
-
 pair<boost::process::child, unsigned short> launch_own_socat_process(std::string_view db_path) {
 	if (db_path.find(' ') != std::string_view::npos)
 		throw std::logic_error("db path contains space (TODO discover and implement socat quoting rules)");
@@ -42,7 +34,7 @@ pair<boost::process::child, unsigned short> launch_own_socat_process(std::string
 	//https://www.boost.org/doc/libs/1_70_0/doc/html/boost_process/faq.html#boost_process.faq.closep
 	//so we will redirect to a temporary file using our PID and the current time
 	//(which should be unique).
-	std::string stderr_log = make_temp_filename();
+	std::string stderr_log = make_temp_filename("toggles-socat");
 	for (unsigned short port = 5000; port < 5100; ++port) {
 		std::string arg1 = fmt::format("TCP-LISTEN:{},fork,range=127.0.0.1/32,reuseaddr,linger=10,linger2=10,backlog=80", port);
 		//hardcoding the path to socat instead of using boost::process::search_path

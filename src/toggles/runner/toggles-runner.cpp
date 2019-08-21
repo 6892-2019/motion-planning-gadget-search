@@ -15,6 +15,8 @@ int incoming_edges_mode(std::string_view db_path, const vector<std::string_view>
 int update_predicates_mode(std::string_view db_path, const vector<std::string_view>& more_arguments);
 //defined in repair-completions-mode.cpp
 int repair_completions_mode(std::string_view db_path, const vector<std::string_view>& args);
+//defined in deleted-locations-mode.cpp
+int deleted_locations_mode(std::string_view db_path, std::string_view input_file, std::string_view output_file);
 //defined in msgpack-mode.cpp
 int msgpack_mode(std::string_view db_path, std::string_view input_file, std::string_view output_file);
 
@@ -50,6 +52,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return update_predicates_mode(db_path, positionals);
 	else if (mode == "completions"sv)
 		return repair_completions_mode(db_path, positionals);
+	else if (mode == "deleted-locations"sv)
+		return deleted_locations_mode(db_path, input_file, output_file);
 	else if (mode == "msgpack"sv) {
 		if (!positionals.empty()) {
 			fmt::print(stderr, "ERROR: msgpack mode takes no positional arguments, but some passed: {}\n", positionals);

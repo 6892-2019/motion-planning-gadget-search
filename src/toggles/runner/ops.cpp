@@ -96,7 +96,7 @@ auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
 }
 
 template<unsigned int N, class Provenance>
-void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
+AutomatonBase::SymbolSet connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 		Provenance prov, Finisher<Provenance>& finisher) {
 	Automaton<N> connected = a;
 	enjoin(connected, prov.connectPoint, (prov.connectPoint+1) % activeAlphabetSize);
@@ -106,7 +106,7 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 
 	connected.minimize();
 	auto active = connected.activeAlphabet();
-	if (active.size() <= 1) return; //there are no interesting 1-symbol automata
+	if (active.size() <= 1) return {}; //there are no interesting 1-symbol automata
 	//TODO: if this check usually doesn't fire, we can use active_alphabet_size instead of activeAlphabet
 	if (active.size() != (activeAlphabetSize - 2)) {
 		//compress the alphabet
@@ -123,6 +123,7 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 	}
 
 	finisher(std::move(connected), prov);
+	return active;
 }
 
 template<unsigned int N>
@@ -169,6 +170,44 @@ void connect(const AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProve
 			fmt::print(stderr, "unhandled toggles-runner connect for gadget {} with alphabet size {} and typeid {}\n",
 					input1, alpha, typeid(a).name());
 	}
+}
+
+AutomatonBase::SymbolSet connect_deleted_symbols(const AutomatonBase& a, unsigned int connectPoint) {
+	//This is to avoid another instantiation of connect_at.
+	ConnectProvenance prov;
+	prov.connectPoint = numeric_cast<std::uint8_t>(connectPoint);
+	Finisher<ConnectProvenance> finisher;
+	auto active_alphabet_size = a.active_alphabet_size();
+	unsigned int otherConnectPoint = (connectPoint+1) % a.alphabet_size();
+
+	AutomatonBase::SymbolSet active;
+	switch (a.alphabet_size()) {
+#define TOGGLESRUNNER_CONNECT_CASE(N) case N: active = connect_at(static_cast<const Automaton<N>&>(a), active_alphabet_size, prov, finisher); break;
+		TOGGLESRUNNER_CONNECT_CASE(4)
+		TOGGLESRUNNER_CONNECT_CASE(5)
+		TOGGLESRUNNER_CONNECT_CASE(6)
+		TOGGLESRUNNER_CONNECT_CASE(7)
+		TOGGLESRUNNER_CONNECT_CASE(8)
+		TOGGLESRUNNER_CONNECT_CASE(9)
+		TOGGLESRUNNER_CONNECT_CASE(10)
+		TOGGLESRUNNER_CONNECT_CASE(11)
+		TOGGLESRUNNER_CONNECT_CASE(12)
+		TOGGLESRUNNER_CONNECT_CASE(13)
+		TOGGLESRUNNER_CONNECT_CASE(14)
+		TOGGLESRUNNER_CONNECT_CASE(15)
+		TOGGLESRUNNER_CONNECT_CASE(16)
+#undef TOGGLESRUNNER_CONNECT_CASE
+		default:
+			fmt::print(stderr, "unhandled toggles-runner connect_deleted_symbols with alphabet size {} and typeid {}\n",
+					a.alphabet_size(), typeid(a).name());
+			std::terminate();
+	}
+
+	AutomatonBase::SymbolSet deleted;
+	for (unsigned int i = 0; i < active_alphabet_size; ++i)
+		if (i != connectPoint && i != otherConnectPoint && !active.count(i))
+			deleted.insert(i);
+	return deleted;
 }
 
 
