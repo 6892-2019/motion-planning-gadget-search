@@ -244,15 +244,12 @@ void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges
 		lines = readAllLines(temp_from);
 
 		for (std::string l : lines) {
-			auto delim = l.find(' ');
-			uint64_t output = to_uint64(l.substr(0, delim));
+			vector<std::string_view> fields = split_view(l, ' ');
+			uint64_t output = to_uint64(fields[0]);
+			fields.erase(fields.begin());
 			vector<unsigned int> locs;
-			while (delim != std::string::npos) {
-				auto start = delim;
-				delim = l.find(' ', start);
-				locs.push_back(to_int(l.substr(start, delim)));
-			}
-			locs.push_back(to_int(l.substr(delim+1)));
+			for (std::string_view f : fields)
+				locs.push_back(to_int(f));
 			auto pair = delloc.try_emplace(output, locs);
 			if (!pair.second)
 				throw std::runtime_error(fmt::format("dellocs conflict for {}: {} {}",
