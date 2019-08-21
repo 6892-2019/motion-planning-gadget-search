@@ -204,8 +204,10 @@ AutomatonBase::SymbolSet connect_deleted_symbols(const AutomatonBase& a, unsigne
 	}
 
 	AutomatonBase::SymbolSet deleted;
-	for (unsigned int i = 0; i < active_alphabet_size; ++i)
-		if (i != connectPoint && i != otherConnectPoint && !active.count(i))
+	if (active_alphabet_size < 2) return deleted; //can't happen?
+	//We should now be dense for 0..alpha-2.
+	for (unsigned int i = 0; i < active_alphabet_size-2; ++i)
+		if (!active.count(i))
 			deleted.insert(i);
 	return deleted;
 }
