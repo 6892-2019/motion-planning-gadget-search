@@ -48,15 +48,11 @@ int deleted_locations_mode(std::string_view db_path, std::string_view input_file
 	vector<std::string> lines = readAllLines(std::string(input_file));
 	vector<uint64_t> gids;
 	for (std::string& x : lines) {
-		vector<std::string::size_type> commata;
-		for (std::string::size_type i = x.find(','); i != std::string::npos; i = x.find(',', i+1))
-			commata.push_back(i);
-
-		//This splitting should be using stringutils.hpp
-		gids.push_back(to_uint64(x.substr(0, commata[0])));
-		gids.push_back(to_uint64(x.substr(commata[1]+1, commata[2]-commata[1]-1)));
-		if (x.find("combine") != std::string::npos)
-			gids.push_back(to_uint64(x.substr(commata[2]+1, commata[3]-commata[2]-1)));
+		vector<std::string_view> fields = split_view(x, ',');
+		gids.push_back(to_uint64(fields[0]));
+		gids.push_back(to_uint64(fields[2]));
+		if (fields[1] == "combine")
+			gids.push_back(to_uint64(fields[3]));
 	}
 	std::sort(gids.begin(), gids.end());
 	gids.erase(std::unique(gids.begin(), gids.end()), gids.end());
