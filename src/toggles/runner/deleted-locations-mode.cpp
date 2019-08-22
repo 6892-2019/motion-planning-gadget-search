@@ -35,7 +35,7 @@ SymbolSet combine_deleted_symbols(const Automaton<16>& la, const Automaton<16>& 
 	std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
 	std::iota(slide.begin()+rightLocations+leftLocations, slide.end(), rightLocations+leftLocations);
 
-	for (unsigned int ll = 0; ll+1 < splice; ++ll)
+	for (unsigned int ll = 0; ll < splice; ++ll)
 		std::swap(slide[ll], slide[ll+rightLocations]);
 	std::iota(slide.begin()+splice, slide.begin()+splice+rightLocations, leftLocations);
 	std::rotate(slide.begin()+splice, slide.begin()+splice+rotation, slide.begin()+splice+rightLocations);
