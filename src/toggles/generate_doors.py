@@ -102,7 +102,7 @@ for open_ports in ((Location.OPEN, Location.OPEN), (Location.OPEN_IN, Location.O
                 survivors.add(min(canonicalize_options(perm)))
 
 
-def edges_for_ports(ports, optional_open=False):
+def edges_for_ports(ports, optional_open=False, close_only_if_open=False):
     port_index = {}
     for i, p in enumerate(ports):
         port_index.setdefault(p, []).append(i)
@@ -128,6 +128,8 @@ def edges_for_ports(ports, optional_open=False):
     name_str = 'door-o' if optional_open else 'door-'
     for p in (Location.OPEN, Location.TRAVERSE, Location.CLOSE):
         d = port_data[p]
+        if close_only_if_open and p == Location.CLOSE:
+            name_str += 's' # "symmetric"
         if d.directed:
             name_str += 'd'
         name_str += str(d.indices[0])
@@ -165,14 +167,19 @@ def edges_for_ports(ports, optional_open=False):
     if not d.directed:
         dedges.append([0, d.indices[0], d.indices[1], 1])
         dedges.append([0, d.indices[1], d.indices[0], 1])
+        if not close_only_if_open:
+            uedges.append([1, d.indices[0], d.indices[1], 1])
     else:
         dedges.append([0, d.indices[0], d.indices[1], 1])
+        if not close_only_if_open:
+            dedges.append([1, d.indices[0], d.indices[1], 1])
 
     return {
         'name': name_str,
         'uedges': uedges, 'dedges': dedges,
         'planar': nonadjacent_count < 2, 'directed': directed_types,
         'optional-open': optional_open,
+        'symmetric-close': close_only_if_open,
         'state-names': {0: 'open', 1: 'closed'},
     }
 
@@ -181,6 +188,7 @@ def gadget_keyfunc(g):
     directedness_priority = {0: 0, 3: 1, 1: 2, 2: 3}
     return (
         g['optional-open'],
+        g['symmetric-close'],
         directedness_priority[len(g['directed'])],
         not g['planar'],
         g['name'],
@@ -194,6 +202,8 @@ for s in survivors:
     # singleplayer there's no reason not to open a door.  Optional close doors
     # are similarly pointless.
     #gadgets.append(edges_for_ports(s, True))
+    # These might be useful/interesting to make, though not useful to search from.
+    gadgets.append(edges_for_ports(s, close_only_if_open=True))
 
 gadgets = sorted(gadgets, key=gadget_keyfunc)
 gadget_subdoc = {}
