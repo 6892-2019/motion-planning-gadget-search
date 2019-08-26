@@ -144,9 +144,9 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets));
 
 	//The loop control below assumes provs isn't empty.  It can only be empty if
-	//we skipped all the pairs.
+	//we skipped all the pairs.  If we produced any gadgets, we must have provs.
 	if (prov.empty()) {
-		if (survivor_size != 0 || skipped == 0)
+		if (survivor_size != 0)
 			fmt::print(stderr, "warning: skipping empty combine provs but there were {} gadgets; {} skipped\n", survivor_size, skipped);
 		return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 	}
