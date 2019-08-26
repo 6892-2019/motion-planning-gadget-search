@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "gadget-set.hpp"
+#include "select-by-id.hpp"
 #include "anyprov.hpp"
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
@@ -666,13 +667,16 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 						possible_combine_rights.cbegin(), possible_combine_rights.cend());
 				if (rights.empty())
 					throw std::runtime_error(fmt::format("no closemirror-reachable combine rights? possible rights are {}", possible_combine_rights));
-				for (const pair<uint64_t, uint64_t>& p : rights) {
-					auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-					for (uint64_t r = p.first; r < p.second; ++r)
-						edges_combine.emplace_back(r, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", r).c_str()));
-					txn.commit();
-				}
-				std::sort(edges_combine.begin(), edges_combine.end(), proj_less<0>());
+				vector<pair<uint64_t, encoding::Stats>> right_stat_sort = select_gadget_id_to_stats(env, rights);
+				std::sort(right_stat_sort.begin(), right_stat_sort.end(), [](const auto& a, const auto&b) {
+					return std::tie(a.second.locations, a.second.states, a.first) <
+							std::tie(b.second.locations, b.second.states, b.first);
+				});
+
+				auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+				for (const auto& p : right_stat_sort)
+					edges_combine.emplace_back(p.first, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", p.first).c_str()));
+				txn.commit();
 			}
 		} else if (!awaiting_connect.empty()) {
 			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("connect", awaiting_connect);

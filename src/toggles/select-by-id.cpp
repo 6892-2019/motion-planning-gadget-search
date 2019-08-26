@@ -135,6 +135,17 @@ std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats
 	return ret;
 }
 
+std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats(
+		lmdb::env& env, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals) {
+	lmdb::dbi gadget_hashtable, gadget_index;
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		txn.commit();
+	}
+	return select_gadget_id_to_stats(env, gadget_hashtable, gadget_index, gid_intervals);
+}
 
 
 uint64_t get_current_max_gadget_id(lmdb::env& env) {
