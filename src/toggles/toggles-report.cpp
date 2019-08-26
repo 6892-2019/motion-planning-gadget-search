@@ -258,6 +258,23 @@ void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges
 	}
 }
 
+const std::string_view preferred_names[] = {
+	"diode"sv,
+	"wire"sv,
+
+	"diode-diode-parallel"sv,
+	"diode-diode-antiparallel-r"sv,
+	"diode-diode-antiparallel-s"sv,
+	"diode-diode-crossing"sv,
+
+	"wire-wire-noncrossing"sv,
+	"wire-wire-crossing"sv,
+
+	"diode-wire-noncrossing-r"sv,
+	"diode-wire-noncrossing-s"sv,
+	"diode-wire-crossing"sv,
+};
+
 struct TargetStuff {
 	vector<pair<uint64_t, uint64_t>> intervals;
 	EdgeCache edge_cache;
@@ -296,10 +313,24 @@ TargetStuff target_stuff(lmdb::env& env) {
 		} while (cur.get(key, value, MDB_NEXT));
 	}
 	vector<uint64_t> stable_iteration;
+	vector<std::string_view> found_preferred_names;
 	for (auto it = inv_names.begin(); it != inv_names.end(); ++it) {
 		stable_iteration.push_back(it->first);
 		edge_cache.insert_or_assign(it->first, AnyProv::source(it->first));
-		std::sort(it.value().begin(), it.value().end());
+
+		for (const std::string& name : it->second) {
+			auto pref = std::find(std::begin(preferred_names), std::end(preferred_names), name);
+			if (pref != std::end(preferred_names))
+				found_preferred_names.push_back(*pref);
+		}
+		if (!found_preferred_names.empty()) {
+			if (found_preferred_names.size() > 1)
+				throw std::logic_error(fmt::format("found multiple preferred names? {} {}", it->first, found_preferred_names));
+			it.value().clear();
+			it.value().push_back(std::string(found_preferred_names.front()));
+			found_preferred_names.clear();
+		} else
+			std::sort(it.value().begin(), it.value().end());
 	}
 
 	lmdb::dbi close_edges = lmdb::dbi::open(txn, "edges-close");
