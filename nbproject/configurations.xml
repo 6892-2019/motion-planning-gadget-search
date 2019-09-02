@@ -44,6 +44,7 @@
           <in>dump-gadget-mode.cpp</in>
           <in>gadget-encoding.cpp</in>
           <in>incoming-edges-mode.cpp</in>
+          <in>migrate-mode.cpp</in>
           <in>msgpack-mode.cpp</in>
           <in>ops.cpp</in>
           <in>provenance.hpp</in>
