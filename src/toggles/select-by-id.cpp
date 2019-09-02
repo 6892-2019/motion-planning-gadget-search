@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "select-by-id.hpp"
+#include "intervals.hpp"
 #include "proj_compare.hpp"
 
 using std::vector;
@@ -36,21 +37,30 @@ namespace {
 //select_gadget_id_to_data needs to do something slightly different.
 std::vector<std::pair<std::uint64_t, std::uint64_t>> select_gadget_id_to_hash(
 		lmdb::txn& txn, lmdb::dbi& gadget_index, const vector<pair<uint64_t, uint64_t>>& gid_intervals) {
+	//gadget_index is a list of optimally-sized pages of hashes, where the key
+	//is the index of the last hash on that page.  The key is inclusive, so the
+	//last key in the database is the last valid gadget id.  This results in
+	//awkward indexing but means MDB_SET_RANGE brings us to the right page.
 	vector<pair<uint64_t, std::size_t>> id_to_hash;
 	lmdb::cursor cur = lmdb::cursor::open(txn, gadget_index);
 	for (pair<uint64_t, uint64_t> p : gid_intervals) {
 		uint64_t id = p.first;
-		std::string_view key = lmdb::to_sv(id), value;
-		if (!cur.get(key, value, MDB_SET))
-			throw std::logic_error(fmt::format("id {} (from interval {}) not found", id, p.first));
-		id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
-
-		while (++id < p.second) {
-			if (!cur.get(key, value, MDB_NEXT))
-				throw std::logic_error(fmt::format("id {} (from interval {}) not found", id, p));
-			if (lmdb::from_sv<uint64_t>(key) != id) //might mean discontiguous ids
-				throw std::logic_error(fmt::format("expected id {} (from interval {}), but next was {}", id, p, lmdb::from_sv<uint64_t>(key)));
-			id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
+		if (id == 0)
+			throw std::logic_error("wef");
+		while (id < p.second) { //interval might span pages
+			std::string_view key = lmdb::to_sv(id), value;
+			if (!cur.get(key, value, MDB_SET_RANGE))
+				throw std::logic_error(fmt::format("id {} (from interval {}) beyond end of gadget_index", id, p));
+			uint64_t last_id_on_page = lmdb::from_sv<uint64_t>(key);
+			uint64_t first_id_on_page = last_id_on_page - value.size()/sizeof(uint64_t) + 1;
+			const char* data = value.data() + (id - first_id_on_page) * sizeof(uint64_t);
+			while (id < p.second && data != value.end()) {
+				uint64_t hash;
+				std::memcpy(&hash, data, sizeof(uint64_t));
+				id_to_hash.emplace_back(id, hash);
+				++id;
+				data += sizeof(uint64_t);
+			}
 		}
 	}
 	return id_to_hash;
@@ -92,18 +102,10 @@ struct gadget_copier {
 std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
 		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
 		const std::vector<std::uint64_t>& gids) {
-	assert(std::is_sorted(gids.begin(), gids.end()));
-	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-	vector<pair<uint64_t, std::size_t>> id_to_hash;
-	for (uint64_t id : gids) {
-		std::string_view value;
-		if (!gadget_index.get(txn, lmdb::to_sv(id), value))
-			throw std::logic_error(fmt::format("id {} not found", id));
-		id_to_hash.emplace_back(id, lmdb::from_sv<std::size_t>(value));
-	}
-	auto ret = select_gadget_id_to_value<gadget_copier>(env, txn, gadget_hashtable, std::move(id_to_hash));
-	txn.commit();
-	return ret;
+	interval_accumulator<uint64_t> accum(128);
+	for (uint64_t i : gids)
+		accum(i);
+	return select_gadget_id_to_data(env, gadget_hashtable, gadget_index, std::move(accum).finish());
 }
 std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
 		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,

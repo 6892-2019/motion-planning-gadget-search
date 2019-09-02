@@ -57,8 +57,10 @@
         <in>anyprov.hpp</in>
         <in>gadget-encoding-stats.cpp</in>
         <in>gadget-encoding-stats.hpp</in>
+        <in>gadget-set.cpp</in>
         <in>gadgets.yaml</in>
         <in>rpc.cpp</in>
+        <in>select-by-id.cpp</in>
         <in>toggles-report.cpp</in>
         <in>toggles-shared.cpp</in>
         <in>toggles-shared.hpp</in>

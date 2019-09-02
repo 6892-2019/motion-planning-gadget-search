@@ -1,5 +1,6 @@
 #include "precompiled.hpp"
 #include "gadget-set.hpp"
+#include "select-by-id.hpp"
 #include "stringutils.hpp"
 #include "tsl/ordered_set.h"
 #include <regex>
@@ -57,7 +58,7 @@ std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, lmdb::dbi&
 		lmdb::dbi& gadget_index, lmdb::dbi& names, const GadgetSet& gs) {
 	//Our ids are dense between 1 and the max.
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-	uint64_t max_id = gadget_index.stat(txn).ms_entries;
+	uint64_t max_id = get_current_max_gadget_id(txn, gadget_index);
 	//vector_ordered_set
 	tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> set;
 
