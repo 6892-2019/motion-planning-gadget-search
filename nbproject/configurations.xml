@@ -60,6 +60,8 @@
         <in>gadget-encoding-stats.hpp</in>
         <in>gadget-set.cpp</in>
         <in>gadgets.yaml</in>
+        <in>lmdb-interval-list.cpp</in>
+        <in>predicates.cpp</in>
         <in>rpc.cpp</in>
         <in>select-by-id.cpp</in>
         <in>toggles-report.cpp</in>

@@ -28,6 +28,149 @@ static std::string g_database_path;
 //forward declaration:
 void write_output(const void* data, size_t size);
 
+
+namespace varint64 {
+//https://sqlite.org/src4/doc/trunk/www/varint.wiki but little-endian
+constexpr static uint64_t VARINT_ONE = 240, VARINT_TWO = 248, VARINT_THREE = 249,
+		VARINT_FOUR = 250, VARINT_FIVE = 251, VARINT_SIX = 252, VARINT_SEVEN = 253, VARINT_EIGHT = 254;
+void write(std::byte*& dest, uint64_t value) {
+	//memcpy, but always to and advancing dest
+	auto write = [&dest](const uint64_t& value, std::size_t amount) {
+		//TODO: assert higher bytes are zero?
+		std::memcpy(dest, &value, amount);
+		dest += amount;
+	};
+
+	if (value <= VARINT_ONE)
+		write(value, 1);
+	else if (value <= (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE - 1) {
+		write((value - VARINT_ONE) / 256 + VARINT_ONE + 1, 1);
+		write((value - VARINT_ONE) % 256, 1);
+	} else if (value <= (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE - 1 + 65536) {
+		write(VARINT_THREE, 1);
+		write((value - ((VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE)) / 256, 1);
+		write((value - ((VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE)) % 256, 1);
+	} else {
+		//TODO: this might be too clever (making the write length not a constant)
+		//Compute the minimum number of bytes to represent the value.
+		std::size_t amount = sizeof(uint64_t) - (__builtin_clzl(value) / 8);
+		write(VARINT_TWO - 1 + amount, 1);
+		write(value, amount);
+	}
+}
+
+uint64_t read(std::byte*& src) {
+	uint64_t first = 0;
+	std::memcpy(&first, src++, 1);
+	if (first <= VARINT_ONE)
+		return first;
+	else if (first <= VARINT_TWO) {
+		uint64_t second = 0;
+		std::memcpy(&second, src++, 1);
+		return VARINT_ONE + 256*(first - VARINT_ONE - 1) + second;
+	} else if (first == VARINT_THREE) {
+		uint64_t second = 0, third = 0;
+		std::memcpy(&second, src++, 1);
+		std::memcpy(&third, src++, 1);
+		return (VARINT_TWO - VARINT_ONE)*256 + VARINT_ONE + 256*second + third;
+	} else {
+		std::size_t amount = first - (VARINT_TWO-1);
+		uint64_t ret = 0;
+		std::memcpy(&ret, src, amount);
+		src += amount;
+		return ret;
+	}
+}
+} //namespace varint64
+
+struct identity_subscript {
+	template<typename T>
+	auto operator[](const T& x) const noexcept {return x;}
+};
+
+struct SkinnyPage {
+	SkinnyPage(std::uint64_t a, std::vector<std::byte>&& b, std::vector<std::byte>&& c) :
+			last_input(a), header(std::move(b)), page(std::move(c)) {}
+	std::uint64_t last_input;
+	std::vector<std::byte> header, page;
+};
+
+template<class Iterator, class IdMapper = identity_subscript>
+std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last, IdMapper map = IdMapper()) {
+	assert(std::is_sorted(first, last, InputGroupingProvCmp()));
+
+	std::vector<SkinnyPage> ret;
+	if (first == last) return ret;
+	std::vector<std::byte> header, page;
+	std::array<std::byte, 5> length;
+	std::vector<uint64_t> block;
+	std::vector<std::byte> chunk;
+	uint64_t previous_input = first->input1 - 1; //so we don't commit an empty page to start
+
+	auto commit_page = [&]() {
+		std::uint16_t offset = numeric_cast<std::uint16_t>(header.size());
+		std::memcpy(header.data(), &offset, 2);
+		ret.emplace_back(previous_input, std::move(header), std::move(page));
+		header.clear();
+		header.resize(2);
+		page.clear();
+	};
+
+	header.resize(2); //reserve two bytes for the first offset (rest are lengths, so delta-coded varint)
+	while (first != last) {
+		//Find the block sharing the same input1.
+		block.clear();
+		Iterator block_it = first;
+		uint64_t input = block_it->input1;
+		while (block_it != last && block_it->input1 == input) {
+			block.push_back(map[block_it->output1]);
+			++block_it;
+		}
+		first = block_it;
+
+		std::sort(block.begin(), block.end());
+		block.erase(std::unique(block.begin(), block.end()), block.end());
+
+		if (chunk.size() < block.size() * 9)
+			chunk.resize(block.size() * 9);
+		std::byte* chunk_end = chunk.data();
+		varint64::write(chunk_end, block.front());
+		for (std::size_t i = 1; i < block.size(); ++i) //delta coding loop
+			varint64::write(chunk_end, block[i] - block[i-1]);
+		//TODO: should be using a smaller varint here -- we only need up through
+		//than 16 * 16 * 2 * 9 and usually much less
+		std::byte* length_end = length.data();
+		varint64::write(length_end, chunk_end - chunk.data());
+
+		if (header.size() + (length_end - length.data()) > std::numeric_limits<std::uint16_t>::max() ||
+				input != previous_input)
+			commit_page();
+
+		header.insert(header.end(), length.data(), length_end);
+		page.insert(page.end(), chunk.data(), chunk_end);
+		previous_input = input;
+	}
+	if (!page.empty())
+		commit_page();
+	return ret;
+}
+
+void insert_skinny_edges(lmdb::txn& txn, lmdb::dbi& edges, std::vector<SkinnyPage>&& pages) {
+	lmdb::cursor cur = lmdb::cursor::open(txn, edges);
+	for (const SkinnyPage& p : pages) {
+		//See comments elsewhere about undefined behavior.
+		std::string_view value(nullptr, p.header.size() + p.page.size());
+		if (!cur.put(lmdb::to_sv(p.last_input), value, MDB_RESERVE | MDB_NOOVERWRITE))
+			throw std::logic_error(fmt::format("failed to insert skinny edge data for {} (length ())",
+					p.last_input, value.size())); //would like to get the DB name here...
+		char* dest = const_cast<char*>(value.data());
+		std::memcpy(dest, p.header.data(), p.header.size());
+		std::memcpy(dest + p.header.size(), p.page.data(), p.page.size());
+	}
+	std::vector<SkinnyPage> ensure_memory_is_freed(std::move(pages));
+}
+
+
 Finisher<ConnectProvenance> do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
 	Finisher<ConnectProvenance> finisher;
 	for (auto& i : inputs)
@@ -135,7 +278,71 @@ auto extract_first(const vector<T>& inputs) {
 //	std::exit(0);
 //}
 
-DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+Finisher<CombineProvenance> operate_combine(lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		vector<pair<uint64_t, uint64_t>> left_intervals, vector<std::uint64_t> right_gids,
+		unsigned int precision, unsigned int max_left_states) {
+	//We pass two separate vectors of gadget data to do_combine, but we want to
+	//do only one select_gadget_id_to_data so as to only need one transaction.
+	if (!std::is_sorted(right_gids.begin(), right_gids.end()))
+		std::sort(right_gids.begin(), right_gids.end());
+	vector<pair<uint64_t, uint64_t>> right_intervals = maximal_intervals(right_gids.begin(), right_gids.end());
+	vector<pair<uint64_t, uint64_t>> input_intervals = interval_union(
+			left_intervals.cbegin(), left_intervals.cend(), right_intervals.cbegin(), right_intervals.cend());
+	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, std::move(input_intervals));
+
+	vector<pair<uint64_t, vector<std::byte>>> right_data;
+	for (pair<uint64_t, vector<std::byte>>& p : inputs) {
+		auto rit = std::find(right_gids.begin(), right_gids.end(), p.first);
+		if (rit != right_gids.end()) {
+			uint64_t r = *rit;
+			right_gids.erase(rit);
+			//Move if this is exclusively a right, otherwise copy.
+			if (interval_contains(left_intervals, r))
+				right_data.push_back(p);
+			else {
+				right_data.push_back(std::move(p));
+				p.second.clear(); //to be erased later
+			}
+		}
+	}
+	if (!right_gids.empty())
+		throw std::logic_error(fmt::format("can't happen: some right gids not retrieved? {}", right_gids));
+
+	//Skip any gadgets that can't possibly combine with any right.  (do_combine
+	//will skip as appropriate if it sometimes fits.)  Also skip if it exceeds
+	//our predefined limits.
+	std::size_t skipped = 0;
+	unsigned int right_min_locs = 0;
+	for (pair<uint64_t, vector<std::byte>>& p : right_data)
+		right_min_locs = std::min(right_min_locs, encoding::locations(p.second.data()));
+	unsigned int left_max_locs = precision - right_min_locs;
+	for (pair<uint64_t, vector<std::byte>>& p : inputs) {
+		if (p.second.empty()) continue; //removed in the loop above
+		encoding::Stats stats = encoding::stats(p.second.data());
+		if (stats.locations > left_max_locs || stats.states > max_left_states) {
+			p.second.clear();
+			skipped += right_data.size();
+		}
+	}
+	inputs.erase(std::partition(inputs.begin(), inputs.end(), [](const auto& p){return !p.second.empty();}), inputs.end());
+	//TODO: consider sorting inputs (currently it's roughly hash-ordered).  Maybe
+	//we want to sort largest-first so we get any pathological determinizes out
+	//of the way early, rather than getting OOM killed at the end.  Note that
+	//do_combine now processes back-first like a stack to gradually release memory.
+
+	Finisher<CombineProvenance> outputs = do_combine(std::move(inputs), std::move(right_data), precision);
+	outputs.skip(skipped);
+	return outputs;
+}
+
+struct less_input2 {
+	bool operator()(const CombineProvenance& a, const CombineProvenance& b) const noexcept {
+		return a.input2 < b.input2;
+	}
+};
+
+DatabaseOperationStatistics commit_combine_result_full(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, vector<pair<uint64_t, lmdb::dbi>>& edge_tables, lmdb::dbi& completions,
 		vector<vector<std::byte>>&& gadgets, vector<CombineProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
 	std::size_t survivor_size = gadgets.size();
@@ -160,10 +367,9 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 	//touching one edge table at a time).  This is more to simplify managing
 	//cursor lifetime than to keep transactions short, as we'll start another
 	//immediately and we can't do anything useful if we're suspended.
-	auto input2_sort = [](const CombineProvenance& a, const CombineProvenance& b){return a.input2 < b.input2;};
-	for (auto block_first = prov.begin(), block_end = std::lower_bound(block_first, prov.end(), *block_first, input2_sort);
+	for (auto block_first = prov.begin(), block_end = std::lower_bound(block_first, prov.end(), *block_first, less_input2());
 			block_first != prov.end();
-			block_end = std::upper_bound(block_first, prov.end(), *block_first, input2_sort)) {
+			block_end = std::upper_bound(block_first, prov.end(), *block_first, less_input2())) {
 		uint64_t input2 = block_first->input2;
 		auto edges_it = std::find_if(edge_tables.begin(), edge_tables.end(),
 				[input2](const auto& p){return p.first == input2;});
@@ -224,7 +430,92 @@ DatabaseOperationStatistics commit_combine_result(lmdb::env& env, lmdb::dbi& gad
 	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
 }
 
+DatabaseOperationStatistics commit_combine_result_skinny(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, vector<pair<uint64_t, lmdb::dbi>>& edge_tables, lmdb::dbi& completions,
+		vector<vector<std::byte>>&& gadgets, vector<CombineProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
+	std::size_t survivor_size = gadgets.size();
+	std::size_t edge_count = prov.size();
+
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets));
+
+	//We group by input2, then by input1.  Because we combine against each right
+	//operand in sequence, we're usually not already sorted, so we don't check
+	//is_sorted like we do in the other commit_*_result functions.
+	std::sort(prov.begin(), prov.end(), InputGroupingProvCmp());
+	vector<pair<lmdb::dbi*, vector<SkinnyPage>>> pages;
+	vector<pair<std::string, vector<pair<uint64_t, uint64_t>>>> pending_completions;
+	pages.reserve(edge_tables.size());
+	while (!prov.empty()) {
+		auto [first, last] = std::equal_range(prov.begin(), prov.end(), prov.back(), less_input2());
+		auto edge_db_iter = std::find_if(edge_tables.begin(), edge_tables.end(),
+				[input2=first->input2](const auto& p){return p.first == input2;});
+		if (edge_db_iter == edge_tables.end())
+			throw std::logic_error(fmt::format("can't happen: didn't open edge db for {}?", first->input2));
+		pages.emplace_back(&edge_db_iter->second, paginate_for_skinny_edges(first, last, selsert_result.local_to_global.begin()));
+		interval_accumulator<uint64_t> comp_input1(512);
+		for (auto i = first; i != last; ++i)
+			comp_input1(i->input1);
+		pending_completions.emplace_back(fmt::format("combine-{}", first->input2), std::move(comp_input1).finish());
+		prov.erase(first, last);
+	}
+	{vector<CombineProvenance> ensure_memory_is_freed(std::move(prov));}
+
+	auto txn = lmdb::txn::begin(env);
+	for (std::size_t i = 0; i < pages.size(); ++i) {
+		//For full edges we check that if the edge exists it's exactly what we have.
+		//It's hard to do that for skinny edges, so now we check we have fresh
+		//completions.
+		auto existing_completions = intersect_completion(env, txn, completions,
+				pending_completions[i].first, pending_completions[i].second);
+		if (!existing_completions.empty())
+			throw std::runtime_error(fmt::format(
+					"combine completion collision for skinny edges; completion key {}, first input interval {}, first colliding interval {}",
+					pending_completions[i].first, pending_completions[i].second[0], existing_completions[0]));
+		insert_skinny_edges(txn, *pages[i].first, std::move(pages[i].second));
+		union_completion(env, txn, completions, pending_completions[i].first, pending_completions[i].second);
+	}
+	txn.commit();
+	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+}
+
 DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_intervals,
+		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index, completions;
+	vector<pair<uint64_t, lmdb::dbi>> edge_tables;
+	{
+		//We may have to create edge databases, though usually the driver will
+		//create them for us, so try a read-only txn first.
+		try {
+			lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+			gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+			gadget_index = lmdb::dbi::open(txn, "gadget_index");
+			completions = lmdb::dbi::open(txn, "completions");
+			for (uint64_t i : right_gids)
+				edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", i).c_str()));
+			txn.commit();
+		} catch (lmdb::not_found_error&) {
+			lmdb::txn txn = lmdb::txn::begin(env);
+			gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+			gadget_index = lmdb::dbi::open(txn, "gadget_index");
+			completions = lmdb::dbi::open(txn, "completions");
+			for (uint64_t i : right_gids)
+				edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", i).c_str(),
+						MDB_CREATE | MDB_INTEGERKEY));
+			txn.commit();
+		}
+	}
+
+	Finisher<CombineProvenance> outputs = operate_combine(env, gadget_hashtable, gadget_index,
+			std::move(left_intervals), std::move(right_gids), precision, max_left_states);
+	return commit_combine_result_skinny(env, gadget_hashtable, gadget_index, edge_tables, completions,
+			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
+}
+
+DatabaseOperationStatistics do_combine_db_full(vector<pair<uint64_t, uint64_t>> left_intervals,
 		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
@@ -255,64 +546,47 @@ DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_
 		}
 	}
 
-	//We pass two separate vectors of gadget data to do_combine, but we want to
-	//do only one select_gadget_id_to_data so as to only need one transaction.
-	if (!std::is_sorted(right_gids.begin(), right_gids.end()))
-		std::sort(right_gids.begin(), right_gids.end());
-	vector<pair<uint64_t, uint64_t>> right_intervals = maximal_intervals(right_gids.begin(), right_gids.end());
-	vector<pair<uint64_t, uint64_t>> input_intervals = interval_union(
-			left_intervals.cbegin(), left_intervals.cend(), right_intervals.cbegin(), right_intervals.cend());
-	vector<pair<std::uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
-			env, gadget_hashtable, gadget_index, std::move(input_intervals));
-
-	vector<pair<uint64_t, vector<std::byte>>> right_data;
-	for (pair<uint64_t, vector<std::byte>>& p : inputs) {
-		auto rit = std::find(right_gids.begin(), right_gids.end(), p.first);
-		if (rit != right_gids.end()) {
-			uint64_t r = *rit;
-			right_gids.erase(rit);
-			//Move if this is exclusively a right, otherwise copy.
-			if (interval_contains(left_intervals, r))
-				right_data.push_back(p);
-			else {
-				right_data.push_back(std::move(p));
-				p.second.clear(); //to be erased later
-			}
-		}
-	}
-	if (!right_gids.empty())
-		throw std::logic_error(fmt::format("can't happen: some right gids not retrieved? {}", right_gids));
-
-	//Skip any gadgets that can't possibly combine with any right.  (do_combine
-	//will skip as appropriate if it sometimes fits.)  Also skip if it exceeds
-	//our predefined limits.
-	std::size_t skipped = 0;
-	unsigned int right_min_locs = 0;
-	for (pair<uint64_t, vector<std::byte>>& p : right_data)
-		right_min_locs = std::min(right_min_locs, encoding::locations(p.second.data()));
-	unsigned int left_max_locs = precision - right_min_locs;
-	for (pair<uint64_t, vector<std::byte>>& p : inputs) {
-		if (p.second.empty()) continue; //removed in the loop above
-		encoding::Stats stats = encoding::stats(p.second.data());
-		if (stats.locations > left_max_locs || stats.states > max_left_states) {
-			p.second.clear();
-			skipped += right_data.size();
-		}
-	}
-	inputs.erase(std::partition(inputs.begin(), inputs.end(), [](const auto& p){return !p.second.empty();}), inputs.end());
-	//TODO: consider sorting inputs (currently it's roughly hash-ordered).  Maybe
-	//we want to sort largest-first so we get any pathological determinizes out
-	//of the way early, rather than getting OOM killed at the end.  Note that
-	//do_combine now processes back-first like a stack to gradually release memory.
-
-	Finisher<CombineProvenance> outputs = do_combine(std::move(inputs), std::move(right_data), precision);
-	outputs.skip(skipped);
-	return commit_combine_result(env, gadget_hashtable, gadget_index, edge_tables, completions,
+	Finisher<CombineProvenance> outputs = operate_combine(env, gadget_hashtable, gadget_index,
+			std::move(left_intervals), std::move(right_gids), precision, max_left_states);
+	return commit_combine_result_full(env, gadget_hashtable, gadget_index, edge_tables, completions,
 			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
 
-DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+Finisher<ConnectProvenance> operate_connect(lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		vector<pair<uint64_t, uint64_t>>& input_intervals, unsigned int max_states) {
+	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, input_intervals);
+	std::size_t skipped = 0;
+
+	//We skip any gadget with locations < 4, but still record completions.
+	auto new_end = std::partition(inputs.begin(), inputs.end(),
+			//partition sorts true before false, so negate filter condition
+			[](const auto& p) {return !(encoding::locations(p.second.data()) < 4);});
+	skipped += std::distance(new_end, inputs.end());
+	inputs.erase(new_end, inputs.end());
+
+	//We skip any gadget with states > max_states, but do not record completions
+	//as we may have to come back for those later.
+	new_end = std::partition(inputs.begin(), inputs.end(), [max_states](const auto& p) {
+		//partition sorts true before false, so negate filter condition
+		return !(encoding::stats(p.second.data()).states > max_states);
+	});
+	interval_accumulator<uint64_t> bad(256);
+	for (auto i = new_end; i != inputs.end(); ++i)
+		bad(i->first);
+	vector<pair<uint64_t, uint64_t>> bad_intervals = std::move(bad).finish();
+	input_intervals = interval_difference(input_intervals.begin(), input_intervals.end(),
+			bad_intervals.begin(), bad_intervals.end());
+	skipped += std::distance(new_end, inputs.end());
+	inputs.erase(new_end, inputs.end());
+
+	Finisher<ConnectProvenance> outputs = do_connect(std::move(inputs));
+	outputs.skip(skipped);
+	return outputs;
+}
+
+DatabaseOperationStatistics commit_connect_result_full(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
 		vector<ConnectProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
@@ -361,7 +635,38 @@ DatabaseOperationStatistics commit_connect_result(lmdb::env& env, lmdb::dbi& gad
 			i = j;
 		}
 	}
+	//Completions now describe skinny edges, so we don't change them here.
+	txn.commit();
 
+	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
+}
+
+DatabaseOperationStatistics commit_connect_result_skinny(lmdb::env& env, lmdb::dbi& gadget_hashtable,
+		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
+		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
+		vector<ConnectProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
+	std::size_t survivor_size = gadgets.size();
+	std::size_t edge_count = prov.size();
+
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets));
+
+	//Group provs by input1, if they aren't already.
+	if (!std::is_sorted(prov.begin(), prov.end(), InputGroupingProvCmp()))
+		std::sort(prov.begin(), prov.end(), InputGroupingProvCmp());
+	vector<SkinnyPage> pages = paginate_for_skinny_edges(prov.begin(), prov.end(), selsert_result.local_to_global.begin());
+	//Release memory before blocking to start a write transaction.
+	{vector<ConnectProvenance> ensure_memory_is_freed(std::move(prov));}
+
+	auto txn = lmdb::txn::begin(env);
+	//For full edges we check that if the edge exists it's exactly what we have.
+	//It's hard to do that for skinny edges, so now we check we have fresh
+	//completions.
+	auto existing_completions = intersect_completion(env, txn, completions, "connect", input_intervals);
+	if (!existing_completions.empty())
+		throw std::runtime_error(fmt::format(
+				"connect completion collision for skinny edges; first input interval {}, first colliding interval {}",
+				input_intervals[0], existing_completions[0]));
+	insert_skinny_edges(txn, edges, std::move(pages));
 	union_completion(env, txn, completions, "connect", input_intervals);
 	txn.commit();
 
@@ -379,39 +684,33 @@ DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input
 		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
 		gadget_index = lmdb::dbi::open(txn, "gadget_index");
 		completions = lmdb::dbi::open(txn, "completions");
+		connect_edges = lmdb::dbi::open(txn, "edges-skinny-connect");
+		txn.commit();
+	}
+
+	Finisher<ConnectProvenance> outputs = operate_connect(env, gadget_hashtable, gadget_index, input_intervals, max_states);
+	return commit_connect_result_skinny(env, gadget_hashtable, gadget_index, connect_edges, completions,
+			std::move(input_intervals), std::move(outputs.rows_).values_container(),
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
+}
+
+DatabaseOperationStatistics do_connect_db_full(vector<pair<uint64_t, uint64_t>> input_intervals, unsigned int max_states) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
 		connect_edges = lmdb::dbi::open(txn, "edges-connect");
 		txn.commit();
 	}
 
-	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
-			env, gadget_hashtable, gadget_index, input_intervals);
-	std::size_t skipped = 0;
-
-	//We skip any gadget with locations < 4, but still record completions.
-	auto new_end = std::partition(inputs.begin(), inputs.end(),
-			//partition sorts true before false, so negate filter condition
-			[](const auto& p) {return !(encoding::locations(p.second.data()) < 4);});
-	skipped += std::distance(new_end, inputs.end());
-	inputs.erase(new_end, inputs.end());
-
-	//We skip any gadget with states > max_states, but do not record completions
-	//as we may have to come back for those later.
-	new_end = std::partition(inputs.begin(), inputs.end(), [max_states](const auto& p) {
-		//partition sorts true before false, so negate filter condition
-		return !(encoding::stats(p.second.data()).states > max_states);
-	});
-	interval_accumulator<uint64_t> bad(256);
-	for (auto i = new_end; i != inputs.end(); ++i)
-		bad(i->first);
-	vector<pair<uint64_t, uint64_t>> bad_intervals = std::move(bad).finish();
-	input_intervals = interval_difference(input_intervals.begin(), input_intervals.end(),
-			bad_intervals.begin(), bad_intervals.end());
-	skipped += std::distance(new_end, inputs.end());
-	inputs.erase(new_end, inputs.end());
-
-	Finisher<ConnectProvenance> outputs = do_connect(std::move(inputs));
-	outputs.skip(skipped);
-	return commit_connect_result(env, gadget_hashtable, gadget_index, connect_edges, completions,
+	Finisher<ConnectProvenance> outputs = operate_connect(env, gadget_hashtable, gadget_index, input_intervals, max_states);
+	return commit_connect_result_full(env, gadget_hashtable, gadget_index, connect_edges, completions,
 			std::move(input_intervals), std::move(outputs.rows_).values_container(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
