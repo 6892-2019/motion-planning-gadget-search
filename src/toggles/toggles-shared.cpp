@@ -137,9 +137,10 @@ std::uint64_t decode_skinny_edge_page(std::string_view key, std::string_view val
 		std::vector<std::uint32_t>& offsets) {
 	offsets.clear();
 	const std::byte* first = reinterpret_cast<const std::byte*>(value.data());
-	const std::byte* p = first;
-	std::uint16_t length_of_offsets = numeric_cast<std::uint16_t>(varint64::read(p));
-	offsets.push_back(length_of_offsets); //end of offsets should fit in 16 bits
+	std::uint16_t length_of_offsets;
+	std::memcpy(&length_of_offsets, first, sizeof(std::uint16_t));
+	const std::byte* p = first + sizeof(std::uint16_t);
+	offsets.push_back(length_of_offsets);
 	while (p != first + length_of_offsets)
 		offsets.push_back(offsets.back() + numeric_cast<std::uint16_t>(varint64::read(p))); //remaining elements are list lengths, so sum to get offset
 	uint64_t last_id_on_page = lmdb::from_sv<uint64_t>(key);
