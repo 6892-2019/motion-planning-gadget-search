@@ -90,7 +90,7 @@ std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last,
 		varint64::write(length_end, chunk_end - chunk.data());
 
 		if (header.size() + (length_end - length.data()) > std::numeric_limits<std::uint16_t>::max() ||
-				input != previous_input)
+				input != previous_input + 1)
 			commit_page();
 
 		header.insert(header.end(), length.data(), length_end);
