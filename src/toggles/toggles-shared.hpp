@@ -218,15 +218,22 @@ void visit_skinny_edges(lmdb::txn& txn, lmdb::dbi& edge_db,
 	uint64_t open_page_start = 0;
 	std::vector<std::uint32_t> offsets;
 	for (pair<uint64_t, uint64_t> p : sources) {
+		//If the next page starts after this interval ends, there are no edges
+		//from ids in this interval.
+		if (p.second <= open_page_start) continue;
 		uint64_t id = p.first;
 		while (id < p.second) { //interval might span pages
 			std::string_view key = lmdb::to_sv(id), value;
 			if (!cur.get(key, value, MDB_SET_RANGE))
-				throw std::logic_error(fmt::format("id {} (from interval {}) beyond end of skinny edge database", id, p));
+				//We've reached the end of the database.  No further ids have edges.
+				return;
 			if (lmdb::from_sv<uint64_t>(key) != open_page_key) {
 				open_page_key = lmdb::from_sv<uint64_t>(key);
 				open_page_start = detail::decode_skinny_edge_page(key, value, offsets);
 			}
+			//Skip to the start of the page (no edges for any skipped ids).  If
+			//the start is beyond this interval, the following loop does nothing.
+			id = open_page_start;
 
 			const std::byte* page_base = reinterpret_cast<const std::byte*>(value.data());
 			for (std::size_t offset = id - open_page_start; id < p.second && id <= open_page_key; ++offset, ++id) {
