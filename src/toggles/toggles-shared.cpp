@@ -2,6 +2,7 @@
 #include "toggles-shared.hpp"
 #include "lmdb-interval-list.hpp"
 #include "intervals.hpp"
+#include "varint.hpp"
 #include "transform_reduce.hpp"
 #include <jemalloc/jemalloc.h>
 
@@ -127,3 +128,48 @@ template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<Conne
 		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads);
 template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<SimpleEdge>(
 		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads);
+
+
+namespace detail {
+//Fills in the offsets (including a past-the-end element, so n+1 offsets for n
+//lists) and returns the first id on the page.
+std::uint64_t decode_skinny_edge_page(std::string_view key, std::string_view value,
+		std::vector<std::uint32_t>& offsets) {
+	offsets.clear();
+	const std::byte* first = reinterpret_cast<const std::byte*>(value.data());
+	const std::byte* p = first;
+	std::uint16_t length_of_offsets = numeric_cast<std::uint16_t>(varint64::read(p));
+	offsets.push_back(length_of_offsets); //end of offsets should fit in 16 bits
+	while (p != first + length_of_offsets)
+		offsets.push_back(offsets.back() + numeric_cast<std::uint16_t>(varint64::read(p))); //remaining elements are list lengths, so sum to get offset
+	uint64_t last_id_on_page = lmdb::from_sv<uint64_t>(key);
+	return last_id_on_page - (offsets.size()-1) + 1;
+}
+} //end namespace detail
+
+namespace {
+std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_skinny_edges0(lmdb::env& env,
+		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources) {
+	interval_accumulator<uint64_t> accum(512);
+	visit_skinny_edges(env, edge_db, sources, [&](uint64_t, uint64_t output) {
+		accum(output);
+		return VisitEdgeResult::proceed;
+	});
+	return std::move(accum).finish();
+}
+}//anonymous namespace
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_skinny_edges(lmdb::env& env,
+		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, unsigned int threads) {
+	if (threads <= 1)
+		return follow_skinny_edges0(env, edge_db, sources);
+	else {
+		std::vector<std::vector<std::pair<std::uint64_t, std::uint64_t>>> tasks
+				//TODO: skinny edge data is denser so we might want larger tasks,
+				//in particular to avoid repeated decoding of pages
+				= make_follow_edges_tasks(sources, threads);
+		return transform_reduce(std::move(tasks), threads,
+				std::bind_front(follow_skinny_edges0, std::ref(env), std::ref(edge_db)),
+				interval_union_vector());
+	}
+}

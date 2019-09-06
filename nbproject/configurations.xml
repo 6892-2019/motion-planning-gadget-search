@@ -95,6 +95,7 @@
       <in>stopwatch.hpp</in>
       <in>stringutils.cpp</in>
       <in>transform_reduce.hpp</in>
+      <in>varint.hpp</in>
       <in>worker.cpp</in>
     </df>
     <logicalFolder name="ExternalFiles"

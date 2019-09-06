@@ -10,6 +10,7 @@
 
 #include <msgpack.hpp>
 #include <lmdb++.h>
+#include "varint.hpp"
 
 void jemalloc_tuning();
 
@@ -201,6 +202,55 @@ void visit_edges(lmdb::env& env, lmdb::dbi& edge_db, uint64_t input, Action&& ac
 	txn.commit();
 }
 
+namespace detail {
+std::uint64_t decode_skinny_edge_page(std::string_view key, std::string_view value, std::vector<std::uint32_t>& offsets);
+} //end namespace detail
+
+template<class Action>
+void visit_skinny_edges(lmdb::txn& txn, lmdb::dbi& edge_db,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources, Action&& action) {
+	using std::uint64_t;
+	using std::pair;
+	lmdb::cursor cur = lmdb::cursor::open(txn, edge_db);
+	//To avoid decoding the page over and over when we have small intervals, we
+	//cache one decoded page header.
+	uint64_t open_page_key = 0;
+	uint64_t open_page_start = 0;
+	std::vector<std::uint32_t> offsets;
+	for (pair<uint64_t, uint64_t> p : sources) {
+		uint64_t id = p.first;
+		while (id < p.second) { //interval might span pages
+			std::string_view key = lmdb::to_sv(id), value;
+			if (!cur.get(key, value, MDB_SET_RANGE))
+				throw std::logic_error(fmt::format("id {} (from interval {}) beyond end of skinny edge database", id, p));
+			if (lmdb::from_sv<uint64_t>(key) != open_page_key) {
+				open_page_key = lmdb::from_sv<uint64_t>(key);
+				open_page_start = detail::decode_skinny_edge_page(key, value, offsets);
+			}
+
+			const std::byte* page_base = reinterpret_cast<const std::byte*>(value.data());
+			for (std::size_t offset = id - open_page_start; id < p.second; ++offset, ++id) {
+				const std::byte* first = page_base + offsets[offset], *last = page_base + offsets[offset+1];
+				std::uint64_t output = 0;
+				do {
+					output += varint64::read(first); //delta decode
+					VisitEdgeResult r = action(id, output);
+					if (r == VisitEdgeResult::quit) return;
+					if (r == VisitEdgeResult::skip) break;
+				} while (first != last);
+			}
+		}
+	}
+}
+template<class Action>
+void visit_skinny_edges(lmdb::env& env, lmdb::dbi& edge_db,
+		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources,
+		Action&& action) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	visit_skinny_edges(txn, edge_db, sources, std::forward<Action>(action));
+	txn.commit();
+}
+
 /**
  * Follows edges in an edge database from the source intervals, returning target
  * intervals (the deduplicated union of all targets).  This function is declared
@@ -222,6 +272,12 @@ extern template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edge
 extern template std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_edges<SimpleEdge>(
 		lmdb::env& env,	lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources,
 		unsigned int threads);
+
+//Not templated, because the database format doesn't change.  If we packed
+//close/mirror edges, we'd have a separate follow_packed_edges function.
+std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_skinny_edges(lmdb::env& env,
+		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources,
+		unsigned int threads = 1);
 
 #endif /* TOGGLES_SHARED_HPP */
 
