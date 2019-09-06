@@ -41,7 +41,7 @@ vector<pair<uint64_t, uint64_t>> intersect_interval_list(
 		const vector<pair<uint64_t, uint64_t>>& intervals) {
 	auto list = view_interval_list(txn, database, key);
 	if (!list.first)
-		return intervals;
+		return {};
 	return interval_intersection(intervals.begin(), intervals.end(), list.first, list.second);
 }
 
