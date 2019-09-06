@@ -229,7 +229,7 @@ void visit_skinny_edges(lmdb::txn& txn, lmdb::dbi& edge_db,
 			}
 
 			const std::byte* page_base = reinterpret_cast<const std::byte*>(value.data());
-			for (std::size_t offset = id - open_page_start; id < p.second; ++offset, ++id) {
+			for (std::size_t offset = id - open_page_start; id < p.second && id <= open_page_key; ++offset, ++id) {
 				const std::byte* first = page_base + offsets[offset], *last = page_base + offsets[offset+1];
 				std::uint64_t output = 0;
 				do {
