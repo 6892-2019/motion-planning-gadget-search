@@ -568,7 +568,7 @@ private:
 		//started on the next edge database as soon as there are idle threads.
 		//Tasks would be pairs of a chunk of unary_needs and an edge database.
 		for (auto& p : edges_combine_)
-			incoming.push_back(follow_edges<CombineEdge>(database_, p.second, unary_needs_, runtime_opts_.db_threads));
+			incoming.push_back(follow_skinny_edges(database_, p.second, unary_needs_, runtime_opts_.db_threads));
 		//binary merge tree
 		//TODO: move this to intervals.hpp as multiway union?  but we also want
 		//fork-join-ish stuff here and that won't generalize well
@@ -715,7 +715,7 @@ private:
 	}
 
 	Control follow_connect() {
-		follow_unary_simple(&follow_edges<ConnectEdge>, edges_connect_, state_.prev_subgeneration(), "connect");
+		follow_unary_simple(&follow_skinny_edges, edges_connect_, state_.prev_subgeneration(), "connect");
 		phase_ = Phase::discover_needs_close;
 		return Control::proceed;
 	}
@@ -1003,7 +1003,7 @@ private:
 		auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
 		gadget_hashtable_ = lmdb::dbi::open(txn, "gadget_hashtable");
 		gadget_index_ = lmdb::dbi::open(txn, "gadget_index");
-		edges_connect_ = lmdb::dbi::open(txn, "edges-connect");
+		edges_connect_ = lmdb::dbi::open(txn, "edges-skinny-connect");
 		edges_close_ = lmdb::dbi::open(txn, "edges-close");
 		edges_mirror_ = lmdb::dbi::open(txn, "edges-mirror");
 		completions_ = lmdb::dbi::open(txn, "completions");
@@ -1018,12 +1018,12 @@ private:
 		try {
 			auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
 			for (uint64_t g : combine_rights_)
-				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", g).c_str()));
+				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", g).c_str()));
 			txn.commit();
 		} catch (lmdb::not_found_error&) {
 			auto txn = lmdb::txn::begin(database_);
 			for (uint64_t g : combine_rights_)
-				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", g).c_str(),
+				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", g).c_str(),
 						MDB_CREATE | MDB_INTEGERKEY));
 			txn.commit();
 		} //let other errors propagate
