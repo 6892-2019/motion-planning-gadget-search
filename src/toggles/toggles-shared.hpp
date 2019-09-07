@@ -233,7 +233,7 @@ void visit_skinny_edges(lmdb::txn& txn, lmdb::dbi& edge_db,
 			}
 			//Skip to the start of the page (no edges for any skipped ids).  If
 			//the start is beyond this interval, the following loop does nothing.
-			id = open_page_start;
+			id = std::max(id, open_page_start);
 
 			const std::byte* page_base = reinterpret_cast<const std::byte*>(value.data());
 			for (std::size_t offset = id - open_page_start; id < p.second && id <= open_page_key; ++offset, ++id) {
