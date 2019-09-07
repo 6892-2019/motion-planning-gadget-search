@@ -1017,14 +1017,19 @@ private:
 		//databases already exist; otherwise we take the write lock and create them.
 		try {
 			auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
-			for (uint64_t g : combine_rights_)
+			for (uint64_t g : combine_rights_) {
 				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", g).c_str()));
+				//We don't use it, but we'd like it to exist.
+				lmdb::dbi::open(txn, fmt::format("edges-combine-{}", g).c_str());
+			}
 			txn.commit();
 		} catch (lmdb::not_found_error&) {
 			auto txn = lmdb::txn::begin(database_);
-			for (uint64_t g : combine_rights_)
+			for (uint64_t g : combine_rights_) {
 				edges_combine_.emplace_back(g, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", g).c_str(),
 						MDB_CREATE | MDB_INTEGERKEY));
+				lmdb::dbi::open(txn, fmt::format("edges-combine-{}", g).c_str(), MDB_CREATE | MDB_INTEGERKEY);
+			}
 			txn.commit();
 		} //let other errors propagate
 		assert(std::is_sorted(edges_combine_.begin(), edges_combine_.end()));
