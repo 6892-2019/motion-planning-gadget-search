@@ -2,6 +2,7 @@
 #include "gadget-set.hpp"
 #include "select-by-id.hpp"
 #include "anyprov.hpp"
+#include "rpc.hpp"
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
 #include "intervals.hpp"
@@ -130,109 +131,208 @@ std::optional<Edge> search_for_edge(lmdb::txn& txn, lmdb::dbi& edges, uint64_t i
 	return ret;
 }
 
-void fill_cache(lmdb::txn& txn, vector<pair<uint64_t, lmdb::dbi>>& combine_edges,
-		lmdb::dbi& connect_edges, lmdb::dbi& close_edges, lmdb::dbi& mirror_edges,
+uint64_t recover_combine_right(lmdb::env& env, vector<pair<uint64_t, lmdb::dbi>>& combine_skinny_edges, SkinnyProv p) {
+	vector<pair<uint64_t, uint64_t>> singleton = {{p.input(), p.input()+1}};
+	uint64_t ret = 0;
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	for (auto& db : combine_skinny_edges) {
+		visit_skinny_edges(txn, db.second, singleton, [&ret, input2=db.first, p](uint64_t input, uint64_t output) {
+			assert(input == p.input());
+			if (output == p.output()) {
+				ret = input2;
+				return VisitEdgeResult::quit;
+			}
+			return VisitEdgeResult::proceed;
+		});
+		if (ret) break;
+	}
+	txn.commit();
+	if (ret) return ret;
+	throw std::logic_error(fmt::format("no combine right for {}/{}?", p.input(), p.output()));
+}
+
+void fill_cache(lmdb::env& env,
+		vector<pair<uint64_t, lmdb::dbi>>& combine_edges, vector<pair<uint64_t, lmdb::dbi>>& combine_skinny_edges,
+		lmdb::dbi& connect_edges, lmdb::dbi& connect_skinny_edges,
+		lmdb::dbi& close_edges, lmdb::dbi& mirror_edges,
 		const vector<pair<uint64_t, uint64_t>>& roots, const vector<vector<SkinnyProv>>& prov,
-		EdgeCache& edge_cache, DeletedLocationsCache& delloc, std::string_view db_path) {
-	//This batching logic was quite helpful for postgres, but is probably less
-	//helpful with lmdb because queries are local.
-	vector<uint64_t> frontier = interval_inflate(roots.begin(), roots.end());
-	//We don't need to know the other end for close and mirror lookups, but it
-	//avoids special-casing in search_for_edge and adds some error-checking.
-	vector<SkinnyProv> combine_batch, connect_batch, close_batch, mirror_batch;
-	vector<AnyProv> newly_cached_connects; //also combines because those include a connect
-	while (!frontier.empty()) {
-		combine_batch.clear();
-		connect_batch.clear();
-		close_batch.clear();
-		mirror_batch.clear();
-
-		for (std::size_t i = 0; i < frontier.size(); ++i) {
-			if (edge_cache.count(frontier[i]))
-				continue;
-			SkinnyProv p = find_sp(prov, frontier[i]);
-			switch (p.kind()) {
-				case EdgeKind::combine: combine_batch.push_back(p); break;
-				case EdgeKind::connect: connect_batch.push_back(p); break;
-				//We "look through" close and mirror edges so we terminate in
-				//fewer iterations.
-				case EdgeKind::close:
-					close_batch.push_back(p);
-					frontier.push_back(p.input());
-					break;
-				case EdgeKind::mirror:
-					mirror_batch.push_back(p);
-					frontier.push_back(p.input());
-					break;
-				case EdgeKind::source:
-					//nothing to do
-					break;
-			}
-		}
-		frontier.clear();
-
-		if (combine_batch.empty() || connect_batch.empty() || close_batch.empty() || mirror_batch.empty()) {
-			vector<AnyProv> edges;
-			for (const SkinnyProv& p : combine_batch) {
-				//We have to search all the combine databases.
-				std::optional<CombineEdge> e;
-				uint64_t input2 = 0;
-				for (pair<uint64_t, lmdb::dbi>& db : combine_edges) {
-					e = search_for_edge<CombineEdge>(txn, db.second, p.input(), p.output());
-					if (e) {
-						input2 = db.first;
-						break;
-					}
+		EdgeCache& edge_cache, DeletedLocationsCache& delloc, std::string_view db_path, unsigned int threads) {
+	vector<uint64_t> trace_lhs = interval_inflate(roots.begin(), roots.end());
+	vector<pair<uint64_t, SkinnyProv>> combine_batch;
+	vector<SkinnyProv> connect_batch, close_batch, mirror_batch;
+	vector<uint64_t> newly_cached_connects; //keys into edge_cache; also combines because those include a connect
+	for (std::size_t i = 0; i < trace_lhs.size(); ++i) { //note that we append during the loop
+		if (edge_cache.count(trace_lhs[i]) ||
+				//We'll always find it, but if we find it earlier, this one is a
+				//duplicate.  This is a linear scan, so potentially quadratic,
+				//but traces shouldn't get large enough for that to matter.
+				std::find(trace_lhs.begin(), trace_lhs.end(), trace_lhs[i]) != trace_lhs.begin()+i)
+			continue;
+		SkinnyProv p = find_sp(prov, trace_lhs[i]);
+		switch (p.kind()) {
+			case EdgeKind::source:
+				continue; //nothing to do; end of this branch of the trace
+			case EdgeKind::combine: {
+				uint64_t input2 = recover_combine_right(env, combine_skinny_edges, p);
+				combine_batch.emplace_back(input2, p);
+				newly_cached_connects.push_back(p.output());
+				trace_lhs.push_back(p.input());
+				trace_lhs.push_back(input2);
 				}
-				if (!e)
-					throw std::logic_error(fmt::format("no combine edge for {}/{}", p.input(), p.output()));
-				edges.push_back(AnyProv::combine(p.input(), input2, *e));
-				newly_cached_connects.push_back(AnyProv::combine(p.input(), input2, *e));
-			}
-			for (const SkinnyProv& p : connect_batch) {
-				std::optional<ConnectEdge> e = search_for_edge<ConnectEdge>(txn, connect_edges, p.input(), p.output());
-				if (!e)
-					throw std::logic_error(fmt::format("no connect edge for {}/{}", p.input(), p.output()));
-				edges.push_back(AnyProv::connect(p.input(), *e));
-				newly_cached_connects.push_back(AnyProv::connect(p.input(), *e));
-			}
-			for (const SkinnyProv& p : close_batch) {
-				std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, close_edges, p.input(), p.output());
-				if (!e)
-					throw std::logic_error(fmt::format("no close edge for {}/{}", p.input(), p.output()));
-				edges.push_back(AnyProv::close(p.input(), *e));
-			}
-			for (const SkinnyProv& p : mirror_batch) {
-				std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, mirror_edges, p.input(), p.output());
-				if (!e)
-					throw std::logic_error(fmt::format("no mirror edge for {}/{}", p.input(), p.output()));
-				edges.push_back(AnyProv::mirror(p.input(), *e));
-			}
-
-			for (const AnyProv& p : edges) {
-				auto pair = edge_cache.try_emplace(p.output(), p);
-				if (!pair.second)
-					throw std::runtime_error(fmt::format("conflict for {}: {} {}",
-							p.output(), *pair.first, p));
-				const vector<uint64_t>& inputs = p.inputs();
-				for (uint64_t i : inputs)
-					frontier.push_back(i);
-			}
-			std::sort(frontier.begin(), frontier.end());
-			frontier.erase(std::unique(frontier.begin(), frontier.end()), frontier.end());
+				break;
+			case EdgeKind::connect:
+				connect_batch.push_back(p);
+				newly_cached_connects.push_back(p.output());
+				trace_lhs.push_back(p.input());
+				break;
+			case EdgeKind::close:
+				close_batch.push_back(p);
+				trace_lhs.push_back(p.input());
+				break;
+			case EdgeKind::mirror:
+				mirror_batch.push_back(p);
+				trace_lhs.push_back(p.input());
+				break;
 		}
 	}
 
+	if (!combine_batch.empty() || !connect_batch.empty() || !close_batch.empty() || !mirror_batch.empty()) {
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		//Close and mirror don't use skinny edges, so we always have the full edges.
+		for (const SkinnyProv& p : close_batch) {
+			if (std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, close_edges, p.input(), p.output()))
+				edge_cache.try_emplace(p.output(), AnyProv::close(p.input(), *e));
+			else
+				throw std::logic_error(fmt::format("no close edge for {}/{}", p.input(), p.output()));
+		}
+		for (const SkinnyProv& p : mirror_batch) {
+			if (std::optional<SimpleEdge> e = search_for_edge<SimpleEdge>(txn, mirror_edges, p.input(), p.output()))
+				edge_cache.try_emplace(p.output(), AnyProv::mirror(p.input(), *e));
+			else
+				throw std::logic_error(fmt::format("no mirror edge for {}/{}", p.input(), p.output()));
+		}
+		close_batch.clear();
+		mirror_batch.clear();
+
+		//Combine and connect may not have full edges.
+		combine_batch.erase(std::remove_if(combine_batch.begin(), combine_batch.end(), [&](const pair<uint64_t, SkinnyProv>& p) {
+			//TODO: the lambda here should be a utility in proj_compare.hpp
+			auto db = std::find_if(combine_edges.begin(), combine_edges.end(), [p](const auto& q){return q.first == p.first;});
+			if (db == combine_edges.end())
+				throw std::logic_error(fmt::format("no edge database for combine right? {} {}",
+						p.second.input(), p.first, p.second.output()));
+			if (std::optional<CombineEdge> e = search_for_edge<CombineEdge>(txn, db->second, p.second.input(), p.second.output())) {
+				edge_cache.try_emplace(p.second.output(), AnyProv::combine(p.second.input(), p.first, *e));
+				return true;
+			} else
+				return false;
+		}), combine_batch.end());
+		connect_batch.erase(std::remove_if(connect_batch.begin(), connect_batch.end(), [&](const SkinnyProv& p) {
+			if (std::optional<ConnectEdge> e = search_for_edge<ConnectEdge>(txn, connect_edges, p.input(), p.output())) {
+				edge_cache.try_emplace(p.output(), AnyProv::connect(p.input(), *e));
+				return true;
+			} else
+				return false;
+		}), connect_batch.end());
+		txn.commit();
+	}
+
+	vector<std::string> request_files, response_files;
+	simple_buffer call_buf;
+	//Group by combine right.
+	std::sort(combine_batch.begin(), combine_batch.end(), proj_less<0>());
+	for (auto first = combine_batch.begin(), last = std::upper_bound(first, combine_batch.end(), *first, proj_less<0>());
+			first != combine_batch.end(); first = last) {
+		vector<uint64_t> rights = {first->first};
+		interval_accumulator<uint64_t> lefts(64);
+		for (auto i = first; i != last; ++i)
+			lefts(i->second.input());
+
+		call_buf.clear();
+		pack_call(call_buf, numeric_cast<std::uint32_t>(request_files.size()),
+				"combine-db-full", std::move(lefts).finish(), rights,
+				//no limits on precision or states
+				16, std::numeric_limits<unsigned int>::max());
+		std::string request = make_temp_filename("toggles-report-combine-request", "msg"),
+				response = make_temp_filename("toggles-report-combine-response", "msg");
+		write_buffer(call_buf, request);
+		request_files.push_back(request);
+		response_files.push_back(response);
+	}
+	if (!connect_batch.empty()) {
+		interval_accumulator<uint64_t> operands(64);
+		for (const SkinnyProv& p : connect_batch)
+			operands(p.input());
+
+		call_buf.clear();
+		pack_call(call_buf, numeric_cast<std::uint32_t>(request_files.size()),
+				"connect-db-full", std::move(operands).finish(),
+				//no limit on states
+				std::numeric_limits<unsigned int>::max());
+		std::string request = make_temp_filename("toggles-report-connect-request", "msg"),
+				response = make_temp_filename("toggles-report-connect-response", "msg");
+		write_buffer(call_buf, request);
+		request_files.push_back(request);
+		response_files.push_back(response);
+	}
+
+	if (!request_files.empty()) {
+		vector<std::function<void()>> tasks;
+		tasks.reserve(request_files.size());
+		for (std::size_t i = 0; i < request_files.size(); ++i)
+			tasks.push_back([&, i](){
+				std::string cmdline = fmt::format("toggles-runner.exe msgpack --db-path {} -i {} -o {}",
+						db_path, request_files[i], response_files[i]);
+				int rc = std::system(cmdline.c_str());
+				if (rc)
+					throw std::runtime_error(fmt::format("problem filling in edges {} {} {}", rc, i, request_files[i]));
+				Response resp = unpack_response(read_buffer(response_files[i]));
+				if (!resp)
+					throw std::runtime_error(fmt::format("edge-filling task {} returned error: {}", i, resp.error_as()));
+			});
+		//TODO: parallel_for with better interface? transform_reduce with trivial reducer?
+		for (auto& t : tasks)
+			t();
+	}
+
+	//Collect any missing edges.
+	if (!combine_batch.empty() || !connect_batch.empty()) {
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		for (const pair<uint64_t, SkinnyProv>& p : combine_batch) {
+			//TODO: copied from above, should be factored out
+			auto db = std::find_if(combine_edges.begin(), combine_edges.end(), [p](const auto& q){return q.first == p.first;});
+			if (db == combine_edges.end())
+				throw std::logic_error(fmt::format("no edge database for combine right? {} {}",
+						p.second.input(), p.first, p.second.output()));
+			if (std::optional<CombineEdge> e = search_for_edge<CombineEdge>(txn, db->second, p.second.input(), p.second.output()))
+				edge_cache.try_emplace(p.second.output(), AnyProv::combine(p.second.input(), p.first, *e));
+			else
+				throw std::logic_error(fmt::format("no combine edge (after filling) for {}/{}/{}",
+						p.second.input(), p.first, p.second.output()));
+		}
+		for (const SkinnyProv& p : connect_batch) {
+			if (std::optional<ConnectEdge> e = search_for_edge<ConnectEdge>(txn, connect_edges, p.input(), p.output()))
+				edge_cache.try_emplace(p.output(), AnyProv::connect(p.input(), *e));
+			else
+				throw std::logic_error(fmt::format("no connect edge (after filling) for {}/{}", p.input(), p.output()));
+		}
+		txn.commit();
+	}
+
+	//TODO: now that we're using msgpack, make this msgpack so we can drop the handrolled parsing
+	//TODO: should really have a database table caching these, keyed on the AnyProv.
 	if (!newly_cached_connects.empty()) {
 		//See if any had deleted locations.
 		vector<std::string> lines;
-		for (AnyProv& p : newly_cached_connects)
+		for (uint64_t o : newly_cached_connects) {
+			const AnyProv& p = edge_cache.at(o);
 			if (p.kind() == EdgeKind::connect)
 				lines.push_back(fmt::format("{},connect,{},{}", p.output(), p.input1(), p.connectPoint()));
 			else if (p.kind() == EdgeKind::combine)
 				lines.push_back(fmt::format("{},combine,{},{},{},{},{}", p.output(), p.input1(), p.input2(), p.splice(), p.rotation(), p.connectPoint()));
 			else
 				throw std::logic_error("can't happen bad edge kind");
+		}
 
 		std::string temp_to = make_temp_filename("toggles-report-delloc-request"),
 				temp_from = make_temp_filename("toggles-report-delloc-response");
@@ -364,7 +464,7 @@ TargetStuff target_stuff(lmdb::env& env) {
 
 //find all the possible combine rights, but don't open any databases
 vector<pair<uint64_t, uint64_t>> find_all_combine_rights(lmdb::env& env) {
-	const std::string_view edges_combine_prefix = "edges-combine-"sv;
+	const std::string_view edges_combine_prefix = "edges-skinny-combine-"sv;
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 	lmdb::dbi main = lmdb::dbi::open(txn, nullptr);
 	lmdb::cursor cur = lmdb::cursor::open(txn, main);
@@ -392,8 +492,11 @@ struct EdgeVisitor {
 	tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
 	template<class Edge>
 	VisitEdgeResult operator()(uint64_t input, const Edge& e) {
-		if (!interval_contains(*closed, e.output) && already_added.insert(e.output).second)
-			followed.emplace_back(e.output, input, kind);
+		return (*this)(input, e.output);
+	}
+	VisitEdgeResult operator()(uint64_t input, uint64_t output) {
+		if (!interval_contains(*closed, output) && already_added.insert(output).second)
+			followed.emplace_back(output, input, kind);
 		return VisitEdgeResult::proceed;
 	}
 };
@@ -443,6 +546,22 @@ pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_edge
 	return {std::move(provs), std::move(discovered)};
 }
 
+pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_skinny_edges(
+		lmdb::env& env, lmdb::dbi& edge_db, EdgeKind kind, const vector<pair<uint64_t, uint64_t>>& possible,
+		const vector<pair<uint64_t, uint64_t>>& closed, unsigned int num_threads) {
+	auto chunks = interval_chunk(possible.begin(), possible.end(), 25000);
+	vector<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		EdgeVisitor visitor = {.kind = kind, .closed = &closed, .followed = {}, .already_added = {}};
+		visit_skinny_edges(txn, edge_db, chunk, visitor);
+		txn.commit();
+		std::sort(visitor.followed.begin(), visitor.followed.end());
+		return std::move(visitor.followed);
+	}, merge_unique_vectors());
+	auto discovered = build_output_intervals(provs, num_threads);
+	return {std::move(provs), std::move(discovered)};
+}
+
 void assign_interval_union(vector<pair<uint64_t, uint64_t>>& left, const vector<pair<uint64_t, uint64_t>>& right) {
 	left = interval_union(left.begin(), left.end(), right.begin(), right.end());
 }
@@ -479,11 +598,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_RDONLY | MDB_NORDAHEAD);
-	lmdb::dbi edges_connect, edges_close, edges_mirror, completions, meta_db;
-	vector<pair<uint64_t, lmdb::dbi>> edges_combine; //lazily-initialized later when we know what we're using
+	lmdb::dbi edges_connect, edges_skinny_connect, edges_close, edges_mirror, completions, meta_db;
+	vector<pair<uint64_t, lmdb::dbi>> edges_combine, edges_skinny_combine; //lazily-initialized later when we know what we're using
 	{
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		edges_connect = lmdb::dbi::open(txn, "edges-connect");
+		edges_skinny_connect = lmdb::dbi::open(txn, "edges-skinny-connect");
 		edges_close = lmdb::dbi::open(txn, "edges-close");
 		edges_mirror = lmdb::dbi::open(txn, "edges-mirror");
 		completions = lmdb::dbi::open(txn, "completions");
@@ -573,9 +693,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		vector<pair<uint64_t, uint64_t>> found = interval_intersection(
 				target.intervals.cbegin(), target.intervals.cend(), discovered.cbegin(), discovered.cend());
 		if (!found.empty()) {
-			lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-			fill_cache(txn, edges_combine, edges_connect, edges_close, edges_mirror, found, prov, edge_cache, dellocs, db_path);
-			txn.commit();
+			fill_cache(env, edges_combine, edges_skinny_combine,
+					edges_connect, edges_skinny_connect,
+					edges_close, edges_mirror, found, prov, edge_cache, dellocs, db_path, num_threads);
 
 			for (const pair<uint64_t, uint64_t>& p : found)
 				for (uint64_t root = p.first; root < p.second; ++root) {
@@ -674,13 +794,15 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				});
 
 				auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-				for (const auto& p : right_stat_sort)
+				for (const auto& p : right_stat_sort) {
 					edges_combine.emplace_back(p.first, lmdb::dbi::open(txn, fmt::format("edges-combine-{}", p.first).c_str()));
+					edges_skinny_combine.emplace_back(p.first, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", p.first).c_str()));
+				}
 				txn.commit();
 			}
 		} else if (!awaiting_connect.empty()) {
 			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("connect", awaiting_connect);
-			auto [provs, discovered] = discover_through_edges<ConnectEdge>(env, edges_connect, EdgeKind::connect, possible, closed, num_threads);
+			auto [provs, discovered] = discover_through_skinny_edges(env, edges_skinny_connect, EdgeKind::connect, possible, closed, num_threads);
 			if (!provs.empty())
 				prov.push_back(std::move(provs));
 			if (!discovered.empty())
@@ -692,10 +814,10 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			awaiting_connect = std::move(discovered); //i.e., if empty, clear
 		} else if (!awaiting_combine.empty()) {
 			vector<pair<uint64_t, uint64_t>> awaiting_combine_next;
-			for (pair<uint64_t, lmdb::dbi>& right : edges_combine) {
+			for (pair<uint64_t, lmdb::dbi>& right : edges_skinny_combine) {
 				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible(
 						fmt::format("combine-{}", right.first), awaiting_combine);
-				auto [provs, discovered] = discover_through_edges<CombineEdge>(env, right.second, EdgeKind::combine, possible, closed, num_threads);
+				auto [provs, discovered] = discover_through_skinny_edges(env, right.second, EdgeKind::combine, possible, closed, num_threads);
 				if (!provs.empty())
 					prov.push_back(std::move(provs));
 				if (!discovered.empty())
