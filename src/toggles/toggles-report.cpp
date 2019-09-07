@@ -241,23 +241,25 @@ void fill_cache(lmdb::env& env,
 	simple_buffer call_buf;
 	//Group by combine right.
 	std::sort(combine_batch.begin(), combine_batch.end(), proj_less<0>());
-	for (auto first = combine_batch.begin(), last = std::upper_bound(first, combine_batch.end(), *first, proj_less<0>());
-			first != combine_batch.end(); first = last) {
-		vector<uint64_t> rights = {first->first};
-		interval_accumulator<uint64_t> lefts(64);
-		for (auto i = first; i != last; ++i)
-			lefts(i->second.input());
+	if (!combine_batch.empty()) {
+		for (auto first = combine_batch.begin(), last = std::upper_bound(first, combine_batch.end(), *first, proj_less<0>());
+				first != combine_batch.end(); first = last, last = std::upper_bound(first, combine_batch.end(), *first, proj_less<0>())) {
+			vector<uint64_t> rights = {first->first};
+			interval_accumulator<uint64_t> lefts(64);
+			for (auto i = first; i != last; ++i)
+				lefts(i->second.input());
 
-		call_buf.clear();
-		pack_call(call_buf, numeric_cast<std::uint32_t>(request_files.size()),
-				"combine-db-full", std::move(lefts).finish(), rights,
-				//no limits on precision or states
-				16, std::numeric_limits<unsigned int>::max());
-		std::string request = make_temp_filename("toggles-report-combine-request", "msg"),
-				response = make_temp_filename("toggles-report-combine-response", "msg");
-		write_buffer(call_buf, request);
-		request_files.push_back(request);
-		response_files.push_back(response);
+			call_buf.clear();
+			pack_call(call_buf, numeric_cast<std::uint32_t>(request_files.size()),
+					"combine-db-full", std::move(lefts).finish(), rights,
+					//no limits on precision or states
+					16, std::numeric_limits<unsigned int>::max());
+			std::string request = make_temp_filename("toggles-report-combine-request", "msg"),
+					response = make_temp_filename("toggles-report-combine-response", "msg");
+			write_buffer(call_buf, request);
+			request_files.push_back(request);
+			response_files.push_back(response);
+		}
 	}
 	if (!connect_batch.empty()) {
 		interval_accumulator<uint64_t> operands(64);
