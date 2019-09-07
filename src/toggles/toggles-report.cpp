@@ -288,6 +288,10 @@ void fill_cache(lmdb::env& env,
 				int rc = std::system(cmdline.c_str());
 				if (rc)
 					throw std::runtime_error(fmt::format("problem filling in edges {} {} {}", rc, i, request_files[i]));
+				//There's some weirdness here where if there's a problem with
+				//the response we just skip the remainder of the tasks, not
+				//throwing or reporting errors.  Presumably read_buffer or
+				//Response has some undefined behavior.
 				Response resp = unpack_response(read_buffer(response_files[i]));
 				if (!resp)
 					throw std::runtime_error(fmt::format("edge-filling task {} returned error: {}", i, resp.error_as()));
