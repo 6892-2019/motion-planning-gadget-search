@@ -32,7 +32,7 @@ void writeAllLines(std::string filename, const std::vector<std::string>& lines);
 std::vector<std::string> processFilenameArgs(const char** first, const char** last);
 std::vector<std::string> processFilenameArgs(std::vector<std::string> args); //passing by value to merge const&/&& overloads
 
-std::string make_temp_filename(std::string_view base);
+std::string make_temp_filename(std::string_view base, std::string_view ext = "txt");
 
 #endif /* IOUTILS_HPP */
 
