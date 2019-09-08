@@ -1,6 +1,87 @@
 #ifndef VARINT_HPP
 #define VARINT_HPP
 
+#include <cstddef>
+#include <cstdint>
+
+namespace upv {
+/* Functions for unary-prefix varints, which are like the traditional
+ * continuation-bit-based vbyte, except packing all of the continuation bits
+ * into the first byte.  The advantage of this format is that fewer branches are
+ * needed to decode it and they should consume fewer branch prediction
+ * resources.  For example:
+ *
+ * 0xxxxxxx
+ * 10xxxxxx xxxxxxxx
+ * 110xxxxx xxxxxxxx xxxxxxxx
+ *
+ * ...and so on, up to 11111110 as the first byte, after which seven data bytes
+ * follow.  To allow encoding 64 bits in nine bytes, we allow a first byte of
+ * 11111111 with eight following bytes.  (Note that this forecloses the
+ * possibility of encoding 128-bit quantities using an additional byte of
+ * continuation bits.)
+ *
+ * The first byte contains the high bits of the encoded integer, but the
+ * trailing bytes are little-endian.  That is, only one shift-or is required
+ * regardless of the length of the value.  No bias is applied, so "overlong"
+ * encodings are possible, which these functions read but don't write (Postel).
+ */
+
+//The current read and write implementations may be too clever in using
+//variable-length memcpy.  A switch with separate cases for each length might
+//perform better.
+
+constexpr inline std::byte prefixes[] = {
+	std::byte{0b00000000},
+	std::byte{0b10000000},
+	std::byte{0b11000000},
+	std::byte{0b11100000},
+	std::byte{0b11110000},
+	std::byte{0b11111000},
+	std::byte{0b11111100},
+	std::byte{0b11111110},
+	std::byte{0b11111111},
+};
+inline std::byte* write(std::byte*& dest, std::uint64_t value) {
+	//We still need a bit to encode zero.  This is annoying because lzcnt would
+	//give 64, which is 0 after subtraction, so this actually is a branch.  Then
+	//there's another branch because 64 bits is an exception.
+	int sigbits = value ? 64 - __builtin_clzl(value) : 1;
+	unsigned int length = sigbits == 64 ? 9 : static_cast<unsigned int>((sigbits + 6)/7);
+	std::byte high_byte;
+	std::memcpy(&high_byte, reinterpret_cast<char*>(&value)+(length-1), 1);
+	high_byte |= prefixes[length-1];
+	std::memcpy(dest, &high_byte, sizeof(high_byte));
+	std::memcpy(dest+1, &value, length-1);
+	dest += length;
+	return dest;
+}
+inline std::byte* write(std::byte* const& dest, std::uint64_t value) {
+	std::byte* d = dest;
+	return write(d, value);
+}
+
+inline std::uint64_t read(const std::byte*& src) {
+	std::uint64_t ret = 0;
+	//Count the number of leading 1s in the first byte, working around __builtin_clz undefinedness.
+	unsigned int header_comp = std::to_integer<unsigned int>(~*src);
+	int trailers = header_comp ? __builtin_clz(header_comp) - 24 : 8;
+	std::memcpy(&ret, src+1, trailers);
+	if (trailers < 8) {//8 is special: no significant bits in the first byte
+		std::byte high_byte_bits = *src & ~prefixes[trailers];
+		std::memcpy(reinterpret_cast<char*>(&ret)+trailers, &high_byte_bits, 1);
+	}
+	src += trailers + 1;
+	return ret;
+}
+inline std::uint64_t read(std::byte*& src) {
+	const std::byte* s = src;
+	std::uint64_t ret = read(s);
+	src = src + (s - src);
+	return ret;
+}
+}//namespace upv
+
 //TODO: factor varint32 out of PackReader/Writer
 
 namespace varint64 {

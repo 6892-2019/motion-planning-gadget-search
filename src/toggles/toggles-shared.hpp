@@ -240,7 +240,7 @@ void visit_skinny_edges(lmdb::txn& txn, lmdb::dbi& edge_db,
 				const std::byte* first = page_base + offsets[offset], *last = page_base + offsets[offset+1];
 				std::uint64_t output = 0;
 				do {
-					output += varint64::read(first); //delta decode
+					output += upv::read(first); //delta decode
 					VisitEdgeResult r = action(id, output);
 					if (r == VisitEdgeResult::quit) return;
 					if (r == VisitEdgeResult::skip) break;

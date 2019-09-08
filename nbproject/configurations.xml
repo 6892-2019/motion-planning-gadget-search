@@ -30,6 +30,7 @@
         <in>regex-test.cpp</in>
         <in>util-test.cpp</in>
         <in>util.cpp</in>
+        <in>varint-test.cpp</in>
       </df>
       <df name="toggles">
         <df name="driver">
@@ -307,6 +308,8 @@
       <item path="src/test/util-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/util.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/varint-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/anyprov.hpp" ex="false" tool="3" flavor2="0">
       </item>

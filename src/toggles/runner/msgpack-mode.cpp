@@ -81,13 +81,11 @@ std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last,
 		if (chunk.size() < block.size() * 9)
 			chunk.resize(block.size() * 9);
 		std::byte* chunk_end = chunk.data();
-		varint64::write(chunk_end, block.front());
+		upv::write(chunk_end, block.front());
 		for (std::size_t i = 1; i < block.size(); ++i) //delta coding loop
-			varint64::write(chunk_end, block[i] - block[i-1]);
-		//TODO: should be using a smaller varint here -- we only need up through
-		//than 16 * 16 * 2 * 9 and usually much less
+			upv::write(chunk_end, block[i] - block[i-1]);
 		std::byte* length_end = length.data();
-		varint64::write(length_end, chunk_end - chunk.data());
+		upv::write(length_end, chunk_end - chunk.data());
 
 		if (header.size() + (length_end - length.data()) > std::numeric_limits<std::uint16_t>::max() ||
 				input != previous_input + 1)
