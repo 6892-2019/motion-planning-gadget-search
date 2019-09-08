@@ -17,7 +17,7 @@ const static std::pair<uint64_t, std::ptrdiff_t> upv_data[] = {
 	{1ul << 56, 9}, {std::numeric_limits<std::uint64_t>::max(), 9},
 };
 
-TEST_CASE("upv_Roundtrip") {
+TEST_CASE("upv_RoundtripBoundaries") {
 	using upv::write, upv::read;
 	std::array<std::byte, 11> data;
 	for (const auto [thing, expected_length] : upv_data) {
@@ -29,5 +29,38 @@ TEST_CASE("upv_Roundtrip") {
 		uint64_t rt = read(end);
 		CHECK_EQ(rt, thing);
 		CHECK_EQ(end - data.begin(), expected_length);
+	}
+}
+
+TEST_CASE("upv_RoundtripSmallExhaustive") {
+	using upv::write, upv::read;
+	std::array<std::byte, 11> data;
+	for (std::uint64_t i = 0; i < (1ul << 14); ++i) {
+		std::fill(data.begin(), data.end(), std::byte{0});
+		std::byte* write_end = write(data.data(), i);
+		std::byte* read_end = data.data();
+		uint64_t rt = read(read_end);
+		CHECK_EQ(rt, i);
+		CHECK_EQ(write_end - data.data(), read_end - data.data());
+	}
+}
+
+TEST_CASE("upv_RoundtripRandom") {
+	using upv::write, upv::read;
+	std::array<std::byte, 11> data;
+	std::knuth_b rng(0);
+	std::uniform_int_distribution<int> width(14, 64);
+	std::independent_bits_engine<decltype(rng), 64, std::uint64_t> value(1);
+	for (int samples = 0; samples < 1000000; ++samples) {
+		int bits = width(rng);
+		std::uint64_t i = value();
+		if (bits < 64)
+			i &= (1ul << bits) - 1;
+		std::fill(data.begin(), data.end(), std::byte{0});
+		std::byte* write_end = write(data.data(), i);
+		std::byte* read_end = data.data();
+		uint64_t rt = read(read_end);
+		CHECK_EQ(rt, i);
+		CHECK_EQ(write_end - data.data(), read_end - data.data());
 	}
 }
