@@ -64,7 +64,7 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 		lmdb::dbi& gadget_index, vector<vector<std::byte>>&& gadgets) {
 	SelsertGadgetByDataResult ret;
 	ret.local_to_global.resize(gadgets.size(), std::numeric_limits<std::uint64_t>::max());
-	ret.early_pruned = ret.late_pruned = 0;
+	ret.early_pruned = ret.late_pruned = ret.novel_global_ids.first = ret.novel_global_ids.second = 0;
 	vector<ProposedInsert> pending = hash_and_move(std::move(gadgets));
 
 	auto pruning_loop = [&](lmdb::txn& txn, lmdb::cursor& cur) {
@@ -143,6 +143,8 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 			lmdb::cursor hashtable_cur = lmdb::cursor::open(txn, gadget_hashtable);
 			auto [new_end, pruned, self_collision] = pruning_loop(txn, hashtable_cur);
 			pending.erase(new_end, pending.end());
+			if (pending.empty())
+				return ret;
 			assert(std::is_sorted(pending.begin(), pending.end(), hash_order()));
 			ret.late_pruned = pruned;
 			//We now know we don't collide with anything in the database, but we
