@@ -40,20 +40,27 @@ constexpr inline std::byte prefixes[] = {
 	std::byte{0b11111000},
 	std::byte{0b11111100},
 	std::byte{0b11111110},
-	std::byte{0b11111111},
 };
 inline std::byte* write(std::byte*& dest, std::uint64_t value) {
-	//We still need a bit to encode zero.  This is annoying because lzcnt would
-	//give 64, which is 0 after subtraction, so this actually is a branch.  Then
-	//there's another branch because 64 bits is an exception.
-	int sigbits = value ? 64 - __builtin_clzl(value) : 1;
-	unsigned int length = sigbits == 64 ? 9 : static_cast<unsigned int>((sigbits + 6)/7);
-	std::byte high_byte;
-	std::memcpy(&high_byte, reinterpret_cast<char*>(&value)+(length-1), 1);
-	high_byte |= prefixes[length-1];
-	std::memcpy(dest, &high_byte, sizeof(high_byte));
-	std::memcpy(dest+1, &value, length-1);
-	dest += length;
+	//There's no clean way to avoid treating the 8-byte case specially, but it
+	//should be rare/predictable.  (And arguably we should be switch-casing
+	//every case anyway.)
+	if (value < (1ul << 56)) {
+		//We still need a bit to encode zero.  This is annoying because lzcnt would
+		//give 64, which is 0 after subtraction, so this actually is a branch.
+		int sigbits = value ? 64 - __builtin_clzl(value) : 1;
+		unsigned int length = static_cast<unsigned int>((sigbits + 6)/7);
+		std::byte high_byte;
+		std::memcpy(&high_byte, reinterpret_cast<char*>(&value)+(length-1), 1);
+		high_byte |= prefixes[length-1];
+		std::memcpy(dest, &high_byte, sizeof(high_byte));
+		std::memcpy(dest+1, &value, length-1);
+		dest += length;
+	} else {
+		*dest++ = ~std::byte{0};
+		std::memcpy(dest, &value, sizeof(value));
+		dest += sizeof(value);
+	}
 	return dest;
 }
 inline std::byte* write(std::byte* const& dest, std::uint64_t value) {
