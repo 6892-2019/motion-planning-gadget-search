@@ -283,7 +283,8 @@ auto bitset<storage_type, N>::find_first() const -> size_type {
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::find_next(size_type prev) const -> size_type {
    assert(prev < size());
-   return ctz(bitset_promote_t<storage_type>(bits_) >> (prev+1)) + prev + 1;
+   //shifting by prev+1 all at once might be undefined behavior
+   return ctz((bitset_promote_t<storage_type>(bits_) >> (prev)) >> 1) + prev + 1;
 }
 
 template<typename storage_type, unsigned int N>
