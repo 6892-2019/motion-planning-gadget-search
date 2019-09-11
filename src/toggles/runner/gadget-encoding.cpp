@@ -156,33 +156,17 @@ unsigned int minimum_size(unsigned int x) {
 	return 4;
 }
 
-auto reachable_accept_components(const AutomatonBase& a, const SCCs& sccs) {
-	dynarray<unsigned int> state_to_comp(a.state_size());
+auto count_accept_components(const AutomatonBase& a) {
+	//There's something fishy with SCCs.  See GitHub issue #92.
+	SCCs sccs = automaton::find_components(a);
+	unsigned int count = 0;
 	for (auto c : xrange(sccs.size()))
-		for (auto s : make_range_for_pair(sccs.begin(c), sccs.end(c)))
-			state_to_comp[s] = c;
-
-	std::vector<unsigned int> ret;
-	tsl::hopscotch_set<unsigned int, farmhash_hash> closed;
-	circular_deque<unsigned int, 32> worklist;
-	closed.insert(state_to_comp[0]);
-	worklist.push_back(state_to_comp[0]);
-	while (!worklist.empty()) {
-		unsigned int cur = worklist.pop_front();
-		//even if we aren't an accepting component, we can still reach other accepting components
-		bool accepting = false;
-		for (auto s : make_range_for_pair(sccs.begin(cur), sccs.end(cur))) {
-			a.for_each_destination(s, [&](AutomatonBase::state_type t) {
-				unsigned int other = state_to_comp[t];
-				if (closed.insert(other).second)
-					worklist.push_back(other);
-			});
-			accepting = accepting || a.accept(s);
-		}
-		if (accepting)
-			ret.push_back(cur); //TODO: could template this finishing action, so we just count if we only care about .size()
-	}
-	return ret;
+		for (auto s : sccs.component(c))
+			if (a.accept(s)) {
+				++count;
+				break;
+			}
+	return count;
 }
 
 
@@ -388,8 +372,7 @@ std::vector<std::byte> encode(const automaton::WorkingAutomaton& a) {
 	stats.states = a.accept_size();
 	stats.undirected_edges = numeric_cast<unsigned int>(uedges.size());
 	stats.directed_edges = numeric_cast<unsigned int>(dedges.size());
-	stats.components = numeric_cast<unsigned int>(
-			reachable_accept_components(a, automaton::find_components(a)).size());
+	stats.components = count_accept_components(a);
 	auto header = detail::build_header(stats);
 
 	detail::edge_coder coder(stats.locations, stats.states);
