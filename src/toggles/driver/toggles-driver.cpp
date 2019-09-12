@@ -887,13 +887,11 @@ private:
 			fmt::print(" {}", id);
 		fmt::print("\n");
 
-		//We only actually need the locations (or the encoding::Stats), but if
-		//this is the only such use we don't need to define a select_id_to_stats.
-		vector<pair<uint64_t, vector<std::byte>>> data = select_gadget_id_to_data(
+		vector<pair<uint64_t, encoding::Stats>> stats = select_gadget_id_to_stats(
 				database_, gadget_hashtable_, gadget_index_, combine_rights_);
-		std::sort(data.begin(), data.end(), proj_less<0>());
-		for (const pair<uint64_t, vector<std::byte>>& p : data)
-			combine_left_locations_.emplace_back(complete_opts_.precision - encoding::locations(p.second.data()));
+		std::sort(stats.begin(), stats.end(), proj_less<0>());
+		for (const pair<uint64_t, encoding::Stats>& p : stats)
+			combine_left_locations_.emplace_back(complete_opts_.precision - p.second.locations);
 		complete_opts_.combine_max_left_locations = std::min(complete_opts_.combine_max_left_locations,
 				*std::max_element(combine_left_locations_.begin(), combine_left_locations_.end()));
 	}

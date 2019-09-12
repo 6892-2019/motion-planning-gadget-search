@@ -45,13 +45,15 @@ std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_t
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals);
 
 //Offering this here (and pulling in gadget-encoding-stats.hpp) lets us keep
-//select_gadget_id_to_value out of this header, but is somewhat unsatisfying as
-//predicates.cpp is the only natural client.
+//select_gadget_id_to_value out of this header.
 std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats(
 		lmdb::env& env, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals);
 std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats(
 		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals);
+std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats(
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		const std::vector<std::uint64_t>& gids);
 
 #endif /* SELECT_BY_ID_HPP */
 

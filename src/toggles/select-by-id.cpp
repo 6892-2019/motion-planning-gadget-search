@@ -138,6 +138,15 @@ std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats
 }
 
 std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats(
+		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
+		const std::vector<std::uint64_t>& gids) {
+	interval_accumulator<uint64_t> accum(128);
+	for (uint64_t i : gids)
+		accum(i);
+	return select_gadget_id_to_stats(env, gadget_hashtable, gadget_index, std::move(accum).finish());
+}
+
+std::vector<std::pair<std::uint64_t, encoding::Stats>> select_gadget_id_to_stats(
 		lmdb::env& env, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& gid_intervals) {
 	lmdb::dbi gadget_hashtable, gadget_index;
 	{
