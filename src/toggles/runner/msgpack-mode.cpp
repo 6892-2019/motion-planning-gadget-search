@@ -687,10 +687,10 @@ DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadg
 				//Having done some duplicate work is fine, so long as we got the
 				//same result.  If not, either there's a bug in the code or the
 				//database is corrupt.
-				SimpleEdge exist = lmdb::from_sv<SimpleEdge>(value);
+				const SimpleEdge exist = lmdb::from_sv<SimpleEdge>(value);
 				if (e != exist)
 					throw std::runtime_error(fmt::format("differing {} edges from {}: {}/{} and {}/{}",
-							completion_kind, p.input1, e.output, e.canonicalizePermutation,
+							completion_kind, p.input1, std::as_const(e).output, e.canonicalizePermutation,
 							exist.output, exist.canonicalizePermutation));
 				--edge_count; //we didn't actually add this edge, don't count it
 			}
