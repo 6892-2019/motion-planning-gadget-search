@@ -178,7 +178,6 @@ AutomatonBase::SymbolSet connect_deleted_symbols(const AutomatonBase& a, unsigne
 	prov.connectPoint = numeric_cast<std::uint8_t>(connectPoint);
 	Finisher<ConnectProvenance> finisher;
 	auto active_alphabet_size = a.active_alphabet_size();
-	unsigned int otherConnectPoint = (connectPoint+1) % a.alphabet_size();
 
 	AutomatonBase::SymbolSet active;
 	switch (a.alphabet_size()) {
