@@ -2,6 +2,7 @@
 #define ANYPROV_HPP
 
 #include "toggles-shared.hpp"
+#include <msgpack.hpp>
 
 using std::vector;
 using std::uint8_t;
@@ -13,7 +14,7 @@ enum class EdgeKind : unsigned char {
 inline bool operator<(EdgeKind a, EdgeKind b) {
 	return static_cast<unsigned char>(a) < static_cast<unsigned char>(b);
 }
-std::string_view name_for_kind(EdgeKind kind) {
+inline std::string_view name_for_kind(EdgeKind kind) {
 	switch (kind) {
 		case EdgeKind::combine: return "combine";
 		case EdgeKind::connect: return "connect";
@@ -30,6 +31,7 @@ struct fmt::formatter<EdgeKind> : formatter<string_view> {
 		return fmt::formatter<string_view>::format(name_for_kind(kind), ctx);
 	}
 };
+MSGPACK_ADD_ENUM(EdgeKind)
 
 class AnyProv {
 public:
@@ -96,6 +98,9 @@ public:
 			r.push_back(input2_);
 		return r;
 	}
+
+	MSGPACK_DEFINE_ARRAY(kind_, output1_, input1_, input2_, splice_, rotation_, connectPoint_, canonicalizePermutation_)
+	friend class msgpack::v3::adaptor::as<AnyProv>;
 private:
 	AnyProv(EdgeKind kind, uint64_t output1, uint64_t input1, uint64_t input2,
 			uint8_t splice, uint8_t rotation, uint8_t connectPoint,
@@ -148,6 +153,24 @@ struct fmt::formatter<AnyProv> {
 		}
 	}
 };
+
+//https://github.com/msgpack/msgpack-c/wiki/v2_0_cpp_adaptor#non-default-constructible-class-support-c11-only-since-120
+namespace msgpack {
+MSGPACK_API_VERSION_NAMESPACE(MSGPACK_DEFAULT_API_NS) {
+namespace adaptor {
+template <>
+struct as<AnyProv> {
+    AnyProv operator()(msgpack::object const& o) const {
+        if (o.type != msgpack::type::ARRAY) throw msgpack::type_error();
+        if (o.via.array.size != 8) throw msgpack::type_error();
+        return AnyProv(o.via.array.ptr[0].as<EdgeKind>(),
+				o.via.array.ptr[1].as<uint64_t>(), o.via.array.ptr[2].as<uint64_t>(), o.via.array.ptr[3].as<uint64_t>(),
+				o.via.array.ptr[4].as<uint8_t>(), o.via.array.ptr[5].as<uint8_t>(), o.via.array.ptr[6].as<uint8_t>(), o.via.array.ptr[7].as<uint8_t>());
+    }
+};
+} // adaptor
+} // MSGPACK_API_VERSION_NAMESPACE(MSGPACK_DEFAULT_API_NS)
+} // msgpack
 
 #endif /* ANYPROV_HPP */
 

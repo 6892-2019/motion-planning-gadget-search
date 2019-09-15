@@ -8,7 +8,7 @@
 #ifndef RPC_HPP
 #define RPC_HPP
 
-#include "msgpack.hpp"
+#include <msgpack.hpp>
 
 template<typename T>
 struct callable_traits : callable_traits<decltype(&T::operator())> {};

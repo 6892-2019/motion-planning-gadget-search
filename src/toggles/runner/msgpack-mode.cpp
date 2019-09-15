@@ -7,11 +7,12 @@
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
 #include "../select-by-id.hpp"
+#include "../anyprov.hpp"
 #include "intervals.hpp"
 #include "varint.hpp"
 #include "hopscotch/hopscotch_map.h"
 #include <boost/container/static_vector.hpp>
-#include "msgpack.hpp"
+#include <msgpack.hpp>
 #include "lmdb++.h"
 #include <cstdio>
 
@@ -792,6 +793,59 @@ DatabaseOperationStatistics do_mirror_db(vector<pair<uint64_t, uint64_t>> input_
 
 
 
+
+
+vector<pair<uint64_t, vector<unsigned int>>> do_deleted_locations(vector<AnyProv> provs) {
+	vector<uint64_t> gids;
+	for (const AnyProv& p : provs) {
+		gids.push_back(p.output());
+		gids.push_back(p.input1());
+		if (p.kind() == EdgeKind::combine)
+			gids.push_back(p.input2());
+	}
+	std::sort(gids.begin(), gids.end());
+	gids.erase(std::unique(gids.begin(), gids.end()), gids.end());
+
+	tsl::hopscotch_map<uint64_t, vector<std::byte>, farmhash_hash> gadget_data;
+	{
+		lmdb::env env = lmdb::env::create();
+		env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+		env.set_max_dbs(64);
+		env.open(g_database_path.c_str(), MDB_RDONLY | MDB_NORDAHEAD);
+		for (pair<uint64_t, vector<std::byte>>& p : select_gadget_id_to_data(env, gids))
+			gadget_data.try_emplace(p.first, std::move(p.second));
+	}
+
+	vector<pair<uint64_t, vector<unsigned int>>> responses;
+	for (const AnyProv& p : provs) {
+		if (p.kind() == EdgeKind::combine) {
+			const auto& output_data = gadget_data.at(p.output());
+			const auto& input1_data = gadget_data.at(p.input1());
+			const auto& input2_data = gadget_data.at(p.input2());
+			if (encoding::locations(output_data.data()) == encoding::locations(input1_data.data()) +
+					encoding::locations(input2_data.data()) - 2)
+				continue; //no deleted symbols
+			SymbolSet dels = combine_deleted_symbols(
+					*encoding::decode<16>(input1_data), *encoding::decode<16>(input2_data),
+					p.splice(), p.rotation(), p.connectPoint());
+			if (!dels.empty())
+				responses.emplace_back(p.output(), vector<unsigned int>{dels.begin(), dels.end()});
+		} else if (p.kind() == EdgeKind::connect) {
+			const auto& output_data = gadget_data.at(p.output());
+			const auto& input_data = gadget_data.at(p.input1());
+			if (encoding::locations(output_data.data()) == encoding::locations(input_data.data()) - 2)
+				continue; //no deleted symbols
+			SymbolSet dels = connect_deleted_symbols(*encoding::decode(input_data.data(), input_data.size()), p.connectPoint());
+			if (!dels.empty())
+				responses.emplace_back(p.output(), vector<unsigned int>{dels.begin(), dels.end()});
+		} else
+			throw std::runtime_error(fmt::format("bad deleted-locations request prov: {}", p));
+	}
+	return responses;
+}
+
+
+
 //DatabaseOperationStatistics do_batch_combine_commit(vector<vector<std::byte>> rows, vector<CombineProvenance> prov, std::size_t pruned) {
 //	pqxx::connection conn(g_database_connect_string);
 //	return commit_combine_result(conn, std::move(rows), std::move(prov), pruned);
@@ -838,6 +892,8 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"combine-db-full"sv, &handler_adapter<do_combine_db_full>},
 	{"close-db"sv, &handler_adapter<do_close_db>},
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
+
+	{"deleted-locations"sv, &handler_adapter<do_deleted_locations>},
 //
 //	{"batch-combine"sv, &handler_adapter<do_batch_combine>},
 //	{"batch-combine-commit"sv, &handler_adapter<do_batch_combine_commit>},

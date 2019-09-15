@@ -374,3 +374,35 @@ Finisher<CombineProvenance> do_combine(vector<pair<uint64_t, vector<std::byte>>>
 			std::terminate();
 	}
 }
+
+//based on copying combine
+AutomatonBase::SymbolSet combine_deleted_symbols(const Automaton<16>& la, const Automaton<16>& ra,
+		unsigned int splice, unsigned int rotation, unsigned int connectPoint) {
+	AutomatonBase::state_type leftLocations = la.active_alphabet_size();
+	AutomatonBase::state_type rightLocations = ra.active_alphabet_size();
+	using symbol_type = WorkingAutomaton::symbol_type;
+	std::array<symbol_type, Automaton<16>::alphabet_size_v> slide;
+	Automaton<16> shiftedRight = ra;
+	std::iota(slide.begin(), slide.end(), 0);
+	std::rotate(slide.rbegin(), slide.rbegin()+leftLocations, slide.rend());
+	shiftedRight.renumberAlphabet(slide.data());
+	Automaton<16> shuffled = automaton::shuffleAccept(la, shiftedRight);
+	shuffled.minimize();
+	//Now [0,leftLocations) are from the left and [leftLocations,leftLocations+rightLocations)
+	//are from the right.  We want to start inserting at left location 0, so we
+	//write all the right locations, then all the left locations.  We'll rotate
+	//the right locations as appropriate.  Then we'll move a left location to
+	//the other end of the array.  Locations beyond leftLocations+rightLocations
+	//are left alone, as they are always inactive.
+	std::iota(slide.begin(), slide.begin()+rightLocations, leftLocations);
+	std::iota(slide.begin()+rightLocations, slide.begin()+rightLocations+leftLocations, 0);
+	std::iota(slide.begin()+rightLocations+leftLocations, slide.end(), rightLocations+leftLocations);
+
+	for (unsigned int ll = 0; ll < splice; ++ll)
+		std::swap(slide[ll], slide[ll+rightLocations]);
+	std::iota(slide.begin()+splice, slide.begin()+splice+rightLocations, leftLocations);
+	std::rotate(slide.begin()+splice, slide.begin()+splice+rotation, slide.begin()+splice+rightLocations);
+	Automaton<16> permuted = shuffled;
+	permuted.permuteAlphabet(slide.data());
+	return connect_deleted_symbols(permuted, connectPoint);
+}

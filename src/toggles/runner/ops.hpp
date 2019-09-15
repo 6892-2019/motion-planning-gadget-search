@@ -42,6 +42,9 @@ Finisher<CombineProvenance> do_combine(std::vector<std::pair<std::uint64_t, std:
 		std::vector<std::pair<std::uint64_t, std::vector<std::byte>>>&& right_data, unsigned int precision);
 
 automaton::AutomatonBase::SymbolSet connect_deleted_symbols(const automaton::AutomatonBase& a, unsigned int connectPoint);
+//I'm sure we could make AutomatonBase work here if we needed to.
+automaton::AutomatonBase::SymbolSet combine_deleted_symbols(const automaton::Automaton<16>& la, const automaton::Automaton<16>& ra,
+		unsigned int splice, unsigned int rotation, unsigned int connectPoint);
 
 #endif /* OPS_HPP */
 

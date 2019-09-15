@@ -325,43 +325,41 @@ void fill_cache(lmdb::env& env,
 		txn.commit();
 	}
 
-	//TODO: now that we're using msgpack, make this msgpack so we can drop the handrolled parsing
-	//TODO: should really have a database table caching these, keyed on the AnyProv.
+	//We could cache these between runs, either in the database itself (no longer
+	//using it read-only) or a side database (e.g., ~/.cache/toggles-report/{id}.mdb).
+	//But reporting doesn't seem to be a bottleneck.
 	if (!newly_cached_connects.empty()) {
-		//See if any had deleted locations.
-		vector<std::string> lines;
-		for (uint64_t o : newly_cached_connects) {
-			const AnyProv& p = edge_cache.at(o);
-			if (p.kind() == EdgeKind::connect)
-				lines.push_back(fmt::format("{},connect,{},{}", p.output(), p.input1(), p.connectPoint()));
-			else if (p.kind() == EdgeKind::combine)
-				lines.push_back(fmt::format("{},combine,{},{},{},{},{}", p.output(), p.input1(), p.input2(), p.splice(), p.rotation(), p.connectPoint()));
-			else
-				throw std::logic_error("can't happen bad edge kind");
-		}
+		vector<AnyProv> requests;
+		for (uint64_t o : newly_cached_connects)
+			requests.push_back(edge_cache.at(o));
 
-		std::string temp_to = make_temp_filename("toggles-report-delloc-request"),
-				temp_from = make_temp_filename("toggles-report-delloc-response");
-		writeAllLines(temp_to, lines);
-		std::string cmdline = fmt::format("toggles-runner.exe deleted-locations --db-path {} -i {} -o {}",
+		simple_buffer rpcbuf;
+		std::string temp_to = make_temp_filename("toggles-report-delloc-request", "msg"),
+				temp_from = make_temp_filename("toggles-report-delloc-response", "msg");
+		pack_call(rpcbuf, 42, "deleted-locations", requests);
+		write_buffer(rpcbuf, temp_to);
+		std::string cmdline = fmt::format("toggles-runner.exe msgpack --db-path {} -i {} -o {}",
 				db_path, temp_to, temp_from);
 		int retcode = std::system(cmdline.c_str());
 		if (retcode)
-			throw std::runtime_error("deleted-locations failure");
-		lines = readAllLines(temp_from);
+			throw std::runtime_error(fmt::format("runner failed during deleted-locations: {}", retcode));
+		rpcbuf.clear();
+		read_buffer(rpcbuf, temp_from);
+		Response resp = unpack_response(rpcbuf);
+		if (!resp)
+			throw std::runtime_error(fmt::format("deleted-locations returned error: {}\n{}\n{}",
+					resp.error_as(), temp_to, temp_from));
 
-		for (std::string l : lines) {
-			vector<std::string_view> fields = split_view(l, ' ');
-			uint64_t output = to_uint64(fields[0]);
-			fields.erase(fields.begin());
-			vector<unsigned int> locs;
-			for (std::string_view f : fields)
-				locs.push_back(to_int(f));
-			auto pair = delloc.try_emplace(output, locs);
+		auto responses = resp.result_as<vector<pair<uint64_t, vector<unsigned int>>>>();
+		for (auto& p : responses) {
+			assert(std::find(newly_cached_connects.begin(), newly_cached_connects.end(), p.first) != newly_cached_connects.end());
+			auto pair = delloc.try_emplace(p.first, std::move(p.second));
 			if (!pair.second)
 				throw std::runtime_error(fmt::format("dellocs conflict for {}: {} {}",
-						output, *pair.first, locs));
+						p.first, *pair.first, p.second));
 		}
+		std::remove(temp_to.c_str());
+		std::remove(temp_from.c_str());
 	}
 }
 
