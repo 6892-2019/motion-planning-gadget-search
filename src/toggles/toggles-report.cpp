@@ -662,7 +662,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	awaiting_closemirror = awaiting_connect = awaiting_combine = closed;
 
 	interval_accumulator<uint64_t> printed_in_traces(512);
-	auto print_trace = [&target, &dellocs, &printed_in_traces](const vector<AnyProv>& trace) {
+	auto print_trace = [&target, &dellocs, &printed_in_traces](const vector<AnyProv>& trace, bool print_dellocs) {
 		for (const AnyProv& p : trace) {
 			if (p.kind() == EdgeKind::source) {
 				auto it = target.inv_names.find(p.output());
@@ -671,10 +671,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				else
 					fmt::print("  {} {{{}}}\n", p, fmt::join(target.inv_names.at(p.output()), ", "));
 			} else {
-				//Strictly speaking, consulting dellocs is only valid for source
-				//traces, but target traces will never have combines or connects
-				//so we'll never notice.
-				auto dels = dellocs.find(p.output());
+				auto dels = print_dellocs ? dellocs.find(p.output()) : dellocs.end();
 				if (dels != dellocs.end()) {
 					const vector<unsigned int>& deletions = dels->second;
 					std::string line = fmt::to_string(p);
@@ -710,9 +707,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 					//There's no need to tell me X builds X.
 					if (target_trace != source_trace) {
 						fmt::print("Target trace:\n");
-						print_trace(std::move(target_trace));
+						print_trace(std::move(target_trace), false);
 						fmt::print("Source trace:\n");
-						print_trace(std::move(source_trace));
+						print_trace(std::move(source_trace), true);
 						fmt::print("\n");
 
 						std::string suffix = "";
