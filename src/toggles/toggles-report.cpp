@@ -295,6 +295,8 @@ void fill_cache(lmdb::env& env,
 				Response resp = unpack_response(read_buffer(response_files[i]));
 				if (!resp)
 					throw std::runtime_error(fmt::format("edge-filling task {} returned error: {}", i, resp.error_as()));
+				std::remove(request_files[i].c_str());
+				std::remove(response_files[i].c_str());
 			});
 		//TODO: parallel_for with better interface? transform_reduce with trivial reducer?
 		for (auto& t : tasks)
