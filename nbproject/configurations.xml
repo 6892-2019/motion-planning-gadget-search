@@ -78,6 +78,7 @@
       <in>bitset.cpp</in>
       <in>bitset.hpp</in>
       <in>circular_deque.hpp</in>
+      <in>coarse_monotonic_clock.hpp</in>
       <in>expr.cpp</in>
       <in>hopcroft.cpp</in>
       <in>hopcroft.hpp</in>
@@ -201,6 +202,8 @@
       <item path="src/bitset.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/circular_deque.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/coarse_monotonic_clock.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/expr.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="0">
