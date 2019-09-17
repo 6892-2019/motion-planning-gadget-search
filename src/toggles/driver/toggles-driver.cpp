@@ -635,7 +635,14 @@ private:
 	}
 
 	Control discover_needs_mirror() {
-		if (!complete_opts_.compute_mirror) {
+		if (generation_ == 0 && subgeneration_ == 0) {
+			//We want to run searches using only one enantiomorph.  That means
+			//we can't follow mirror edges before initializing the combine rights.
+			//When we don't specify the -r or -s morph, we'll collect both morphs
+			//during collect_initial anyway.
+			phase_ = Phase::begin_subgeneration;
+			return Control::proceed;
+		} else if (!complete_opts_.compute_mirror) {
 			phase_ = Phase::follow_mirror;
 			return Control::proceed;
 		}
