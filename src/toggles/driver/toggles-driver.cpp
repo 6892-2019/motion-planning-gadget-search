@@ -11,6 +11,7 @@
 #include "stringutils.hpp"
 #include "ioutils.hpp"
 #include "stopwatch.hpp"
+#include "coarse_monotonic_clock.hpp"
 #include "tsl/ordered_map.h"
 #include "lmdb++.h"
 #include <fmt/chrono.h>
@@ -790,92 +791,106 @@ private:
 	DatabaseOperationStatistics do_unary_operation(std::string_view operation,
 			const vector<vector<pair<uint64_t, uint64_t>>>& chunks,
 			unsigned int max_states = 0) {
-		std::uint32_t seqno = 0;
-		DatabaseOperationStatistics overall_stats = {};
-		bool error_happened = false;
-		workers_->run([&](simple_buffer& buffer) {
-			if (error_happened) return false; //stop generating work, but let existing issued work finish
-			if (!(seqno < chunks.size())) return false;
+		std::vector<simple_buffer> tasks;
+		for (std::uint32_t seqno = 0; seqno < chunks.size(); ++seqno)
 			if (max_states)
-				pack_call(buffer, seqno, operation, chunks[seqno], max_states);
+				tasks.push_back(pack_call(seqno, operation, chunks[seqno], max_states));
 			else
-				pack_call(buffer, seqno, operation, chunks[seqno]);
-			++seqno;
-			return true;
-		}, [&](simple_buffer& buffer) {
-			error_happened |= process_operation_response(buffer, overall_stats);
-		});
-		if (error_happened)
-			throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
-		return overall_stats;
+				tasks.push_back(pack_call(seqno, operation, chunks[seqno]));
+		return do_generic_operation(std::move(tasks));
 	}
 
 	DatabaseOperationStatistics do_combine_operation() {
 		assert(!combine_needs_.empty());
+		std::vector<simple_buffer> tasks;
 		std::uint32_t seqno = 0;
-		std::size_t outer_index = 0, inner_index = 0;
-		auto make_chunks = [&]() {
-			return interval_chunk(combine_needs_[outer_index].second.cbegin(), combine_needs_[outer_index].second.cend(),
-				std::max<std::uint64_t>(runtime_opts_.combine_pairs_per_task / combine_needs_[outer_index].first.size(), 1));
-		};
-		vector<vector<pair<uint64_t, uint64_t>>> chunks = make_chunks();
+		for (std::size_t outer_index = 0; outer_index < combine_needs_.size(); ++outer_index) {
+			vector<vector<pair<uint64_t, uint64_t>>> chunks = interval_chunk(combine_needs_[outer_index].second.cbegin(), combine_needs_[outer_index].second.cend(),
+					std::max<std::uint64_t>(runtime_opts_.combine_pairs_per_task / combine_needs_[outer_index].first.size(), 1));
+			for (std::size_t inner_index = 0; inner_index < chunks.size(); ++inner_index)
+				tasks.push_back(pack_call(seqno++, "combine-db", chunks[inner_index], combine_needs_[outer_index].first,
+					complete_opts_.precision, complete_opts_.combine_max_left_states));
+		}
+		return do_generic_operation(std::move(tasks));
+	}
+
+	DatabaseOperationStatistics do_generic_operation(std::vector<simple_buffer> tasks) {
+		std::reverse(tasks.begin(), tasks.end());
+
+		std::string operation_name = phase_ == Phase::compute_combine ? "combine" :
+				phase_ == Phase::compute_connect ? "connect" :
+				phase_ == Phase::compute_close ? "close" :
+				phase_ == Phase::compute_mirror ? "mirror" : "BUG";
+
 		DatabaseOperationStatistics overall_stats = {};
+		const std::size_t tasks_total = tasks.size();
+		std::uint32_t tasks_dispatched = 0, tasks_completed = 0;
+		coarse_monotonic_clock::time_point operation_start = coarse_monotonic_clock::now();
+		vector<pair<std::uint32_t, coarse_monotonic_clock::time_point>> task_starts;
 		bool error_happened = false;
 		workers_->run([&](simple_buffer& buffer) {
 			if (error_happened) return false; //stop generating work, but let existing issued work finish
-			if (!(outer_index < combine_needs_.size())) return false;
-			pack_call(buffer, seqno++, "combine-db", chunks[inner_index++], combine_needs_[outer_index].first,
-					complete_opts_.precision, complete_opts_.combine_max_left_states);
-			if (!(inner_index < chunks.size())) {
-				inner_index = 0;
-				++outer_index;
-				if (outer_index < combine_needs_.size())
-					chunks = make_chunks();
-				else
-					vector<vector<pair<uint64_t, uint64_t>>> release_memory(std::move(chunks));
-			}
+			if (tasks.empty()) return false;
+			buffer.clear();
+			buffer.write(static_cast<const char*>(tasks.back().data()), tasks.back().size());
+			tasks.pop_back();
+			//tasks_dispatched matches sequence number because we dispatch tasks in order
+			task_starts.emplace_back(tasks_dispatched++, coarse_monotonic_clock::now());
 			return true;
 		}, [&](simple_buffer& buffer) {
-			error_happened |= process_operation_response(buffer, overall_stats);
+			std::optional<Response> resp; //just for lazy init because Response isn't default-constructible
+			try {
+				resp = unpack_response(buffer);
+			} catch (msgpack::insufficient_bytes&) {
+				//lmdbxx doesn't wrap this one; do it ourselves
+				int dead_count = -1;
+				int rc = mdb_reader_check(database_, &dead_count);
+				//Indicates the process died without sending us a response (we tried
+				//to unpack an empty/truncated response).  Due to shortcomings in
+				//the RPC interface, we can't even say which task it was that failed
+				//on us.  (maybe with a better exception type?)
+				fmt::print("ERROR: a task failed without response; cleaned up {} database readers\n", dead_count);
+				if (rc != MDB_SUCCESS)
+					lmdb::error::raise("mdb_reader_check", rc);
+				error_happened = true;
+				return;
+			}
+			if (!*resp) {
+				fmt::print("ERROR: task {} failed: {}\n", resp->seq(), resp->error_as());
+				error_happened = true;
+				return;
+			}
+
+			coarse_monotonic_clock::time_point end = coarse_monotonic_clock::now();
+			auto start_it = std::find_if(task_starts.begin(), task_starts.end(),
+					//TODO: proj_compare helper (see also toggles-report.cpp)
+					std::bind_front(coord_equal_right<0>(), resp->seq()));
+			assert(start_it != task_starts.end());
+			std::chrono::duration<double, std::chrono::seconds::period> task_time = end - start_it->second;
+			std::swap(*start_it, task_starts.back()); //may be a self-swap, but that's okay
+			task_starts.pop_back();
+
+			++tasks_completed;
+			coarse_monotonic_clock::duration operation_time = coarse_monotonic_clock::now() - operation_start;
+			auto operation_eta = operation_time / tasks_completed * (tasks_total - tasks_completed);
+			auto hours = duration_cast<std::chrono::hours>(operation_eta);
+			auto minutes = duration_cast<std::chrono::minutes>(operation_eta) - hours;
+			auto seconds = duration_cast<std::chrono::seconds>(operation_eta) - hours - minutes;
+			std::string eta = hours.count() ? fmt::format("{}h{}m{}s", hours.count(), minutes.count(), seconds.count()) :
+					minutes.count() ? fmt::format("{}m{}s", minutes.count(), seconds.count()) :
+					fmt::format("{}s", seconds.count());
+
+			DatabaseOperationStatistics stats = resp->result_as<DatabaseOperationStatistics>();
+			overall_stats += stats;
+
+			fmt::print("{} {}.{} {}/{} {:.1f}s/{}: {} s, {:6d} p, {:6d} k, {:6d} n, {:6d} e\n",
+					operation_name, generation_, subgeneration_,
+					resp->seq(), tasks_total, task_time.count(), eta,
+					stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 		});
 		if (error_happened)
 			throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
 		return overall_stats;
-	}
-
-	/**
-	 * Process an RPC response from a worker.
-	 * @return true iff an error occurred
-	 */
-	bool process_operation_response(simple_buffer& buffer, DatabaseOperationStatistics& overall_stats) {
-		std::optional<Response> resp; //just for lazy init because Response isn't default-constructible
-		try {
-			resp = unpack_response(buffer);
-		} catch (msgpack::insufficient_bytes&) {
-			//lmdbxx doesn't wrap this one; do it ourselves
-			int dead_count = -1;
-			int rc = mdb_reader_check(database_, &dead_count);
-			//Indicates the process died without sending us a response (we tried
-			//to unpack an empty/truncated response).  Due to shortcomings in
-			//the RPC interface, we can't even say which task it was that failed
-			//on us.  (maybe with a better exception type?)
-			fmt::print("ERROR: a task failed without response; cleaned up {} database readers\n", dead_count);
-			if (rc != MDB_SUCCESS)
-				lmdb::error::raise("mdb_reader_check", rc);
-			return true;
-		}
-
-		assert(resp);
-		if (!*resp) {
-			fmt::print("ERROR: task {} failed: {}\n", resp->seq(), resp->error_as());
-			return true;
-		} else {
-			DatabaseOperationStatistics stats = resp->result_as<DatabaseOperationStatistics>();
-			fmt::print("task {} completed: {} skipped, {} pruned, {} known, {} new, {} edges\n",
-					resp->seq(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
-			overall_stats += stats;
-		}
-		return false;
 	}
 
 	void initialize_combine_rights() {
