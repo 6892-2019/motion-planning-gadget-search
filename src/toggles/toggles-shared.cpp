@@ -4,7 +4,9 @@
 #include "intervals.hpp"
 #include "varint.hpp"
 #include "transform_reduce.hpp"
+#ifndef __SANITIZE_ADDRESS__
 #include <jemalloc/jemalloc.h>
+#endif //__SANITIZE_ADDRESS
 
 using std::vector;
 using std::pair;
@@ -12,6 +14,7 @@ using std::uint64_t;
 using namespace std::literals::string_view_literals;
 
 void jemalloc_tuning() {
+#ifndef __SANITIZE_ADDRESS__
 	//Both the runner and driver often block (on lmdb or on running tasks), so
 	//configure jemalloc background threads to let jemalloc yield unused memory
 	//back to the operating system.
@@ -19,6 +22,7 @@ void jemalloc_tuning() {
 	int rc = mallctl("background_thread", nullptr, 0, &yes_please, sizeof(yes_please));
 	if (rc)
 		fmt::print("warning: problem initializing jemalloc opts: {} {}", rc, strerror(rc));
+#endif //__SANITIZE_ADDRESS
 }
 
 
