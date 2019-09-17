@@ -363,6 +363,10 @@ void fill_cache(lmdb::env& env,
 		std::remove(temp_to.c_str());
 		std::remove(temp_from.c_str());
 	}
+
+	if (!request_files.empty() || !newly_cached_connects.empty())
+		if (unsigned int dead_count = check_for_stale_readers(env))
+			fmt::print("cleaned up {} stale readers\n", dead_count);
 }
 
 const std::string_view preferred_names[] = {

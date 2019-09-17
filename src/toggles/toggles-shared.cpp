@@ -25,6 +25,15 @@ void jemalloc_tuning() {
 #endif //__SANITIZE_ADDRESS
 }
 
+unsigned int check_for_stale_readers(lmdb::env& env) {
+	//lmdbxx doesn't wrap this one; do it ourselves
+	int dead_count = -1;
+	int rc = mdb_reader_check(env, &dead_count);
+	if (rc != MDB_SUCCESS)
+		lmdb::error::raise("mdb_reader_check", rc);
+	return numeric_cast<unsigned int>(dead_count);
+}
+
 
 
 namespace {

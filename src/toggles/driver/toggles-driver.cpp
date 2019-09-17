@@ -817,11 +817,13 @@ private:
 	DatabaseOperationStatistics do_generic_operation(std::vector<simple_buffer> tasks) {
 		std::reverse(tasks.begin(), tasks.end());
 
+		if (unsigned int dead_count = check_for_stale_readers(database_))
+			fmt::print("cleaned up {} stale readers\n", dead_count);
+
 		std::string operation_name = phase_ == Phase::compute_combine ? "combine" :
 				phase_ == Phase::compute_connect ? "connect" :
 				phase_ == Phase::compute_close ? "close" :
 				phase_ == Phase::compute_mirror ? "mirror" : "BUG";
-
 		DatabaseOperationStatistics overall_stats = {};
 		const std::size_t tasks_total = tasks.size();
 		std::uint32_t tasks_dispatched = 0, tasks_completed = 0;
@@ -838,20 +840,17 @@ private:
 			task_starts.emplace_back(tasks_dispatched++, coarse_monotonic_clock::now());
 			return true;
 		}, [&](simple_buffer& buffer) {
+			if (unsigned int dead_count = check_for_stale_readers(database_))
+				fmt::print("cleaned up {} stale readers\n", dead_count);
 			std::optional<Response> resp; //just for lazy init because Response isn't default-constructible
 			try {
 				resp = unpack_response(buffer);
 			} catch (msgpack::insufficient_bytes&) {
-				//lmdbxx doesn't wrap this one; do it ourselves
-				int dead_count = -1;
-				int rc = mdb_reader_check(database_, &dead_count);
 				//Indicates the process died without sending us a response (we tried
 				//to unpack an empty/truncated response).  Due to shortcomings in
 				//the RPC interface, we can't even say which task it was that failed
 				//on us.  (maybe with a better exception type?)
-				fmt::print("ERROR: a task failed without response; cleaned up {} database readers\n", dead_count);
-				if (rc != MDB_SUCCESS)
-					lmdb::error::raise("mdb_reader_check", rc);
+				fmt::print("ERROR: a task failed without response\n");
 				error_happened = true;
 				return;
 			}
@@ -1226,6 +1225,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	data_env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	data_env.set_max_dbs(64);
 	data_env.open(std::string(db_path).c_str(), MDB_NORDAHEAD); //TODO: flags?
+	if (unsigned int dead_count = check_for_stale_readers(data_env))
+		fmt::print("cleaned up {} stale readers\n", dead_count);
 	uint64_t database_id = 0;
 	std::string_view creator_hostname, creation_timestamp;
 	{
