@@ -54,7 +54,7 @@ public:
 		return data_.get();
 	}
 	void grow(std::size_t min_capacity) {
-		std::size_t a = std::max(capacity_, 4096ul);
+		std::size_t a = std::max(capacity_, 128ul);
 		while (a < min_capacity)
 			//TODO: this growth policy is too aggressive for large sizes, should back down to 1.5
 			a *= 2;
