@@ -113,6 +113,91 @@ TEST_CASE("IntervalsTest_IntervalAccumulator03") {
 
 
 
+TEST_CASE("IntervalsTest_OverlapResultConversion") {
+	CHECK_UNARY(overlap_result::overlap);
+	CHECK_UNARY_FALSE(overlap_result::adjacent);
+	CHECK_UNARY_FALSE(overlap_result::separate);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap00") {
+	initializer_list<pair<int, int>> left = {};
+	initializer_list<pair<int, int>> right = {};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::separate);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::separate);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap01") {
+	initializer_list<pair<int, int>> left = {};
+	initializer_list<pair<int, int>> right = {{0, 5}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::separate);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::separate);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap02") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{0, 5}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::overlap);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::overlap);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap03") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{-1, 3}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::overlap);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::overlap);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap04") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{0, 3}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::overlap);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::overlap);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap05") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{2, 3}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::overlap);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::overlap);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap06") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{2, 10}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::overlap);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::overlap);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap07") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{-1, 3}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::overlap);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::overlap);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap08") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{-2, 0}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::adjacent);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::adjacent);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap09") {
+	initializer_list<pair<int, int>> left = {{0, 5}};
+	initializer_list<pair<int, int>> right = {{5, 10}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::adjacent);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::adjacent);
+}
+
+TEST_CASE("IntervalsTest_IntervalOverlap10") {
+	initializer_list<pair<int, int>> left = {{0, 5}, {10, 15}};
+	initializer_list<pair<int, int>> right = {{5, 10}};
+	CHECK_EQ(interval_overlap(left.begin(), left.end(), right.begin(), right.end()), overlap_result::adjacent);
+	CHECK_EQ(interval_overlap(right.begin(), right.end(), left.begin(), left.end()), overlap_result::adjacent);
+}
+
+
+
 TEST_CASE("IntervalsTest_IntervalIntersection00") {
 	initializer_list<pair<int, int>> left = {};
 	initializer_list<pair<int, int>> right = {};

@@ -218,6 +218,41 @@ bool interval_contains(const Iterable& iterable, const T& element) {
 	return interval_contains(begin(iterable), end(iterable), element);
 }
 
+//This would be an enum class if they could have conversion operators.
+struct overlap_result {
+	static const overlap_result overlap, adjacent, separate;
+	explicit operator bool() const noexcept {check(v); return v == 0;}
+	bool operator==(overlap_result o) const noexcept {check(v); check(o.v); return v == o.v;}
+	bool operator!=(overlap_result o) const noexcept {return !(*this == o);}
+	unsigned int v; //can't be private, or no longer an aggregate/trivial
+private:
+	static void check(unsigned int v) {
+#ifndef NDEBUG
+		if (v >= 3) throw std::logic_error(fmt::format("bad overlap_result: {}", v));
+#endif //NDEBUG
+	}
+};
+constexpr const overlap_result overlap_result::overlap = overlap_result{0};
+constexpr const overlap_result overlap_result::adjacent = overlap_result{1};
+constexpr const overlap_result overlap_result::separate = overlap_result{2};
+
+template<typename It1, typename It2>
+overlap_result interval_overlap(It1 left, It1 left_end, It2 right, It2 right_end) {
+	bool adjacent = false;
+	while (left != left_end && right != right_end) {
+		if ((right->first <= left->first && left->first < right->second) ||
+				(left->first <= right->first && right->first < left->second))
+			return overlap_result::overlap;
+		if (left->second == right->first || right->second == left->first)
+			adjacent = true;
+		if (left->first < right->first)
+			++left;
+		else
+			++right;
+	}
+	return adjacent ? overlap_result::adjacent : overlap_result::separate;
+}
+
 template<typename It1, typename It2,
 		typename T = typename std::common_type<
 				//should be using std::tuple_element here, I guess...
