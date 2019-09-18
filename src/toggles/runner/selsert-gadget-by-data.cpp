@@ -40,8 +40,8 @@ bool operator<(const SortStats& a, const SortStats& b) noexcept {
 			b_directed = b.stats.undirected_edges != 0;
 	auto a_total_edges = a.stats.undirected_edges + a.stats.directed_edges,
 			b_total_edges = b.stats.undirected_edges + b.stats.directed_edges;
-	return std::tie(a.stats.locations, a.stats.states, a.stats.components, a_undirected, a_directed, a.stats.undirected_edges, a.stats.directed_edges, a_total_edges, a.hash) <
-			std::tie(b.stats.locations, b.stats.states, b.stats.components, b_undirected, b_directed, b.stats.undirected_edges, b.stats.directed_edges, b_total_edges, b.hash);
+	return std::tie(a.stats.components, a.stats.locations, a.stats.states, a_undirected, a_directed, a.stats.undirected_edges, a.stats.directed_edges, a_total_edges, a.hash) <
+			std::tie(b.stats.components, b.stats.locations, b.stats.states, b_undirected, b_directed, b.stats.undirected_edges, b.stats.directed_edges, b_total_edges, b.hash);
 }
 
 vector<ProposedInsert> hash_and_move(vector<vector<std::byte>>&& gadgets) {
