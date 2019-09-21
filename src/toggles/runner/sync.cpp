@@ -2,6 +2,7 @@
 #include "automatonbase.hpp"
 #include "intervals.hpp"
 #include "../toggles-shared.hpp"
+#include "../completions.hpp"
 #include "canonicalize.hpp"
 #include "gadget-encoding.hpp"
 #include "selsert-gadget-by-data.hpp"
@@ -475,7 +476,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 	//the benefit of the reporter.
 	std::sort(selsert_result.local_to_global.begin(), selsert_result.local_to_global.end());
 	vector<pair<uint64_t, uint64_t>> named_gadgets = maximal_ranges(std::move(selsert_result.local_to_global));
-	auto needs_close = filter_completion(env, completions, "close", named_gadgets);
+	auto needs_close = subtract_completion(env, completions, "close", named_gadgets);
 	DatabaseOperationStatistics close_stats = do_close_db0(std::move(needs_close),
 			env, gadget_hashtable, gadget_index, close_edges, completions);
 	fmt::print("close: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",
@@ -486,7 +487,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 
 	auto desire_mirror = interval_union(named_gadgets.cbegin(), named_gadgets.cend(),
 			followed_close.cbegin(), followed_close.cend());
-	auto needs_mirror = filter_completion(env, completions, "mirror", desire_mirror);
+	auto needs_mirror = subtract_completion(env, completions, "mirror", desire_mirror);
 	DatabaseOperationStatistics mirror_stats = do_mirror_db0(std::move(needs_mirror),
 			env, gadget_hashtable, gadget_index, mirror_edges, completions);
 	fmt::print("mirror: {} locally pruned, {} globally pruned, {} discovered, {} edges\n",

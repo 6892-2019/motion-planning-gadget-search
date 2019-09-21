@@ -1,6 +1,5 @@
 #include "precompiled.hpp"
 #include "toggles-shared.hpp"
-#include "lmdb-interval-list.hpp"
 #include "intervals.hpp"
 #include "varint.hpp"
 #include "transform_reduce.hpp"
@@ -11,7 +10,6 @@
 using std::vector;
 using std::pair;
 using std::uint64_t;
-using namespace std::literals::string_view_literals;
 
 void jemalloc_tuning() {
 #ifndef __SANITIZE_ADDRESS__
@@ -32,62 +30,6 @@ unsigned int check_for_stale_readers(lmdb::env& env) {
 	if (rc != MDB_SUCCESS)
 		lmdb::error::raise("mdb_reader_check", rc);
 	return numeric_cast<unsigned int>(dead_count);
-}
-
-
-
-namespace {
-std::array<std::string_view, 3> completions_key_whitelist = {
-	"connect"sv,
-	"close"sv,
-	"mirror"sv,
-};
-std::array<std::string_view, 1> completions_key_prefix_whitelist = {
-	"combine-"sv,
-};
-void check_completions_key(std::string_view key) {
-	for (std::string_view x : completions_key_whitelist)
-		if (key == x)
-			return;
-	for (std::string_view x : completions_key_prefix_whitelist)
-		if (key.size() >= x.size() && key.compare(0, x.size(), x) == 0)
-			return;
-	throw std::logic_error(fmt::format("bad completions key: {}", key));
-}
-}
-
-//TODO: filter_completion is a poor name because "filter" usually keeps elements
-//for which the predicate is true, while we're removing them.  Make this subtract_completion.
-std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
-		lmdb::env& env, lmdb::dbi& completions, std::string_view kind,
-		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-	check_completions_key(kind);
-	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-	auto ret = subtract_interval_list(txn, completions, kind, intervals);
-	txn.commit();
-	return ret;
-}
-std::vector<std::pair<std::uint64_t, std::uint64_t>> filter_completion(
-		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
-		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-	check_completions_key(kind);
-	return subtract_interval_list(txn, completions, kind, intervals);
-}
-
-std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_completion(
-		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
-		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-	check_completions_key(kind);
-	return intersect_interval_list(txn, completions, kind, intervals);
-}
-
-//TODO: Rename this function.  Unlike the others, it writes to the database.
-//maybe "update_completion"?
-std::vector<std::pair<std::uint64_t, std::uint64_t>> union_completion(
-		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& completions, std::string_view kind,
-		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-	check_completions_key(kind);
-	return write_interval_list_union(txn, completions, kind, intervals);
 }
 
 

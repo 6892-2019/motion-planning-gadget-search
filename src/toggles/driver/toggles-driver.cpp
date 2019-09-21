@@ -6,6 +6,7 @@
 #include "../predicates.hpp"
 #include "../gadget-set.hpp"
 #include "../gadget-encoding-stats.hpp"
+#include "../completions.hpp"
 #include "intervals.hpp"
 #include "proj_compare.hpp"
 #include "stringutils.hpp"
@@ -518,7 +519,7 @@ private:
 
 			for (std::size_t i = 0; i < combine_rights_.size(); ++i) {
 				uint64_t r = combine_rights_[i];
-				vector<pair<uint64_t, uint64_t>> undone = filter_completion(database_, txn,
+				vector<pair<uint64_t, uint64_t>> undone = subtract_completion(txn,
 						completions_, fmt::format("combine-{}", r), unary_needs_);
 				vector<pair<uint64_t, uint64_t>> possible = intersect_predicate(txn, predicates_,
 						PredicateKind::locations, combine_left_locations_[i], std::move(undone));
@@ -737,7 +738,7 @@ private:
 
 		Stopwatch stopwatch = Stopwatch::process();
 		if (!preds) {
-			unary_needs_ = filter_completion(database_, completions_, completions_key, candidates);
+			unary_needs_ = subtract_completion(database_, completions_, completions_key, candidates);
 			fmt::print("Found {} of {} gadgets needing {} in {}\n",
 				interval_size(unary_needs_), interval_size(candidates), completions_key, stopwatch.elapsed().hms());
 			return;
@@ -751,7 +752,7 @@ private:
 		//completions first.
 		apply_predicates(txn, candidates, preds);
 		std::size_t eligible = interval_size(unary_needs_);
-		unary_needs_ = filter_completion(database_, txn, completions_, completions_key, unary_needs_);
+		unary_needs_ = subtract_completion(txn, completions_, completions_key, unary_needs_);
 		txn.commit();
 		fmt::print("Found {} of {} eligible gadgets ({} total candidates) needing {} in {}\n",
 				interval_size(unary_needs_), eligible, interval_size(candidates), completions_key, stopwatch.elapsed().hms());

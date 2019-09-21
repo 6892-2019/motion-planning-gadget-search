@@ -7,6 +7,7 @@
 #include "../rpc.hpp"
 #include "../toggles-shared.hpp"
 #include "../select-by-id.hpp"
+#include "../completions.hpp"
 #include "../anyprov.hpp"
 #include "intervals.hpp"
 #include "varint.hpp"
@@ -369,7 +370,6 @@ DatabaseOperationStatistics commit_combine_result_full(lmdb::env& env, lmdb::dbi
 				block_first = subblock_end;
 			}
 		}
-		union_completion(env, txn, completions, completions_kind, std::move(comp_input1).finish());
 		txn.commit();
 	}
 
@@ -408,17 +408,11 @@ DatabaseOperationStatistics commit_combine_result_skinny(lmdb::env& env, lmdb::d
 
 	auto txn = lmdb::txn::begin(env);
 	for (std::size_t i = 0; i < pages.size(); ++i) {
-		//For full edges we check that if the edge exists it's exactly what we have.
-		//It's hard to do that for skinny edges, so now we check we have fresh
-		//completions.
-		auto existing_completions = intersect_completion(env, txn, completions,
-				pending_completions[i].first, pending_completions[i].second);
-		if (!existing_completions.empty())
+		if (!record_completion(txn, completions, pending_completions[i].first, pending_completions[i].second))
 			throw std::runtime_error(fmt::format(
-					"combine completion collision for skinny edges; completion key {}, first input interval {}, first colliding interval {}",
-					pending_completions[i].first, pending_completions[i].second[0], existing_completions[0]));
+					"combine completion collision for skinny edges; completion key {}, first input interval {}",
+					pending_completions[i].first, pending_completions[i].second[0]));
 		insert_skinny_edges(txn, *pages[i].first, std::move(pages[i].second));
-		union_completion(env, txn, completions, pending_completions[i].first, pending_completions[i].second);
 	}
 	txn.commit();
 	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
@@ -604,16 +598,10 @@ DatabaseOperationStatistics commit_connect_result_skinny(lmdb::env& env, lmdb::d
 	{vector<ConnectProvenance> ensure_memory_is_freed(std::move(prov));}
 
 	auto txn = lmdb::txn::begin(env);
-	//For full edges we check that if the edge exists it's exactly what we have.
-	//It's hard to do that for skinny edges, so now we check we have fresh
-	//completions.
-	auto existing_completions = intersect_completion(env, txn, completions, "connect", input_intervals);
-	if (!existing_completions.empty())
+	if (!record_completion(txn, completions, "connect", input_intervals))
 		throw std::runtime_error(fmt::format(
-				"connect completion collision for skinny edges; first input interval {}, first colliding interval {}",
-				input_intervals[0], existing_completions[0]));
+				"connect completion collision for skinny edges; adding {}", fmt::join(input_intervals, ", ")));
 	insert_skinny_edges(txn, edges, std::move(pages));
-	union_completion(env, txn, completions, "connect", input_intervals);
 	txn.commit();
 
 	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};
@@ -708,7 +696,7 @@ DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadg
 		input_intervals = interval_union(input_intervals.cbegin(), input_intervals.cend(), stuff.cbegin(), stuff.cend());
 	}
 
-	union_completion(env, txn, completions, completion_kind, input_intervals);
+	record_completion(txn, completions, completion_kind, input_intervals, true);
 	txn.commit();
 
 	return {skipped, pruned, survivor_size - selsert_result.novel_size(), selsert_result.novel_size(), edge_count};

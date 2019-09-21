@@ -2,6 +2,7 @@
 #include "gadget-set.hpp"
 #include "select-by-id.hpp"
 #include "anyprov.hpp"
+#include "completions.hpp"
 #include "rpc.hpp"
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
@@ -747,7 +748,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 
 	auto discover_whats_possible = [&](std::string_view kind, vector<pair<uint64_t, uint64_t>>& intervals) {
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-		vector<pair<uint64_t, uint64_t>> possible = intersect_completion(env, txn, completions, kind, intervals);
+		vector<pair<uint64_t, uint64_t>> possible = intersect_completion(txn, completions, kind, intervals);
 		txn.commit();
 		return possible;
 	};

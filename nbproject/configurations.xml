@@ -316,6 +316,10 @@
       </item>
       <item path="src/toggles/anyprov.hpp" ex="false" tool="3" flavor2="0">
       </item>
+      <item path="src/toggles/completions.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/toggles/completions.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/toggles/driver/precompiled-asio.cpp"
             ex="false"
             tool="1"
