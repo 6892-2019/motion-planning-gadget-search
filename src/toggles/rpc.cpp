@@ -112,7 +112,7 @@ simple_buffer dispatch(msgpack::object_handle hcmd,
 		return pack_error(seq_no, fmt::format("bad arity for command '{}': expected {}, got {}",
 				command, e.expected, e.actual));
 	} catch (std::exception& e) {
-		return pack_error(seq_no, fmt::format("command '{}' threw an exception: {}", command, e.what()));
+		return pack_error(seq_no, fmt::format("command '{}' threw a {} exception: {}", command, typeid(e).name(), e.what()));
 	} catch (...) {
 		return pack_error(seq_no, fmt::format("command '{}' threw an unusual exception", command));
 	}
