@@ -205,9 +205,8 @@ void compact_lsm(LSM& lsm, lmdb::cursor& cur, unsigned int level = 0) {
 		std::string key = make_lsm_key(lsm.kind, level, i);
 		std::string_view key_view = key;
 		if (!cur.get(key_view, MDB_SET))
-//			throw std::logic_error(fmt::format("in compact_lsm: level {} page {} is in the parsed LSM tree, but couldn't get {} (kind {})",
-//					level, i, key, lsm.kind));
-			std::abort();
+			throw std::logic_error(fmt::format("in compact_lsm: level {} page {} is in the parsed LSM tree, but couldn't get {} (kind {})",
+					level, i, key, lsm.kind));
 		cur.del();
 	}
 	lsm.levels[level].clear();
