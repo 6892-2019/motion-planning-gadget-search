@@ -169,7 +169,8 @@ void compact_lsm_full(LSM& lsm, lmdb::cursor& cur) {
 	if (!cur.put(key, value))
 		throw std::logic_error(fmt::format("failed to overwrite {} during full compaction", lsm.kind));
 
-	while (cur.get(key, MDB_NEXT) && key.compare(0, lsm.kind.size(), lsm.kind) == 0) //TODO C++20 starts_with
+	while (cur.get(key, MDB_NEXT) && key.compare(0, lsm.kind.size(), lsm.kind) == 0 && //TODO C++20 starts_with
+			lsm.kind.size() < key.size() && key[lsm.kind.size()] == '-')
 		cur.del();
 	lsm.levels.clear();
 
