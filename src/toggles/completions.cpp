@@ -383,14 +383,23 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_completion(
 	return merge_ranges(ranges.begin(), ranges.end());
 }
 
-bool compact_completion(lmdb::txn& txn, lmdb::dbi& completions, const std::string_view kind) {
+bool compact_completion(lmdb::txn& txn, lmdb::dbi& completions, const std::string_view kind,
+		unsigned int tolerated_levels) {
 	check_completions_key(kind);
 	lmdb::cursor cur = lmdb::cursor::open(txn, completions);
 	std::string_view dummy_kind = kind; //work around cur.get modifying kind
 	if (!cur.get(dummy_kind, MDB_SET))
 		return false;
 	LSM lsm = parse_lsm(cur, kind);
-	if (lsm.levels.empty()) return false;
+	if (lsm.levels.size() < tolerated_levels) return false;
 	compact_lsm_full(lsm, cur);
 	return true;
+}
+bool compact_completion(lmdb::env& env, lmdb::dbi& completions, const std::string_view kind,
+		unsigned int tolerated_levels) {
+	check_completions_key(kind);
+	auto txn = lmdb::txn::begin(env);
+	bool ret = compact_completion(txn, completions, kind, tolerated_levels);
+	txn.commit();
+	return ret;
 }

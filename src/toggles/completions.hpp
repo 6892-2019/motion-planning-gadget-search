@@ -19,7 +19,10 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_completion(
 bool record_completion(lmdb::txn& txn, lmdb::dbi& completions, const std::string_view kind,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals,
 		bool allow_overlap = false);
-bool compact_completion(lmdb::txn& txn, lmdb::dbi& completions, const std::string_view kind);
+bool compact_completion(lmdb::txn& txn, lmdb::dbi& completions, const std::string_view kind,
+		unsigned int tolerated_levels = 0);
+bool compact_completion(lmdb::env& env, lmdb::dbi& completions, const std::string_view kind,
+		unsigned int tolerated_levels = 0);
 
 #endif /* COMPLETIONS_HPP */
 

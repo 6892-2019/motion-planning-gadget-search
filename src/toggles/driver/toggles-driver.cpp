@@ -470,6 +470,8 @@ public:
 			}
 		}
 
+		prepare_to_stop(control);
+
 		workers_ = nullptr;
 		return control == Control::stop;
 	}
@@ -508,6 +510,13 @@ private:
 			.max_states = complete_opts_.combine_max_left_states,
 			.max_components = complete_opts_.combine_max_left_components
 		};
+
+		{
+			auto txn = lmdb::txn::begin(database_);
+			for (uint64_t r : combine_rights_)
+				compact_completion(txn, completions_, fmt::format("combine-{}", r));
+			txn.commit();
+		}
 
 		vector<pair<uint64_t, vector<pair<uint64_t, uint64_t>>>> intervals;
 		{
@@ -737,6 +746,8 @@ private:
 			return;
 
 		Stopwatch stopwatch = Stopwatch::process();
+		compact_completion(database_, completions_, completions_key, 1);
+
 		if (!preds) {
 			unary_needs_ = subtract_completion(database_, completions_, completions_key, candidates);
 			fmt::print("Found {} of {} gadgets needing {} in {}\n",
@@ -1007,6 +1018,18 @@ private:
 			//TODO: more informative update_SL_predicates return value
 			auto elapsed = stopwatch.elapsed();
 			fmt::print("Updated predicates in {} ({})\n", elapsed.hms(), elapsed.utilization());
+		}
+	}
+
+	void prepare_to_stop(Control disposition) {
+		{
+			auto txn = lmdb::txn::begin(database_);
+			for (uint64_t r : combine_rights_)
+				compact_completion(txn, completions_, fmt::format("combine-{}", r));
+			compact_completion(txn, completions_, "connect");
+			compact_completion(txn, completions_, "close");
+			compact_completion(txn, completions_, "mirror");
+			txn.commit();
 		}
 	}
 

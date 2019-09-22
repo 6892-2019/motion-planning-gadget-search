@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "../select-by-id.hpp"
 #include "../predicates.hpp"
+#include "../completions.hpp"
 #include "intervals.hpp"
 #include "stringutils.hpp"
 #include "stopwatch.hpp"
@@ -48,12 +49,14 @@ int repair_completions_mode(std::string_view db_path, const vector<std::string_v
 	bool list_all = false, rebuild_close = false, rebuild_mirror = false, rebuild_connect = false;
 	vector<std::string_view> rebuild_combine;
 	unsigned int num_threads = 1;
-	vector<std::string_view> dump;
+	vector<std::string_view> dump, compact;
 	for (std::size_t i = 0; i < args.size(); ++i) {
 		if (args[i] == "--list"sv)
 			list_all = true;
 		else if (args[i] == "--dump"sv)
 			dump.push_back(args[++i]);
+		else if (args[i] == "--compact"sv)
+			compact.push_back(args[++i]);
 		else if (args[i] == "--rebuild-close"sv)
 			rebuild_close = true;
 		else if (args[i] == "--rebuild-mirror"sv)
@@ -135,6 +138,14 @@ int repair_completions_mode(std::string_view db_path, const vector<std::string_v
 		}
 		fmt::print("\n");
 		txn.commit();
+	}
+
+	for (std::string_view key : compact) {
+		Stopwatch stopwatch = Stopwatch::process();
+		lmdb::txn txn = lmdb::txn::begin(env);
+		compact_completion(txn, completions, key);
+		txn.commit();
+		fmt::print("compacted {} in {}\n", key, stopwatch.elapsed().hms());
 	}
 
 	if (rebuild_close)
