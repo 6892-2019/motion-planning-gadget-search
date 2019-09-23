@@ -1,57 +1,64 @@
 #ifndef TRANSFORM_REDUCE_HPP
 #define TRANSFORM_REDUCE_HPP
 
+#include "dynarray.hpp"
 #include <vector>
 #include <atomic>
 #include <future>
-
-namespace detail {
-template<typename Result, class Reducer>
-Result transform_reduce_parallel_merge(Reducer reducer, typename std::vector<Result>::iterator first,
-		typename std::vector<Result>::iterator last, unsigned int threads) {
-	std::size_t size = std::distance(first, last);
-	if (size == 0)
-		return {}; //The transform step already relies on Result being default-constructible.
-	if (size == 1)
-		return std::move(*first);
-	if (size == 2)
-		return reducer(std::move(*first), std::move(*(first+1)));
-
-	auto midpoint = first + size/2;
-	if (threads > 1) {
-		unsigned int right_threads = threads/2;
-		std::future<Result> right = std::async(std::launch::async, [=](){
-			return transform_reduce_parallel_merge<Result>(reducer, midpoint, last, right_threads);
-		});
-		Result left = transform_reduce_parallel_merge<Result>(reducer, first, midpoint, threads - right_threads);
-		return reducer(std::move(left), right.get());
-	} else {
-		Result left = transform_reduce_parallel_merge<Result>(reducer, first, midpoint, 1),
-				right = transform_reduce_parallel_merge<Result>(reducer, midpoint, last, 1);
-		return reducer(std::move(left), std::move(right));
-	}
-}
-} //namespace detail
 
 template<typename Task, class Transformer, class Reducer>
 auto transform_reduce(std::vector<Task>&& tasks, unsigned int threads,
 		Transformer&& transformer, Reducer&& reducer) {
 	using Result = decltype(transformer(tasks[0]));
-	std::vector<Result> results_to_merge(tasks.size());
+	if (tasks.empty())
+		return Result{};
+	if (tasks.size() == 1)
+		return std::forward<Transformer>(transformer)(std::move(tasks[0]));
+
+	//results[i] is effectively local to the thread executing task i, until it
+	//publishes a pointer to it in pubs.
+	std::vector<Result> results(tasks.size());
+	//An implicit binary tree (internal nodes only).  Each task publishes a
+	//pointer to results[i] in its parent node, or if the other child already
+	//did, does the reduce and stores in that parent, and so on.  The last
+	//result is stored back into results[0].
+	dynarray<std::atomic<Result*>> pubs(tasks.size()-1); //tasks.size() == 0/1 already handled above
+	for (auto& i : pubs) //why is initializing std::atomic so hard?
+		std::atomic_init(&i, nullptr);
 	std::atomic<std::size_t> task_index_dispenser(0);
 
 	std::vector<std::future<void>> futures;
 	for (std::size_t i = 0; i < threads && i < tasks.size(); ++i)
 		futures.push_back(std::async(std::launch::async, [&]() {
 			Transformer local_transformer = transformer;
-			for (std::size_t index = task_index_dispenser++; index < tasks.size(); index = task_index_dispenser++)
-				results_to_merge[index] = local_transformer(std::move(tasks[index]));
+			Reducer local_reducer = reducer;
+			for (std::size_t index = task_index_dispenser++; index < tasks.size(); index = task_index_dispenser++) {
+				results[index] = local_transformer(std::move(tasks[index]));
+
+				std::size_t tree_node = index + pubs.size();
+				do {
+					std::size_t parent = (tree_node-1)/2, sibling = tree_node + (tree_node & 0x1 ? 1 : -1);
+					Result* old = nullptr;
+					if (pubs[parent].compare_exchange_strong(old, &results[index], std::memory_order::acq_rel))
+						break; //stored our result; other child will continue reduction chain
+
+					if (tree_node < sibling)
+						results[index] = local_reducer(std::move(results[index]), std::move(*old));
+					else
+						results[index] = local_reducer(std::move(*old), std::move(results[index]));
+					//No task threads will read pubs[parent] again, but the
+					//caller thread will read pubs[0] to find the final result.
+					//Synchronization is through waiting on the future, so we
+					//can use relaxed ordering.
+					pubs[parent].store(&results[index], std::memory_order::relaxed);
+					tree_node = parent;
+				} while (tree_node);
+			}
 		}));
 	for (std::size_t i = 0; i < futures.size(); ++i)
 		futures[i].wait();
 
-	return detail::transform_reduce_parallel_merge<Result>(std::forward<Reducer>(reducer),
-			results_to_merge.begin(), results_to_merge.end(), threads);
+	return std::move(*pubs[0].load(std::memory_order::relaxed));
 }
 
 #endif /* TRANSFORM_REDUCE_HPP */
