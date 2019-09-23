@@ -514,7 +514,8 @@ struct EdgeVisitor {
 
 struct merge_unique_vectors {
 template<typename T>
-vector<T> operator()(vector<T>&& left, vector<T>&& right) const {
+vector<T> operator()(vector<T>&& left_rref, vector<T>&& right_rref) const {
+	vector<T> left(std::move(left_rref)), right(std::move(right_rref)); //ensure memory is freed on return
 	vector<T> result;
 	//This is an overestimate, but at most by max(left.size(), right.size()),
 	//because we know each vector is already uniqued.  Empirically, this
