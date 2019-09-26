@@ -1258,22 +1258,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	data_env.open(std::string(db_path).c_str(), MDB_NORDAHEAD); //TODO: flags?
 	if (unsigned int dead_count = check_for_stale_readers(data_env))
 		fmt::print("cleaned up {} stale readers\n", dead_count);
-	uint64_t database_id = 0;
-	std::string_view creator_hostname, creation_timestamp;
-	{
-		lmdb::txn txn = lmdb::txn::begin(data_env, nullptr, MDB_RDONLY);
-		lmdb::dbi meta = lmdb::dbi::open(txn, "meta");
-		std::string_view id_target;
-		if (!meta.get(txn, "id_bytes", id_target)) {
-			fmt::print("ERROR: database {} doesn't have an id?\n", db_path);
-			return 1;
-		}
-		meta.get(txn, "creator_hostname", creator_hostname);
-		meta.get(txn, "creation_timestamp", creation_timestamp);
-		database_id = lmdb::from_sv<uint64_t>(id_target);
-		txn.commit();
-	}
-	fmt::print("Database ID {:x}, created on {} at {}\n", database_id, creator_hostname, creation_timestamp);
+	DatabaseMetadata metadata = read_meta(data_env);
+	fmt::print("Database ID {:x}, created on {} at {}\n", metadata.id, metadata.creator_hostname, metadata.creation_timestamp);
 
 	std::optional<Search> search; //just for lazy init
 	if (!checkpoint_db_path.empty()) {
@@ -1286,9 +1272,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		std::string_view id_target;
 		if (checkpoint_root.get(txn, "parent_id_bytes", id_target)) {
 			uint64_t parent_id = lmdb::from_sv<uint64_t>(id_target);
-			if (parent_id != database_id) {
+			if (parent_id != metadata.id) {
 				fmt::print("ERROR: checkpoint database {} is from id {}, but parent {} has id {}\n",
-						checkpoint_db_path, parent_id, db_path, database_id);
+						checkpoint_db_path, parent_id, db_path, metadata.id);
 				return 1;
 			}
 			txn.commit();
@@ -1298,8 +1284,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				fmt::print("ERROR: checkpoint database {} doesn't have parent id, but also isn't empty\n", checkpoint_db_path);
 				return 1;
 			}
-			checkpoint_root.put(txn, "parent_id_bytes", lmdb::to_sv(database_id));
-			checkpoint_root.put(txn, "parent_id", fmt::to_string(database_id));
+			checkpoint_root.put(txn, "parent_id_bytes", lmdb::to_sv(metadata.id));
+			checkpoint_root.put(txn, "parent_id", fmt::to_string(metadata.id));
 			txn.commit();
 			//run the normal ctor, but also give it the environment
 			search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),

@@ -610,7 +610,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_RDONLY | MDB_NORDAHEAD);
-	lmdb::dbi edges_connect, edges_skinny_connect, edges_close, edges_mirror, completions, meta_db;
+	lmdb::dbi edges_connect, edges_skinny_connect, edges_close, edges_mirror, completions;
 	vector<pair<uint64_t, lmdb::dbi>> edges_combine, edges_skinny_combine; //lazily-initialized later when we know what we're using
 	{
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
@@ -619,22 +619,14 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		edges_close = lmdb::dbi::open(txn, "edges-close");
 		edges_mirror = lmdb::dbi::open(txn, "edges-mirror");
 		completions = lmdb::dbi::open(txn, "completions");
-		meta_db = lmdb::dbi::open(txn, "meta");
 		txn.commit();
 	}
 
 	{
 		std::time_t now = std::time(nullptr);
 		fmt::print("Report on {} started at {:%F %T %Z}\n", db_path, *std::localtime(&now));
-
-		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-		std::string_view database_id, creation_timestamp, creator_hostname;
-		meta_db.get(txn, "id_bytes", database_id);
-		meta_db.get(txn, "creation_timestamp", creation_timestamp);
-		meta_db.get(txn, "creator_hostname", creator_hostname);
-		txn.commit();
-		fmt::print("Database ID {:x}, created on {} at {}\n", lmdb::from_sv<uint64_t>(database_id),
-				creator_hostname, creation_timestamp);
+		DatabaseMetadata meta = read_meta(env);
+		fmt::print("Database ID {:x}, created on {} at {}\n", meta.id, meta.creator_hostname, meta.creation_timestamp);
 	}
 
 	GadgetSet source_set = parse_gid_specs(source_specs);

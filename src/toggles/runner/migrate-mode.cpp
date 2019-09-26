@@ -1,4 +1,5 @@
 #include "precompiled.hpp"
+#include "../toggles-shared.hpp"
 #include "lmdb++.h"
 #include <sys/mman.h>
 
@@ -27,10 +28,8 @@ void migrate_gadget_index(lmdb::env& env, std::string_view temp_dir) {
 			return;
 		}
 
-		lmdb::dbi meta = lmdb::dbi::open(txn, "meta");
-		std::string_view database_id;
-		meta.get(txn, "id_bytes", database_id);
-		std::string filename = fmt::format("{}/gadget_index-{:x}.dat", temp_dir, lmdb::from_sv<uint64_t>(database_id));
+		DatabaseMetadata meta = read_meta(env);
+		std::string filename = fmt::format("{}/gadget_index-{:x}.dat", temp_dir, meta.id);
 		hash_file = std::fopen(filename.c_str(), "r+b");
 
 		if (!hash_file) {

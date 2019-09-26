@@ -274,5 +274,18 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_skinny_edges(lmdb::e
 		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources,
 		unsigned int threads = 1);
 
+
+
+struct DatabaseMetadata {
+	uint64_t id;
+	std::string creator_hostname;
+	std::time_t creation_time;
+	std::string creation_timestamp;
+};
+
+DatabaseMetadata read_meta(lmdb::env& env);
+
+
+
 #endif /* TOGGLES_SHARED_HPP */
 

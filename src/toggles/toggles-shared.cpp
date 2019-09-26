@@ -132,3 +132,22 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_skinny_edges(lmdb::e
 				interval_union_vector());
 	}
 }
+
+
+
+DatabaseMetadata read_meta(lmdb::env& env) {
+	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+	lmdb::dbi meta = lmdb::dbi::open(txn, "meta");
+	DatabaseMetadata data;
+	std::string_view value;
+	meta.get(txn, "id_bytes", value);
+	data.id = lmdb::from_sv<uint64_t>(value);
+	meta.get(txn, "creator_hostname", value);
+	data.creator_hostname.assign(value);
+	meta.get(txn, "creation_time_bytes", value);
+	data.creation_time = lmdb::from_sv<std::time_t>(value);
+	meta.get(txn, "creation_timestamp", value);
+	data.creation_timestamp.assign(value);
+	txn.commit();
+	return data;
+}
