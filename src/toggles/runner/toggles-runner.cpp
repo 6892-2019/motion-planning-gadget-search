@@ -8,7 +8,7 @@ void jemalloc_tuning();
 //defined in sync.cpp
 int sync_mode(std::string_view db_path, const vector<std::string_view>& files);
 //defined in dump-gadget-mode.cpp
-int dump_gadget_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
+int dump_gadget_mode(std::string_view db_path, vector<std::string_view>& gadget_spec);
 //defined in incoming-edges-mode.cpp
 int incoming_edges_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
 //defned in update-predicates-mode.cpp
