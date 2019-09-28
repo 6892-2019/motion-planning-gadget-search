@@ -274,14 +274,23 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 			//custom names.
 			bool custom_names = false;
 			if (data["state-names"] && data["state-names"].IsMap()) {
-				custom_names = true;
-				for (auto nit = data["state-names"].begin(); nit != data["state-names"].end(); ++nit) {
-					unsigned int number = nit->first.as<unsigned int>();
-					state_names[number] = nit->second.as<std::string>();
-					if (!pragma.allow_pruning_named_states && std::find_if(morphs.begin(), morphs.end(),
-							[number](const CanonicalizeRecord& r){return r.gadget_state == number;}) == morphs.end())
-						throw std::runtime_error(fmt::format("named state was pruned {} {} {} {}",
-									gadget_name, number, state_names[number], morphs.size()));
+				//As a special exception, if there is a single key and its value
+				//is null, that state is registered using the normal name of the
+				//gadget and the other states are not named.
+				if (data["state-names"].size() == 1 && data["state-names"].begin()->second.IsNull()) {
+					//Still need to put something in the map to know which state it is.
+					unsigned int number = data["state-names"].begin()->first.as<unsigned int>();
+					state_names[number] = "BUGBUGBUG";
+				} else {
+					custom_names = true;
+					for (auto nit = data["state-names"].begin(); nit != data["state-names"].end(); ++nit) {
+						unsigned int number = nit->first.as<unsigned int>();
+						state_names[number] = nit->second.as<std::string>();
+						if (!pragma.allow_pruning_named_states && std::find_if(morphs.begin(), morphs.end(),
+								[number](const CanonicalizeRecord& r){return r.gadget_state == number;}) == morphs.end())
+							throw std::runtime_error(fmt::format("named state was pruned {} {} {} {}",
+										gadget_name, number, state_names[number], morphs.size()));
+					}
 				}
 			}
 			//could allow a sequence of integers specifying states to give the default integer names to
