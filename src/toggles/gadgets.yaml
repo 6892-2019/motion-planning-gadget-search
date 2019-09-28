@@ -206,6 +206,9 @@ gadgets:
              [0, 11, 14, 0], [0, 11, 15, 0], [0, 12, 13, 0], [0, 12, 14, 0],
              [0, 12, 15, 0], [0, 13, 14, 0], [0, 13, 15, 0], [0, 14, 15, 0]]
 
+  deterministic-split:
+    uedges: [[0, 0, 1, 1], [0, 2, 0, 1]]
+
 #for alpha in range(3, 17):
 #  digits = str(len(str(alpha-1)))
 #  format_str = '[0, {:'+digits+'d}, {:'+digits+'d}, 1]'
@@ -329,10 +332,26 @@ gadgets:
     - [0, 11, 6, 1]
     - [0, 10, 7, 1]
     - [0, 9,  8, 1]
-  locking-2-toggle:
+
+  locking-2-toggle-parallel:
     uedges: [[0, 0, 1, 1], [0, 3, 2, 2]]
-  deterministic-split:
-    uedges: [[0, 0, 1, 1], [0, 2, 0, 1]]
+    state-names: {0: 'open', 1: 'top', 2: 'bottom'}
+  locking-2-toggle-antiparallel:
+    uedges: [[0, 0, 1, 1], [0, 2, 3, 2]]
+    state-names: {0: 'open', 1: 'locked'} # state 2 is a rotation of state 1
+  locking-2-toggle-crossing:
+    uedges: [[0, 0, 2, 1], [0, 3, 1, 2]]
+    state-names: {0: 'open', 1: 'down', 2: 'up'}
+
+  alternating-toggle-toggle-parallel:
+    dedges: [[0, 0, 1, 1], [1, 1, 0, 2], [2, 3, 2, 3], [3, 2, 3, 0]]
+    state-names: {0: 'top-right', 1: 'top-left', 2: 'bottom-right', 3: 'bottom-left'}
+  alternating-toggle-toggle-antiparallel:
+    dedges: [[0, 0, 1, 1], [1, 1, 0, 2], [2, 2, 3, 3], [3, 3, 2, 0]]
+    state-names: {0: 'right', 1: 'left'}
+  alternating-toggle-toggle-crossing:
+    dedges: [[0, 0, 2, 1], [1, 2, 0, 2], [2, 3, 1, 3], [3, 1, 3, 0]]
+    state-names: {0: 'down-right', 1: 'up-left', 2: 'up-right', 3: 'down-left'}
 
 # These gadgets are from a sheet of paper Jayson showed me after a 6.892 class.
 # Two repeated gadgets have been removed; numbering is otherwise row-major.
@@ -474,5 +493,16 @@ gadgets:
   undirected-self-closing-door:
     dedges: [[0, 0, 1, 1], [0, 1, 0, 1], [0, 2, 2, 0], [1, 2, 2, 0]]
     state-names: {0: open, 1: closed}
+
+  xor-crossover-directed:
+    dedges: [[0, 0, 2, 1], [1, 0, 2, 1], [0, 3, 1, 2], [2, 3, 1, 2]]
+    state-names: {0: null}
+  xor-crossover-undirected:
+    uedges: [[0, 0, 2, 1], [1, 0, 2, 1], [0, 3, 1, 2], [2, 3, 1, 2]]
+    state-names: {0: null}
+  xor-crossover-halfdirected:
+    uedges: [[0, 0, 2, 1], [1, 0, 2, 1]]
+    dedges: [[0, 3, 1, 2], [2, 3, 1, 2]]
+    state-names: {0: null}
 
 aliases: {}
