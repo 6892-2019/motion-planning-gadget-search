@@ -28,6 +28,18 @@ struct proj_equal {
 	}
 };
 
+template<int... I>
+struct proj_not_equal {
+	template<typename T>
+	bool operator()(const T& l, const T& r) const {
+		using std::get;
+		if constexpr(sizeof...(I) == 1)
+			return get<I...>(l) != get<I...>(r);
+		else
+			return std::tie(get<I>(l)...) != std::tie(get<I>(r)...);
+	}
+};
+
 template<int I>
 struct coord_less_left {
 	template<typename T, typename U>

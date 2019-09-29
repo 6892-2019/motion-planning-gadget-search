@@ -11,6 +11,8 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& files);
 int dump_gadget_mode(std::string_view db_path, vector<std::string_view>& gadget_spec);
 //defined in incoming-edges-mode.cpp
 int incoming_edges_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
+//defined in invert-mode.cpp
+int invert_index_mode(std::string_view db_path, std::vector<std::string_view>& args);
 //defned in update-predicates-mode.cpp
 int update_predicates_mode(std::string_view db_path, const vector<std::string_view>& more_arguments);
 //defined in repair-completions-mode.cpp
@@ -48,6 +50,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return dump_gadget_mode(db_path, positionals);
 	else if (mode == "incoming-edges"sv)
 		return incoming_edges_mode(db_path, positionals);
+	else if (mode == "invert-index"sv)
+		return invert_index_mode(db_path, positionals);
 	else if (mode == "predicates"sv)
 		return update_predicates_mode(db_path, positionals);
 	else if (mode == "completions"sv)

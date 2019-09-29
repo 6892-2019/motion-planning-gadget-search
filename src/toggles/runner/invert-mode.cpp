@@ -1,0 +1,339 @@
+#include "precompiled.hpp"
+#include "../toggles-shared.hpp"
+#include "../select-by-id.hpp"
+#include "../anyprov.hpp" //for EdgeKind
+#include "intervals.hpp"
+#include "varint.hpp"
+#include "transform_reduce.hpp"
+#include "stringutils.hpp"
+#include "proj_compare.hpp"
+#include <deque>
+#include <ctime>
+
+using std::vector;
+using std::deque;
+using std::pair;
+using std::uint64_t;
+using std::uint32_t;
+using namespace std::literals::string_view_literals;
+
+namespace {
+std::string_view env_basename(std::string_view path) {
+	if (path.substr(path.size()-1) == "/"sv)
+		path.remove_suffix(1);
+	if (path.substr(path.size()-4) == ".mdb"sv)
+		path.remove_suffix(4);
+	auto start = path.rfind('/');
+	if (start != std::string_view::npos)
+		path.remove_prefix(start+1);
+	return path;
+}
+
+struct Header {
+	std::size_t header_size;
+	uint64_t database_id;
+	std::time_t timestamp;
+	EdgeKind kind; //cannot be EdgeKind::source
+	uint64_t combine_right; //or 0 if not a combine database
+	unsigned int id_bytes, offset_bytes;
+	std::size_t offsets; //the number of following Offset structures
+};
+static_assert(std::is_standard_layout_v<Header>, "Header's layout not robust");
+
+void fill_header_from_name(Header& header, std::string_view name) {
+	header.combine_right = 0;
+	if (auto i = name.find("combine"sv); i != std::string_view::npos) {
+		header.kind = EdgeKind::combine;
+		i += "combine-"sv.size();
+		header.combine_right = to_uint64(name.substr(i, std::string_view::npos));
+	} else if (name.find("connect"sv) != std::string_view::npos)
+		header.kind = EdgeKind::connect;
+	else if (name.find("close"sv) != std::string_view::npos)
+		header.kind = EdgeKind::close;
+	else if (name.find("mirror"sv) != std::string_view::npos)
+		header.kind = EdgeKind::mirror;
+	else
+		throw std::logic_error("couldn't parse kind from "+std::string(name));
+}
+
+template<unsigned int X, unsigned int Y>
+struct Offset {
+	//little-endian
+	std::array<std::byte, X> id_;
+	std::array<std::byte, Y> offset_; //offset from start of edge lists, after all Offset structures
+	uint64_t id() const {
+		uint64_t id = 0;
+		std::memcpy(&id, id_.data(), id_.size());
+		return id;
+	}
+	std::size_t offset() const {
+		std::size_t offset = 0;
+		std::memcpy(&offset, offset_.data(), offset_.size());
+		return offset;
+	}
+};
+
+struct concatenate_vectors {
+	template<typename T>
+	vector<T> operator()(vector<T>&& left_rref, vector<T>&& right_rref) {
+		//I'm not sure if it's safe to return the left argument object, because
+		//that might result in a self-move assignment.  Moves are cheap, so be
+		//safe and move into a fresh object.
+		vector<T> left(std::move(left_rref)), right(std::move(right_rref));
+		left.insert(left.end(), std::move_iterator(right.begin()), std::move_iterator(right.end()));
+		return left;
+	}
+};
+
+//TODO: use deque with larger page sizes; we'll have millions of objects so the default 512 is bad
+vector<deque<pair<uint32_t, uint32_t>>> invert_skinny(lmdb::env& env, lmdb::dbi& database, unsigned int threads) {
+	uint64_t max_id = get_current_max_gadget_id(env);
+	std::size_t chunk_size = std::min<std::size_t>(max_id / (threads * 10), 1000);
+	vector<pair<uint64_t, uint64_t>> every_gadget_ever = {{1, max_id+1}};
+	return transform_reduce(interval_chunk(every_gadget_ever.begin(), every_gadget_ever.end(), chunk_size), threads,
+			[&](vector<pair<uint64_t, uint64_t>> chunk) {
+				vector<deque<pair<uint32_t, uint32_t>>> ret(1);
+				visit_skinny_edges(env, database, std::move(chunk), [&inverted=ret[0]](uint64_t input, uint64_t output) {
+					inverted.emplace_back(numeric_cast<uint32_t>(output), numeric_cast<uint32_t>(input));
+					return VisitEdgeResult::proceed;
+				});
+				if (ret.front().empty())
+					ret.pop_back();
+				return ret;
+			}, concatenate_vectors());
+}
+
+template<typename Edge>
+vector<deque<pair<uint32_t, uint32_t>>> invert_full(lmdb::env& env, lmdb::dbi& database, unsigned int threads) {
+	uint64_t max_id = get_current_max_gadget_id(env);
+	std::size_t chunk_size = std::min<std::size_t>(max_id / (threads * 10), 1000);
+	vector<pair<uint64_t, uint64_t>> every_gadget_ever = {{1, max_id+1}};
+	return transform_reduce(interval_chunk(every_gadget_ever.begin(), every_gadget_ever.end(), chunk_size), threads,
+			[&](vector<pair<uint64_t, uint64_t>> chunk) {
+				vector<deque<pair<uint32_t, uint32_t>>> ret(1);
+				visit_edges<Edge>(env, database, std::move(chunk), [&inverted=ret[0]](uint64_t input, const Edge& e) {
+					inverted.emplace_back(numeric_cast<uint32_t>(e.output), numeric_cast<uint32_t>(input));
+					return VisitEdgeResult::proceed;
+				});
+				if (ret.front().empty())
+					ret.pop_back();
+				return ret;
+			}, concatenate_vectors());
+}
+
+struct merge_unique_deques {
+	template<typename T>
+	deque<T> operator()(deque<T>&& left_rref, deque<T>&& right_rref) const {
+		//ensure memory is freed on return
+		//TODO: may not be necessary after pop_front_iterator? they'll get emptied
+		deque<T> left(std::move(left_rref)), right(std::move(right_rref));
+		deque<T> result; //no need to reserve because deque grows incrementally
+		//TODO: create and use pop_front_iterator to release memory gradually
+		merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(result));
+		return result;
+	}
+};
+
+deque<pair<uint32_t, uint32_t>> sort_and_merge(vector<deque<pair<uint32_t, uint32_t>>>&& data, unsigned int threads) {
+	return transform_reduce(std::move(data), threads, [](deque<pair<uint32_t, uint32_t>> block) {
+		std::sort(block.begin(), block.end());
+		return block;
+	}, merge_unique_deques());
+}
+
+//If we want to parallelize encoding, this will split into appropriate groups.
+//But then we can't gradually release memory with pop_front().
+//vector<deque<pair<uint32_t, uint32_t>>::const_iterator> chunk_respecting_groups(
+//		deque<pair<uint32_t, uint32_t>>::const_iterator first,
+//		deque<pair<uint32_t, uint32_t>>::const_iterator last, unsigned int min_chunk_size) {
+//	vector<deque<pair<uint32_t, uint32_t>>::const_iterator> ret;
+//	ret.push_back(first);
+//	while (first != last) {
+//		first += std::min<std::ptrdiff_t>(min_chunk_size, std::distance(first, last));
+//		first = std::adjacent_find(first, last, proj_not_equal<0>());
+//		//adjacent_find returns a pointer to the first element, but we want past-the-end
+//		if (first != last) ++first;
+//		ret.push_back(first);
+//	}
+//	return ret;
+//}
+
+//We can't store the data in a deque because we can only write contiguous data
+//to files, but we want to grow memory gradually (as we draw down the edges), so
+//we do our own chunking.
+struct CodedChunk {
+	vector<pair<uint32_t, uint32_t>> id_length;
+	vector<std::byte> data;
+};
+constexpr std::size_t chunk_datalen = 1024 * 1024; //1MB
+vector<CodedChunk> encode_chunked(deque<pair<uint32_t, uint32_t>> edges) {
+	vector<CodedChunk> chunks;
+	CodedChunk cur;
+	vector<std::byte> buf;
+	while (!edges.empty()) {
+		auto id = edges.front().first;
+		auto first = edges.begin(), last = std::find_if(first, edges.end(), [id](const auto& p){return p.first != id;});
+
+		uint32_t prev = 0;
+		buf.resize(std::distance(first, last) * (sizeof(prev)+1)); //ensure enough space, but p determines actual length
+		std::byte* p = buf.data();
+		for (auto i = first; i != last; ++i) {
+			varint64::write(p, i->second - prev); //delta-encode
+			prev = i->second;
+		}
+
+		std::ptrdiff_t length = std::distance(buf.data(), p);
+		if (cur.data.size() + length > chunk_datalen) {
+			chunks.push_back(std::move(cur));
+			cur.id_length.clear();
+			cur.data.clear();
+		}
+		cur.id_length.emplace_back(id, numeric_cast<uint32_t>(length));
+		cur.data.insert(cur.data.end(), buf.data(), p);
+		edges.erase(first, last);
+	}
+	if (!cur.id_length.empty())
+		chunks.push_back(std::move(cur));
+	return chunks;
+}
+
+unsigned int necessary_bytes(std::size_t x) {
+	unsigned int i = 1;
+	while (x /= 256) ++i;
+	return i;
+}
+
+bool write_fully(int fd, const void* data_any, std::size_t length) {
+	const char* data = static_cast<const char*>(data_any); //avoid 'arithmetic on void*' warning
+	ssize_t written;
+	while (length) {
+		do {
+			written = write(fd, data, length);
+		} while ((written < 0) && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK));
+		if (written < 0) return false;
+		length -= written;
+		data += written;
+	}
+	return true;
+}
+
+void write_to_file(const std::string& filename, const Header& header, vector<CodedChunk> chunks) {
+	FILE* file = std::fopen(filename.c_str(), "wb");
+	if (!file) {
+		fmt::print(stderr, "error opening {} {}\n", filename, errno);
+		std::exit(1);
+	}
+
+	std::fwrite(&header, sizeof(Header), 1, file);
+
+	std::size_t offset;
+	for (const CodedChunk& c : chunks) {
+		for (pair<uint32_t, uint32_t> p : c.id_length) {
+			std::fwrite(&p.first, 1, header.id_bytes, file);
+			std::fwrite(&offset, 1, header.offset_bytes, file);
+			offset += p.second;
+		}
+	}
+
+	std::fflush(file);
+	int fd = fileno(file);
+	for (const CodedChunk& c : chunks)
+		if (!write_fully(fd, c.data.data(), c.data.size())) {
+			fmt::print(stderr, "failed while writing data to {}\n", filename);
+			std::exit(1);
+		}
+
+	if (std::ferror(file)) {
+		fmt::print(stderr, "some kind of error writing {}\n", filename);
+		std::exit(1);
+	}
+	std::fclose(file);
+}
+} //end anonymous namespace
+
+int invert_index_mode(std::string_view db_path, std::vector<std::string_view>& args) {
+	std::string_view output_dir;
+	vector<std::string_view> tables_to_invert;
+	//max I/O parallelism (reduced by env's max readers); sort parallelism equal to threads
+	unsigned int read_threads = std::numeric_limits<unsigned int>::max(),
+			cpu_threads = std::thread::hardware_concurrency();
+
+	for (std::size_t i = 0; i < args.size(); ++i)
+		if (args[i] == "--output-dir"sv || args[i] == "--output"sv)
+			output_dir = args[++i];
+		else if (args[i] == "--threads"sv)
+			read_threads = cpu_threads = to_uint(args[++i]);
+		else if (args[i] == "--read-threads"sv)
+			read_threads = to_uint(args[++i]);
+		else if (args[i] == "--cpu-threads"sv)
+			cpu_threads = to_uint(args[++i]);
+		else
+			tables_to_invert.push_back(args[i]);
+
+	if (output_dir.empty()) {
+		fmt::print(stderr, "no output directory specified\n");
+		return 1;
+	}
+
+	lmdb::env env = lmdb::env::create();
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(std::string(db_path).c_str(), MDB_NORDAHEAD);
+	unsigned int lmdb_max_readers = 0;
+	lmdb::env_get_max_readers(env.handle(), &lmdb_max_readers);
+	read_threads = std::min(read_threads, lmdb_max_readers);
+	DatabaseMetadata meta = read_meta(env);
+	vector<lmdb::dbi> databases;
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		for (std::string_view t : tables_to_invert)
+			databases.push_back(lmdb::dbi::open(txn, t.data()));
+		txn.commit();
+	}
+
+	for (std::size_t overall_index = 0; overall_index < tables_to_invert.size(); ++overall_index) {
+		Header header;
+		std::memset(&header, 0, sizeof(Header));
+		header.header_size = sizeof(Header);
+		header.database_id = meta.id;
+		header.timestamp = std::time(nullptr);
+		std::string_view database_name = tables_to_invert[overall_index];
+		fill_header_from_name(header, database_name);
+
+		lmdb::dbi& database = databases[overall_index];
+		vector<deque<pair<uint32_t, uint32_t>>> unsorted_edges;
+		if (database_name.find("skinny"sv) != std::string_view::npos)
+			unsorted_edges = invert_skinny(env, database, read_threads);
+		else if (header.kind == EdgeKind::combine)
+			unsorted_edges = invert_full<CombineEdge>(env, database, read_threads);
+		else if (header.kind == EdgeKind::connect)
+			unsorted_edges = invert_full<ConnectEdge>(env, database, read_threads);
+		else if (header.kind == EdgeKind::close || header.kind == EdgeKind::mirror)
+			unsorted_edges = invert_full<SimpleEdge>(env, database, read_threads);
+
+		deque<pair<uint32_t, uint32_t>> sorted_edges = sort_and_merge(std::move(unsorted_edges), cpu_threads);
+
+		vector<CodedChunk> coded_chunks = encode_chunked(std::move(sorted_edges));
+		std::size_t total_edgelist_length = 0;
+		header.offsets = 0;
+		for (const CodedChunk& c : coded_chunks) {
+			total_edgelist_length += c.data.size();
+			header.offsets += c.id_length.size();
+		}
+		uint32_t max_id = coded_chunks.back().id_length.back().first;
+		header.id_bytes = necessary_bytes(max_id);
+		//This is a slight overestimation, as the last offset is implied by the
+		//end of the file, not stored.
+		header.offset_bytes = necessary_bytes(total_edgelist_length);
+
+		if (database_name.compare(0, "edges-skinny-"sv.size(), "edges-skinny-"sv) == 0)
+			database_name.remove_prefix("edges-skinny-"sv.size());
+		else if (database_name.compare(0, "edges-"sv.size(), "edges-"sv) == 0)
+			database_name.remove_prefix("edges-"sv.size());
+		std::string filename = fmt::format("{}/invert-{}-{:x}-{}.dat",
+				output_dir, env_basename(db_path), header.database_id, database_name);
+		write_to_file(filename, header, std::move(coded_chunks));
+		fmt::print("wrote {}\n", filename);
+	}
+	return 0;
+}
