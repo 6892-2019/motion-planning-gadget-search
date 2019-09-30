@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "../toggles-shared.hpp"
 #include "../select-by-id.hpp"
+#include "../gadget-set.hpp"
 #include "../anyprov.hpp" //for EdgeKind
 #include "intervals.hpp"
 #include "varint.hpp"
@@ -10,6 +11,8 @@
 #include <deque>
 #include <ctime>
 #include <fcntl.h> //for fallocate
+#include <sys/mman.h> //for mmap
+#include <sys/stat.h>
 
 using std::vector;
 using std::deque;
@@ -57,8 +60,10 @@ void fill_header_from_name(Header& header, std::string_view name) {
 		throw std::logic_error("couldn't parse kind from "+std::string(name));
 }
 
+struct OffsetBase {};
+
 template<unsigned int X, unsigned int Y>
-struct Offset {
+struct Offset : public OffsetBase {
 	//little-endian
 	std::array<std::byte, X> id_;
 	std::array<std::byte, Y> offset_; //offset from start of edge lists, after all Offset structures
@@ -376,5 +381,170 @@ int invert_index_mode(std::string_view db_path, std::vector<std::string_view>& a
 		write_to_file(filename, header, std::move(coded_chunks));
 		fmt::print("wrote {}\n", filename);
 	}
+	return 0;
+}
+
+namespace {
+struct Mapping {
+	int fd;
+	std::size_t length;
+	const Header* header; //also the beginning of the mapping
+	const OffsetBase* offset_begin, *offset_end;
+	const std::byte* edges_begin, *edges_end;
+};
+
+pair<const std::byte*, std::size_t> do_mmap(int fd) {
+	struct stat s;
+	if (fstat(fd, &s) == -1) {
+		fmt::print(stderr, "error: fstat problem: {} ({})\n", strerror(errno), errno);
+		std::exit(1);
+	}
+	const void* addr = mmap(nullptr, s.st_size, PROT_READ, MAP_SHARED_VALIDATE, fd, 0);
+	if (addr == MAP_FAILED) {
+		fmt::print(stderr, "error: failed to map file (already opened): {} ({})\n", strerror(errno), errno);
+		std::exit(1);
+	}
+	return {reinterpret_cast<const std::byte*>(addr), s.st_size};
+}
+
+struct offset_id_compare {
+	template<unsigned int X, unsigned int Y>
+	bool operator()(const Offset<X, Y>& o, uint64_t needle) const {
+		return o.id() < needle;
+	}
+};
+
+template<unsigned int X, unsigned int Y>
+pair<std::size_t, std::size_t> process_offsets(const Mapping& map, uint64_t needle) {
+	const Offset<X, Y>* begin = static_cast<const Offset<X, Y>*>(map.offset_begin);
+	const Offset<X, Y>* end = static_cast<const Offset<X, Y>*>(map.offset_end);
+	const Offset<X, Y>* p = std::lower_bound(begin, end, needle, offset_id_compare());
+	if (p == end || p->id() != needle)
+		return {0, 0};
+	if ((p+1) == end)
+		return {p->offset(), 0};
+	return {p->offset(), (p+1)->offset()};
+}
+
+pair<const std::byte*, const std::byte*> lookup_edge_range(const Mapping& map, uint64_t needle) {
+	pair<std::size_t, std::size_t> offsets;
+	//We'll always use the same version for a given mapping, so we could store
+	//a function pointer in the Mapping struct to skip this switch table.
+	switch (map.header->id_bytes << 3 | map.header->offset_bytes) {
+#define LOOKUP_EDGE_RANGE_CASE(X, Y) case (X << 3 | Y): offsets = process_offsets<X, Y>(map, needle); break;
+		LOOKUP_EDGE_RANGE_CASE(1, 1)
+		LOOKUP_EDGE_RANGE_CASE(1, 2)
+		LOOKUP_EDGE_RANGE_CASE(1, 3)
+		LOOKUP_EDGE_RANGE_CASE(1, 4)
+		LOOKUP_EDGE_RANGE_CASE(1, 5)
+		LOOKUP_EDGE_RANGE_CASE(2, 1)
+		LOOKUP_EDGE_RANGE_CASE(2, 2)
+		LOOKUP_EDGE_RANGE_CASE(2, 3)
+		LOOKUP_EDGE_RANGE_CASE(2, 4)
+		LOOKUP_EDGE_RANGE_CASE(2, 5)
+		LOOKUP_EDGE_RANGE_CASE(3, 1)
+		LOOKUP_EDGE_RANGE_CASE(3, 2)
+		LOOKUP_EDGE_RANGE_CASE(3, 3)
+		LOOKUP_EDGE_RANGE_CASE(3, 4)
+		LOOKUP_EDGE_RANGE_CASE(3, 5)
+		LOOKUP_EDGE_RANGE_CASE(4, 1)
+		LOOKUP_EDGE_RANGE_CASE(4, 2)
+		LOOKUP_EDGE_RANGE_CASE(4, 3)
+		LOOKUP_EDGE_RANGE_CASE(4, 4)
+		LOOKUP_EDGE_RANGE_CASE(4, 5)
+		LOOKUP_EDGE_RANGE_CASE(5, 1)
+		LOOKUP_EDGE_RANGE_CASE(5, 2)
+		LOOKUP_EDGE_RANGE_CASE(5, 3)
+		LOOKUP_EDGE_RANGE_CASE(5, 4)
+		LOOKUP_EDGE_RANGE_CASE(5, 5)
+#undef LOOKUP_EDGE_RANGE_CASE
+		default:
+			throw std::logic_error(fmt::format("unhandled case in lookup_edge_range: {} {}",
+					map.header->id_bytes, map.header->offset_bytes));
+	}
+
+	if (!offsets.first)
+		return {nullptr, nullptr};
+	if (!offsets.second)
+		return {map.edges_begin+offsets.first, map.edges_end};
+	return {map.edges_begin+offsets.first, map.edges_begin+offsets.second};
+}
+}//end anonymous namespace
+
+int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& args) {
+	auto separator = std::find(args.begin(), args.end(), "--"sv);
+	if (separator == args.end()) {
+		fmt::print(stderr, "error: separator argument -- not found\n");
+		return 1;
+	} else if (separator == args.begin()) {
+		fmt::print(stderr, "error: no index files given\n");
+		return 1;
+	} else if (std::next(separator) == args.end()) {
+		fmt::print(stderr, "error: no search sources given\n");
+		return 1;
+	}
+
+	lmdb::env env = lmdb::env::create();
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(std::string(db_path).c_str(), MDB_NORDAHEAD);
+	DatabaseMetadata meta = read_meta(env);
+
+	vector<Mapping> mappings;
+	for (auto file_it = args.begin(); file_it != separator; ++file_it) {
+		std::string filename(*file_it); //ensure null terminated
+		Mapping mapping;
+		mapping.fd = open(filename.c_str(), O_RDONLY);
+		if (mapping.fd == -1) {
+			fmt::print(stderr, "error opening {}: {} ({})", filename, strerror(errno), errno);
+			return 1;
+		}
+		pair<const std::byte*, std::size_t> raw_map = do_mmap(mapping.fd);
+		mapping.length = raw_map.second;
+		mapping.header = reinterpret_cast<const Header*>(raw_map.first);
+		mapping.offset_begin = reinterpret_cast<const OffsetBase*>(raw_map.first + mapping.header->header_size);
+		mapping.edges_begin = reinterpret_cast<const std::byte*>(mapping.offset_begin) +
+				(mapping.header->offsets * (mapping.header->id_bytes + mapping.header->offset_bytes));
+		mapping.offset_end = reinterpret_cast<const OffsetBase*>(mapping.edges_begin);
+		mapping.edges_end = raw_map.first + raw_map.second;
+		mappings.push_back(mapping);
+
+		if (madvise(const_cast<std::byte*>(raw_map.first), mapping.length, MADV_RANDOM))
+			fmt::print(stderr, "warning: failed to madvise: {} ({})\n", strerror(errno), errno);
+
+		if (mapping.header->database_id != meta.id) {
+			fmt::print(stderr, "error: using database id {:x} but {} is from {:x}\n",
+					meta.id, filename, mapping.header->database_id);
+			return 1;
+		}
+	}
+
+	vector<std::string_view> gadget_spec(std::next(separator), args.end());
+	GadgetSet gadget_set = parse_gid_specs(gadget_spec);
+	vector<uint64_t> sources = collect_initial_gadget_set(env, gadget_set);
+
+	//We could use threads here, but I think the inverted indices will be small
+	//enough to be fully prefetched.  If not, or we want to lazily load them for
+	//some other reason, we should definitely use threads to get more in-flight
+	//page faults.
+	deque<uint64_t> worklist(sources.begin(), sources.end());
+	tsl::hopscotch_set<uint64_t, farmhash_hash> closed(worklist.begin(), worklist.end());
+	while (!worklist.empty()) {
+		uint64_t cur = worklist.front();
+		worklist.pop_front();
+		for (const Mapping& m : mappings) {
+			pair<const std::byte*, const std::byte*> range = lookup_edge_range(m, cur);
+			uint64_t prev = 0;
+			while (range.first != range.second) { //handles nullptr pairs
+				uint64_t next = prev + varint64::read(range.first); //delta-decode
+				if (closed.insert(next).second) {
+					worklist.push_back(next);
+					fmt::print("{}\n", next);
+				}
+				prev = next;
+			}
+		}
+	}
+
 	return 0;
 }
