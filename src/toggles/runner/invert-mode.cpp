@@ -123,10 +123,16 @@ vector<deque<pair<uint32_t, uint32_t>>> invert_full(lmdb::env& env, lmdb::dbi& d
 				});
 				if (ret.front().empty())
 					ret.pop_back();
-				else
+				else {
 					//Skinny edge tables are deduplicated, but full edge tables
-					//are not, and merge_deques expects uniqueness.
+					//are not.  Sort and unique to release memory now, and so
+					//merge_deques can assume uniqueness.  (It may be faster to
+					//sort only blocks with the same input (.second), but
+					//tracking the block boundaries is awkward with the
+					//visitation interface.)
+					std::sort(ret.front().begin(), ret.front().end());
 					ret.front().erase(std::unique(ret.front().begin(), ret.front().end()), ret.front().end());
+				}
 				return ret;
 			}, concatenate_vectors());
 }
