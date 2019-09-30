@@ -118,6 +118,10 @@ vector<deque<pair<uint32_t, uint32_t>>> invert_full(lmdb::env& env, lmdb::dbi& d
 				});
 				if (ret.front().empty())
 					ret.pop_back();
+				else
+					//Skinny edge tables are deduplicated, but full edge tables
+					//are not, and merge_deques expects uniqueness.
+					ret.front().erase(std::unique(ret.front().begin(), ret.front().end()), ret.front().end());
 				return ret;
 			}, concatenate_vectors());
 }
