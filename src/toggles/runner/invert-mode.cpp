@@ -9,6 +9,7 @@
 #include "proj_compare.hpp"
 #include <deque>
 #include <ctime>
+#include <fcntl.h> //for fallocate
 
 using std::vector;
 using std::deque;
@@ -218,11 +219,28 @@ bool write_fully(int fd, const void* data_any, std::size_t length) {
 }
 
 void write_to_file(const std::string& filename, const Header& header, vector<CodedChunk> chunks) {
+	std::size_t total_length = sizeof(Header);
+	//We could merge this loop into the caller's loop over the chunks.
+	for (const CodedChunk& c : chunks) {
+		total_length += c.id_length.size() * (header.id_bytes + header.offset_bytes);
+		total_length += c.data.size();
+	}
+
 	FILE* file = std::fopen(filename.c_str(), "wb");
 	if (!file) {
 		fmt::print(stderr, "error opening {} {}\n", filename, errno);
 		std::exit(1);
 	}
+
+	int fd = fileno(file);
+	if (fallocate(fd, 0, 0, total_length))
+		if (errno == EOPNOTSUPP)
+			fmt::print(stderr, "warning: fallocate({}) not supported\n", filename);
+		else {
+			fmt::print(stderr, "error fallocate({}, 0, 0, {}) for {}\n", fd, total_length, filename);
+			std::exit(1);
+		}
+
 
 	std::fwrite(&header, sizeof(Header), 1, file);
 
@@ -235,8 +253,7 @@ void write_to_file(const std::string& filename, const Header& header, vector<Cod
 		}
 	}
 
-	std::fflush(file);
-	int fd = fileno(file);
+	std::fflush(file); //switching to syscall API; flush libc buffers
 	for (const CodedChunk& c : chunks)
 		if (!write_fully(fd, c.data.data(), c.data.size())) {
 			fmt::print(stderr, "failed while writing data to {}\n", filename);
