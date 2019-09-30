@@ -122,15 +122,32 @@ vector<deque<pair<uint32_t, uint32_t>>> invert_full(lmdb::env& env, lmdb::dbi& d
 			}, concatenate_vectors());
 }
 
-struct merge_unique_deques {
+struct merge_deques {
 	template<typename T>
-	deque<T> operator()(deque<T>&& left_rref, deque<T>&& right_rref) const {
-		//ensure memory is freed on return
-		//TODO: may not be necessary after pop_front_iterator? they'll get emptied
-		deque<T> left(std::move(left_rref)), right(std::move(right_rref));
+	deque<T> operator()(deque<T>&& left, deque<T>&& right) const {
+		//Edges are unique so we don't need merge_unique.
+		//TODO: we could use std::merge if we had a pop_front_iterator; see GitHub #112.
 		deque<T> result; //no need to reserve because deque grows incrementally
-		//TODO: create and use pop_front_iterator to release memory gradually
-		merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(result));
+		while (!left.empty() && !right.empty()) {
+			if (right.front() < left.front()) { //preserve order for equal elements (though we shouldn't have any here)
+				result.push_back(std::move(right.front()));
+				right.pop_front();
+			} else {
+				result.push_back(std::move(left.front()));
+				left.pop_front();
+			}
+		}
+		while (!left.empty()) {
+			result.push_back(std::move(left.front()));
+			left.pop_front();
+		}
+		while (!right.empty()) {
+			result.push_back(std::move(right.front()));
+			right.pop_front();
+		}
+		//Left and right are empty, and deque should release its memory, but
+		//let's make sure they're left in the moved-from state.
+		deque<T> release_left(std::move(left)), release_right(std::move(right));
 		return result;
 	}
 };
@@ -139,7 +156,7 @@ deque<pair<uint32_t, uint32_t>> sort_and_merge(vector<deque<pair<uint32_t, uint3
 	return transform_reduce(std::move(data), threads, [](deque<pair<uint32_t, uint32_t>> block) {
 		std::sort(block.begin(), block.end());
 		return block;
-	}, merge_unique_deques());
+	}, merge_deques());
 }
 
 //If we want to parallelize encoding, this will split into appropriate groups.
