@@ -281,7 +281,10 @@ int invert_index_mode(std::string_view db_path, std::vector<std::string_view>& a
 	env.open(std::string(db_path).c_str(), MDB_NORDAHEAD);
 	unsigned int lmdb_max_readers = 0;
 	lmdb::env_get_max_readers(env.handle(), &lmdb_max_readers);
-	read_threads = std::min(read_threads, lmdb_max_readers);
+	//We've read from this thread, so one reader slot is already taken.  Without
+	//the -1, we silently read no data some of the time (or LMDB reports an
+	//error that lmdbxx swallows).
+	read_threads = std::min(read_threads, lmdb_max_readers - 1);
 	DatabaseMetadata meta = read_meta(env);
 	vector<lmdb::dbi> databases;
 	{
