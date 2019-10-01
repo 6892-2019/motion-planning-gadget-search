@@ -529,6 +529,25 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 	GadgetSet gadget_set = parse_gid_specs(gadget_spec);
 	vector<uint64_t> sources = collect_initial_gadget_set(env, gadget_set);
 
+	//We follow close edges here.  I'm not sure that's the right thing; maybe we
+	//shouldn't if we've specified the gadget by id instead of by name.
+	{
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		lmdb::dbi edges_close = lmdb::dbi::open(txn, "edges-close");
+		txn.commit();
+
+		//TODO: interval_accumulate function or interval_accumulator static method
+		interval_accumulator<uint64_t> intervals(512);
+		for (uint64_t s : sources)
+			intervals(s);
+		auto closed = follow_edges<SimpleEdge>(env, edges_close, std::move(intervals).finish(), 1);
+		auto more_sources = interval_inflate(closed.begin(), closed.end());
+		sources.insert(sources.end(), more_sources.begin(), more_sources.end()); //could be using back_inserter if we had an OutputIterator overload
+		std::sort(sources.begin(), sources.end());
+		//in case our input set had both a gadget and its closure
+		sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
+	}
+
 	//We could use threads here, but I think the inverted indices will be small
 	//enough to be fully prefetched.  If not, or we want to lazily load them for
 	//some other reason, we should definitely use threads to get more in-flight
