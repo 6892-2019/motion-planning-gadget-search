@@ -276,7 +276,7 @@ void write_to_file(const std::string& filename, const Header& header, vector<Cod
 
 	std::fwrite(&header, sizeof(Header), 1, file);
 
-	std::size_t offset;
+	std::size_t offset = 0;
 	for (const CodedChunk& c : chunks) {
 		for (pair<uint32_t, uint32_t> p : c.id_length) {
 			std::fwrite(&p.first, 1, header.id_bytes, file);
