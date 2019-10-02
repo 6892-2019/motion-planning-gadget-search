@@ -5,6 +5,8 @@
 #include "transform_reduce.hpp"
 #include "stringutils.hpp"
 #include <lmdb++.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 #include <fcntl.h> //for fallocate
 
 using std::uint64_t;
@@ -78,6 +80,15 @@ template<typename T>
 deque<T> sort_and_merge(vector<deque<T>>&& data, unsigned int threads) {
 	return transform_reduce(std::move(data), threads, [](deque<T> block) {
 		std::sort(block.begin(), block.end());
+		return block;
+	}, merge_deques());
+}
+
+template<typename T>
+deque<T> sort_unique_and_merge(vector<deque<T>>&& data, unsigned int threads) {
+	return transform_reduce(std::move(data), threads, [](deque<T> block) {
+		std::sort(block.begin(), block.end());
+		block.erase(std::unique(block.begin(), block.end()), block.end());
 		return block;
 	}, merge_deques());
 }
@@ -287,6 +298,86 @@ int hashid_index_mode(std::string_view db_path, std::vector<std::string_view>& a
 		default:
 			fmt::print(stderr, "error: need {} id bytes, unhandled case\n", header.id_bytes);
 			std::exit(1);
+	}
+	return 0;
+}
+
+namespace {
+struct DataThing {
+	lmdb::env env;
+	const uint64_t* hashes_begin = nullptr, *hashes_end = nullptr;
+};
+
+struct Batcher {
+	const uint64_t* begin, *end, *cur;
+	bool operator()(vector<uint64_t>& v) {
+		v.clear();
+		if (cur == end) return false;
+		v.push_back(*cur++);
+		while (cur != end && *cur == (v.back()+1))
+			v.push_back(*cur++);
+		return true;
+	}
+};
+}//end anonymous namespace
+
+int db_equiv_mode(std::vector<std::string_view>& args) {
+	std::array<std::string_view, 2> db_paths = {};
+	unsigned int db_paths_index = 0;
+	unsigned int threads = std::thread::hardware_concurrency();
+	for (std::size_t i = 0; i < args.size(); ++i)
+		if (args[i] == "--threads"sv)
+			threads = to_uint(args[++i]);
+		else if (db_paths_index < db_paths.size())
+			db_paths[db_paths_index++] = args[i];
+		else {
+			fmt::print(stderr, "unrecognized argument or too many positionals: {}\n", args[i]);
+			return 1;
+		}
+
+	std::array<DataThing, 2> dbs = {{{lmdb::env::create()}, {lmdb::env::create()}}};
+	for (unsigned int i = 0; i < db_paths.size(); ++i) {
+		dbs[i].env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+		dbs[i].env.set_max_dbs(64);
+		dbs[i].env.open(std::string(db_paths[i]).c_str(), MDB_NORDAHEAD);
+
+		std::string hashes_index_filename = fmt::format("{}/{}.idx", db_paths[i], "hashes");
+		int fd = open(hashes_index_filename.c_str(), O_RDONLY);
+		if (fd) {
+			struct stat s = {};
+			fstat(fd, &s);
+			void* m = mmap(nullptr, s.st_size, PROT_READ, MAP_SHARED_VALIDATE, fd, 0);
+			close(fd); //map persists
+			dbs[i].hashes_begin = reinterpret_cast<const uint64_t*>(m);
+			dbs[i].hashes_end = reinterpret_cast<const uint64_t*>(m) + (s.st_size / sizeof(uint64_t));
+			//TODO: not sure if MADV_SEQUENTIAL would help here.  We should
+			//probably have prefetched this before running anyway.
+		} else
+			dbs[i].hashes_begin = dbs[i].hashes_end = nullptr;
+	}
+
+	if (!dbs[0].hashes_begin || !dbs[1].hashes_begin) {
+		fmt::print(stderr, "TODO: implement cursor-based hash batching\n");
+		return 1;
+	}
+
+	Batcher left_batcher = {dbs[0].hashes_begin, dbs[0].hashes_end, dbs[0].hashes_begin},
+			right_batcher = {dbs[1].hashes_begin, dbs[1].hashes_end, dbs[1].hashes_begin};
+	vector<uint64_t> left, right;
+	left_batcher(left);
+	right_batcher(right);
+	while (!left.empty() && !right.empty()) {
+		if ((left.front() <= right.front() && right.front() <= left.back()) ||
+				(right.front() <= left.front() && left.front() <= right.back()))
+			fmt::print("{} {}\n", left, right);
+		if (std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end()))
+			left_batcher(left);
+		else if (std::lexicographical_compare(right.begin(), right.end(), left.begin(), left.end()))
+			right_batcher(right);
+		else {
+			left_batcher(left);
+			right_batcher(right);
+		}
 	}
 	return 0;
 }

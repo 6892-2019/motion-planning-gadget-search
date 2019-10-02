@@ -17,6 +17,7 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 //defined in db-equivalence-mode.cpp
 int hash_index_mode(std::string_view db_path, std::vector<std::string_view>& args);
 int hashid_index_mode(std::string_view db_path, std::vector<std::string_view>& args);
+int db_equiv_mode(std::vector<std::string_view>& args);
 //defned in update-predicates-mode.cpp
 int update_predicates_mode(std::string_view db_path, const vector<std::string_view>& more_arguments);
 //defined in repair-completions-mode.cpp
@@ -62,6 +63,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return hash_index_mode(db_path, positionals);
 	else if (mode == "hashid-index"sv)
 		return hashid_index_mode(db_path, positionals);
+	else if (mode == "db-equiv"sv)
+		return db_equiv_mode(positionals);
 	else if (mode == "predicates"sv)
 		return update_predicates_mode(db_path, positionals);
 	else if (mode == "completions"sv)
