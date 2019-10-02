@@ -94,7 +94,7 @@ struct concatenate_vectors {
 //TODO: use deque with larger page sizes; we'll have millions of objects so the default 512 is bad
 vector<deque<pair<uint32_t, uint32_t>>> invert_skinny(lmdb::env& env, lmdb::dbi& database, unsigned int threads) {
 	uint64_t max_id = get_current_max_gadget_id(env);
-	std::size_t chunk_size = std::min<std::size_t>(max_id / (threads * 10), 1000);
+	std::size_t chunk_size = std::max<std::size_t>(max_id / (threads * 1000), 1000);
 	vector<pair<uint64_t, uint64_t>> every_gadget_ever = {{1, max_id+1}};
 	return transform_reduce(interval_chunk(every_gadget_ever.begin(), every_gadget_ever.end(), chunk_size), threads,
 			[&](vector<pair<uint64_t, uint64_t>> chunk) {
@@ -112,7 +112,7 @@ vector<deque<pair<uint32_t, uint32_t>>> invert_skinny(lmdb::env& env, lmdb::dbi&
 template<typename Edge>
 vector<deque<pair<uint32_t, uint32_t>>> invert_full(lmdb::env& env, lmdb::dbi& database, unsigned int threads) {
 	uint64_t max_id = get_current_max_gadget_id(env);
-	std::size_t chunk_size = std::min<std::size_t>(max_id / (threads * 10), 1000);
+	std::size_t chunk_size = std::max<std::size_t>(max_id / (threads * 1000), 1000);
 	vector<pair<uint64_t, uint64_t>> every_gadget_ever = {{1, max_id+1}};
 	return transform_reduce(interval_chunk(every_gadget_ever.begin(), every_gadget_ever.end(), chunk_size), threads,
 			[&](vector<pair<uint64_t, uint64_t>> chunk) {
