@@ -31,7 +31,6 @@ std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_t
 	return select_gadget_id_to_data(env, gadget_hashtable, gadget_index, gid_intervals);
 }
 
-namespace {
 //This is separate from select_gadget_id_to_value both to factor it out of the
 //template and because the vector<uint64_t> (i.e., non-interval) overload of
 //select_gadget_id_to_data needs to do something slightly different.
@@ -66,6 +65,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> select_gadget_id_to_hash(
 	return id_to_hash;
 }
 
+namespace {
 template<class ValueExtractor, class V = decltype(ValueExtractor()(""sv))>
 std::vector<std::pair<std::uint64_t, V>> select_gadget_id_to_value(
 		lmdb::env& env, lmdb::txn& txn, lmdb::dbi& gadget_hashtable,

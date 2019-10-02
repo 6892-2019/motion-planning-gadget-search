@@ -33,6 +33,9 @@ std::uint64_t get_current_max_gadget_id(lmdb::txn& txn);
 
 
 
+std::vector<std::pair<std::uint64_t, std::uint64_t>> select_gadget_id_to_hash(
+		lmdb::txn& txn, lmdb::dbi& gadget_index, const std::vector<std::pair<uint64_t, uint64_t>>& gid_intervals);
+
 std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
 		lmdb::env& env, const std::vector<std::uint64_t>& gids);
 std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> select_gadget_id_to_data(
