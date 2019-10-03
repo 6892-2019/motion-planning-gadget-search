@@ -305,6 +305,7 @@ int hashid_index_mode(std::string_view db_path, std::vector<std::string_view>& a
 namespace {
 struct DataThing {
 	lmdb::env env;
+	lmdb::dbi gadget_hashtable;
 	const uint64_t* hashes_begin = nullptr, *hashes_end = nullptr;
 };
 
@@ -324,10 +325,15 @@ struct Batcher {
 int db_equiv_mode(std::vector<std::string_view>& args) {
 	std::array<std::string_view, 2> db_paths = {};
 	unsigned int db_paths_index = 0;
-	unsigned int threads = std::thread::hardware_concurrency();
+	unsigned int read_threads = std::numeric_limits<unsigned int>::max(),
+			cpu_threads = std::thread::hardware_concurrency();
 	for (std::size_t i = 0; i < args.size(); ++i)
 		if (args[i] == "--threads"sv)
-			threads = to_uint(args[++i]);
+			read_threads = cpu_threads = to_uint(args[++i]);
+		else if (args[i] == "--read-threads"sv)
+			read_threads = to_uint(args[++i]);
+		else if (args[i] == "--cpu-threads"sv)
+			cpu_threads = to_uint(args[++i]);
 		else if (db_paths_index < db_paths.size())
 			db_paths[db_paths_index++] = args[i];
 		else {
@@ -335,11 +341,21 @@ int db_equiv_mode(std::vector<std::string_view>& args) {
 			return 1;
 		}
 
+	//TODO: there has to be a cleaner way to work with DataThing...
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 	std::array<DataThing, 2> dbs = {{{lmdb::env::create()}, {lmdb::env::create()}}};
+#pragma GCC diagnostic pop
 	for (unsigned int i = 0; i < db_paths.size(); ++i) {
 		dbs[i].env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 		dbs[i].env.set_max_dbs(64);
-		dbs[i].env.open(std::string(db_paths[i]).c_str(), MDB_NORDAHEAD);
+		dbs[i].env.open(std::string(db_paths[i]).c_str(), MDB_NORDAHEAD | MDB_RDONLY);
+
+		{
+			auto txn = lmdb::txn::begin(dbs[i].env, nullptr, MDB_RDONLY);
+			dbs[i].gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+			txn.commit();
+		}
 
 		std::string hashes_index_filename = fmt::format("{}/{}.idx", db_paths[i], "hashes");
 		int fd = open(hashes_index_filename.c_str(), O_RDONLY);
@@ -361,23 +377,74 @@ int db_equiv_mode(std::vector<std::string_view>& args) {
 		return 1;
 	}
 
-	Batcher left_batcher = {dbs[0].hashes_begin, dbs[0].hashes_end, dbs[0].hashes_begin},
-			right_batcher = {dbs[1].hashes_begin, dbs[1].hashes_end, dbs[1].hashes_begin};
-	vector<uint64_t> left, right;
-	left_batcher(left);
-	right_batcher(right);
-	while (!left.empty() && !right.empty()) {
-		if ((left.front() <= right.front() && right.front() <= left.back()) ||
-				(right.front() <= left.front() && left.front() <= right.back()))
-			fmt::print("{} {}\n", left, right);
-		if (std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end()))
-			left_batcher(left);
-		else if (std::lexicographical_compare(right.begin(), right.end(), left.begin(), left.end()))
-			right_batcher(right);
-		else {
-			left_batcher(left);
-			right_batcher(right);
-		}
+	unsigned int lmdb_max_readers = 0;
+	lmdb::env_get_max_readers(dbs[0].env.handle(), &lmdb_max_readers);
+	//See comment in invert-mode.cpp.
+	read_threads = std::min(read_threads, lmdb_max_readers - 1);
+
+	vector<pair<uint64_t, uint64_t>> all_hashes = {{0, std::numeric_limits<uint64_t>::max()-10}};
+	std::size_t chunk_size = std::max<std::size_t>(std::numeric_limits<uint64_t>::max() / (read_threads * 100), 250000);
+	auto unsorted_results = transform_reduce(interval_chunk(all_hashes.begin(), all_hashes.end(), chunk_size), read_threads,
+			[&](vector<pair<uint64_t, uint64_t>> chunk) {
+				deque<pair<uint64_t, uint64_t>> ret;
+				vector<uint64_t> left, right;
+				for (pair<std::size_t, std::size_t> interval : chunk) {
+					const uint64_t* left_begin = std::lower_bound(dbs[0].hashes_begin, dbs[0].hashes_end, interval.first);
+					const uint64_t* left_end = std::lower_bound(dbs[0].hashes_begin, dbs[0].hashes_end, interval.second);
+					const uint64_t* right_begin = std::lower_bound(dbs[1].hashes_begin, dbs[1].hashes_end, interval.first);
+					const uint64_t* right_end = std::lower_bound(dbs[1].hashes_begin, dbs[1].hashes_end, interval.second);
+					Batcher left_batcher = {left_begin, left_end, left_begin},
+							right_batcher = {right_begin, right_end, right_begin};
+					left_batcher(left);
+					right_batcher(right);
+					auto ltxn = lmdb::txn::begin(dbs[0].env, nullptr, MDB_RDONLY);
+					auto rtxn = lmdb::txn::begin(dbs[1].env, nullptr, MDB_RDONLY);
+					lmdb::cursor lcur = lmdb::cursor::open(ltxn, dbs[0].gadget_hashtable),
+							rcur = lmdb::cursor::open(rtxn, dbs[1].gadget_hashtable);
+					while (!left.empty() && !right.empty()) {
+						if ((left.front() <= right.front() && right.front() <= left.back()) || //if overlapping
+								(right.front() <= left.front() && left.front() <= right.back())) {
+							//This does more comparisons than necessary if both sides have
+							//multiple hashes, but that seems to be rare enough.
+							for (uint64_t lhash : left) {
+								std::string_view lkey = lmdb::to_sv(lhash);
+								std::string_view lvalue;
+								lcur.get(lkey, lvalue, MDB_SET);
+								for (uint64_t rhash : right) {
+									std::string_view rkey = lmdb::to_sv(rhash);
+									std::string_view rvalue;
+									rcur.get(rkey, rvalue, MDB_SET);
+
+									if (std::equal(lvalue.begin(), lvalue.end()-8, rvalue.begin(), rvalue.end()-8)) {
+										lvalue.remove_prefix(lvalue.size()-8);
+										rvalue.remove_prefix(rvalue.size()-8);
+										ret.emplace_back(lmdb::from_sv<uint64_t>(lvalue), lmdb::from_sv<uint64_t>(rvalue));
+									}
+								}
+							}
+						}
+
+						if (std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end()))
+							left_batcher(left);
+						else if (std::lexicographical_compare(right.begin(), right.end(), left.begin(), left.end()))
+							right_batcher(right);
+						else {
+							left_batcher(left);
+							right_batcher(right);
+						}
+					}
+				}
+
+				vector<deque<pair<uint64_t, uint64_t>>> real_ret;
+				real_ret.push_back(std::move(ret));
+				return real_ret;
+			}, concatenate_vectors());
+
+	deque<pair<uint64_t, uint64_t>> sorted_results = sort_unique_and_merge(std::move(unsorted_results), cpu_threads);
+	while (!sorted_results.empty()) {
+		fmt::print("{} {}\n", sorted_results.front().first, sorted_results.front().second);
+		sorted_results.pop_front();
 	}
+
 	return 0;
 }
