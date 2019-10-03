@@ -257,6 +257,8 @@
       </item>
       <item path="src/pinning.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/pop_iterator.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/precompiled-instantiations.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/randutils.hpp" ex="false" tool="3" flavor2="0">
@@ -296,6 +298,8 @@
       <item path="src/test/intervals-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/proj_compare-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/pop_iterator-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/regex-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
