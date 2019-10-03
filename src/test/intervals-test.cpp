@@ -6,6 +6,7 @@
 using std::initializer_list;
 using std::pair;
 using std::vector;
+using std::uint64_t;
 
 TEST_CASE("IntervalsTest_MaximalIntervals00") {
 	initializer_list<int> input = {};
@@ -109,6 +110,40 @@ TEST_CASE("IntervalsTest_IntervalAccumulator03") {
 		accum(i);
 	auto actual = std::move(accum).finish();
 	CHECK_UNARY(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+
+
+TEST_CASE("IntervalsTest_IntervalChunk00") {
+	initializer_list<pair<uint64_t, uint64_t>> inputs = {{1, 1213501999}};
+	std::size_t chunk_size = 18960;
+	auto actual = interval_chunk(inputs.begin(), inputs.end(), chunk_size);
+
+	CHECK_EQ(actual.size(), 64004);
+	CHECK_EQ(actual[0][0].first, inputs.begin()->first);
+	for (unsigned int i = 0; i < actual.size()-1; ++i) {
+		CHECK_UNARY(actual[i].size() == 1);
+		CHECK_EQ(actual[i][0].second - actual[i][0].first, chunk_size);
+		CHECK_EQ(actual[i][0].second, actual[i+1][0].first);
+	}
+	CHECK_UNARY(actual.back().size() == 1);
+	CHECK_EQ(actual.back()[0].second, inputs.begin()->second);
+}
+
+TEST_CASE("IntervalsTest_IntervalChunk01") {
+	initializer_list<pair<uint64_t, uint64_t>> inputs = {{0, std::numeric_limits<uint64_t>::max()}};
+	std::size_t chunk_size = std::numeric_limits<uint64_t>::max() / 16;
+	auto actual = interval_chunk(inputs.begin(), inputs.end(), chunk_size);
+
+	CHECK_EQ(actual.size(), 17);
+	CHECK_EQ(actual[0][0].first, inputs.begin()->first);
+	for (unsigned int i = 0; i < actual.size()-1; ++i) {
+		CHECK_UNARY(actual[i].size() == 1);
+		CHECK_EQ(actual[i][0].second - actual[i][0].first, chunk_size);
+		CHECK_EQ(actual[i][0].second, actual[i+1][0].first);
+	}
+	CHECK_UNARY(actual.back().size() == 1);
+	CHECK_EQ(actual.back()[0].second, inputs.begin()->second);
 }
 
 

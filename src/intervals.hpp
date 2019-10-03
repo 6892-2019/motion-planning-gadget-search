@@ -161,13 +161,12 @@ std::vector<std::vector<std::pair<T, T>>> interval_chunk(It1 left, It1 left_end,
 	while (left != left_end) {
 		std::pair<T, T> cur = *left++;
 		while (cur.first != cur.second) {
+			assert(cur.first < cur.second); //or else we've added an element not in the intervals
 			std::size_t needed = chunk_size - working_interval_size;
-			//TODO: numeric_cast silences the warning in the case we currently
-			//care about, but makes this function less general
-//			T endpoint = std::min<T>(numeric_cast<T>(cur.first + needed), cur.second);
 			T endpoint;
 			if (__builtin_add_overflow(cur.first, needed, &endpoint))
-				endpoint = cur.second; //cur.second always <= max()
+				endpoint = cur.second;
+			endpoint = std::min(endpoint, cur.second);
 			working.emplace_back(cur.first, endpoint);
 			working_interval_size += endpoint - cur.first;
 			cur.first = endpoint;
