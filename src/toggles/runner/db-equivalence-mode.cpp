@@ -465,3 +465,47 @@ int db_equiv_mode(std::vector<std::string_view>& args) {
 
 	return 0;
 }
+
+int equiv_map_mode(std::vector<std::string_view>& args) {
+	if (args.size() > 2) {
+		fmt::print(stderr, "error: too many arguments\n");
+		return 1;
+	}
+
+	auto do_map = [](std::string_view filename) -> pair<const std::byte*, const std::byte*> {
+		int fd = open(std::string(filename).c_str(), O_RDONLY);
+		if (fd) {
+			struct stat s = {};
+			fstat(fd, &s);
+			void* m = mmap(nullptr, s.st_size, PROT_READ, MAP_SHARED_VALIDATE, fd, 0);
+			close(fd); //map persists
+			madvise(m, s.st_size, MADV_SEQUENTIAL);
+			const std::byte* base = reinterpret_cast<const std::byte*>(m);
+			return {base, base + s.st_size};
+		} else {
+			fmt::print(stderr, "error: failed to open {}\n", filename);
+			return {nullptr, nullptr};
+		}
+	};
+
+	pair<const std::byte*, const std::byte*> table = do_map(args[0]), scalar = do_map(args[1]);
+	if (!table.first || !scalar.first)
+		return 1;
+
+	uint64_t key = upv::read(table.first), value = upv::read(table.first), query = upv::read(scalar.first);
+	while (table.first != table.second && scalar.first != scalar.second) {
+		if (key < query) {
+			key = upv::read(table.first);
+			value = upv::read(table.first);
+		} else if (key > query)
+			query = upv::read(scalar.first);
+		else { //equal
+			fmt::print("{}\n", value);
+			key = upv::read(table.first);
+			value = upv::read(table.first);
+			query = upv::read(scalar.first);
+		}
+	}
+
+	return 0;
+}
