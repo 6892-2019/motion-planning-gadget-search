@@ -27,6 +27,7 @@
         <in>circular_deque-test.cpp</in>
         <in>expr-test.cpp</in>
         <in>intervals-test.cpp</in>
+        <in>proj_compare-test.cpp</in>
         <in>regex-test.cpp</in>
         <in>util-test.cpp</in>
         <in>util.cpp</in>
@@ -41,10 +42,12 @@
         </df>
         <df name="runner">
           <in>canonicalize.cpp</in>
+          <in>db-equivalence-mode.cpp</in>
           <in>deleted-locations-mode.cpp</in>
           <in>dump-gadget-mode.cpp</in>
           <in>gadget-encoding.cpp</in>
           <in>incoming-edges-mode.cpp</in>
+          <in>invert-mode.cpp</in>
           <in>migrate-mode.cpp</in>
           <in>msgpack-mode.cpp</in>
           <in>ops.cpp</in>
@@ -57,6 +60,7 @@
           <in>update_predicates_mode.cpp</in>
         </df>
         <in>anyprov.hpp</in>
+        <in>completions.cpp</in>
         <in>gadget-encoding-stats.cpp</in>
         <in>gadget-encoding-stats.hpp</in>
         <in>gadget-set.cpp</in>
@@ -96,8 +100,8 @@
       <in>stopwatch.cpp</in>
       <in>stopwatch.hpp</in>
       <in>stringutils.cpp</in>
+      <in>task_parallel.cpp</in>
       <in>transform_reduce.hpp</in>
-      <in>varint.hpp</in>
       <in>worker.cpp</in>
     </df>
     <logicalFolder name="ExternalFiles"
@@ -213,8 +217,6 @@
           </incDir>
         </ccTool>
       </item>
-      <item path="src/farmhash-util.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/fuzz/fuzz-state-renumbering.cpp"
             ex="false"
             tool="1"
@@ -237,14 +239,6 @@
       <item path="src/maybe_owning_ptr.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/natural_map.hpp" ex="false" tool="3" flavor2="0">
-      </item>
-      <item path="src/natural_set.cpp" ex="false" tool="1" flavor2="11">
-        <ccTool flags="0">
-          <incDir>
-            <pElem>../nauty</pElem>
-            <pElem>.</pElem>
-          </incDir>
-        </ccTool>
       </item>
       <item path="src/nfa-optimize.cpp" ex="false" tool="1" flavor2="0">
       </item>
@@ -278,8 +272,6 @@
       </item>
       <item path="src/task_parallel.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/task_parallel.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/test/algoutils-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/automaton-canonicalize-test.cpp"
@@ -306,6 +298,8 @@
       </item>
       <item path="src/test/intervals-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/test/proj_compare-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="src/test/regex-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/util-test.cpp" ex="false" tool="1" flavor2="0">
@@ -317,8 +311,6 @@
       <item path="src/toggles/anyprov.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/completions.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/completions.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/driver/precompiled-asio.cpp"
             ex="false"
@@ -352,21 +344,20 @@
       </item>
       <item path="src/toggles/gadget-set.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/gadget-set.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/toggles/gadgets.yaml" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/lmdb-interval-list.cpp" ex="false" tool="1" flavor2="0">
       </item>
-      <item path="src/toggles/lmdb-interval-list.hpp" ex="false" tool="3" flavor2="0">
-      </item>
       <item path="src/toggles/predicates.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/predicates.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/rpc.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/runner/canonicalize.cpp"
+            ex="false"
+            tool="1"
+            flavor2="0">
+      </item>
+      <item path="src/toggles/runner/db-equivalence-mode.cpp"
             ex="false"
             tool="1"
             flavor2="0">
@@ -390,6 +381,8 @@
             ex="false"
             tool="1"
             flavor2="0">
+      </item>
+      <item path="src/toggles/runner/invert-mode.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/toggles/runner/migrate-mode.cpp"
             ex="false"
@@ -433,8 +426,6 @@
             flavor2="0">
       </item>
       <item path="src/toggles/select-by-id.cpp" ex="false" tool="1" flavor2="0">
-      </item>
-      <item path="src/toggles/select-by-id.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/toggles/toggles-report.cpp" ex="false" tool="1" flavor2="0">
       </item>
