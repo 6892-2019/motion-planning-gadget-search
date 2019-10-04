@@ -8,6 +8,7 @@
 #include "transform_reduce.hpp"
 #include "stringutils.hpp"
 #include "proj_compare.hpp"
+#include "tsl/ordered_set.h"
 #include <deque>
 #include <ctime>
 #include <fcntl.h> //for fallocate
@@ -478,6 +479,11 @@ pair<const std::byte*, const std::byte*> lookup_edge_range(const Mapping& map, u
 }//end anonymous namespace
 
 int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& args) {
+	if (isatty(1)) {
+		fmt::print(stderr, "error: I won't write binary output to a terminal.\n");
+		return 1;
+	}
+
 	auto separator = std::find(args.begin(), args.end(), "--"sv);
 	if (separator == args.end()) {
 		fmt::print(stderr, "error: separator argument -- not found\n");
@@ -553,7 +559,7 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 	//some other reason, we should definitely use threads to get more in-flight
 	//page faults.
 	deque<uint64_t> worklist(sources.begin(), sources.end());
-	tsl::hopscotch_set<uint64_t, farmhash_hash> closed(worklist.begin(), worklist.end());
+	tsl::ordered_set<uint64_t, farmhash_hash> closed(worklist.begin(), worklist.end());
 	while (!worklist.empty()) {
 		uint64_t cur = worklist.front();
 		worklist.pop_front();
@@ -562,12 +568,24 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 			uint64_t prev = 0;
 			while (range.first != range.second) { //handles nullptr pairs
 				uint64_t next = prev + varint64::read(range.first); //delta-decode
-				if (closed.insert(next).second) {
+				if (closed.insert(next).second)
 					worklist.push_back(next);
-					fmt::print("{}\n", next);
-				}
 				prev = next;
 			}
+		}
+	}
+
+	std::deque<uint64_t> visited = std::move(closed).values_container();
+	std::sort(visited.begin(), visited.end());
+	std::array<std::byte, 4096> buf;
+	std::byte* p = buf.data();
+	uint64_t prev = 0;
+	for (uint64_t x : visited) {
+		varint64::write(p, x - prev);
+		prev = x;
+		if (std::distance(p, buf.end()) < 9) {
+			std::fwrite(buf.data(), 1, std::distance(buf.data(), p), stdout);
+			p = buf.data();
 		}
 	}
 
