@@ -617,7 +617,7 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 	std::byte* p = buf.data();
 	uint64_t prev = 0;
 	for (uint64_t x : visited) {
-		varint64::write(p, x - prev);
+		upv::write(p, x - prev);
 		prev = x;
 		if (std::distance(p, buf.end()) < 9) {
 			std::fwrite(buf.data(), 1, std::distance(buf.data(), p), stdout);

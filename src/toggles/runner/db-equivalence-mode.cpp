@@ -452,8 +452,8 @@ int db_equiv_mode(std::vector<std::string_view>& args) {
 	while (!sorted_results.empty()) {
 		//The key is delta-coded.  The value cannot be because the delta might
 		//be negative, but we can varint-encode it.
-		varint64::write(p, sorted_results.front().first - prev_key);
-		varint64::write(p, sorted_results.front().second);
+		upv::write(p, sorted_results.front().first - prev_key);
+		upv::write(p, sorted_results.front().second);
 		prev_key = sorted_results.front().first;
 		sorted_results.pop_front();
 		if (std::distance(p, buf.end()) < 9*2) {
