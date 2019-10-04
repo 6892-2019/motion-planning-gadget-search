@@ -100,7 +100,8 @@ int update_predicates_mode(std::string_view db_path, const vector<std::string_vi
 		pair<uint64_t, uint64_t> last = {0, 0};
 		while (value.size() >= sizeof(pair<uint64_t, uint64_t>)) {
 			pair<uint64_t, uint64_t> p;
-			std::memcpy(&p, value.data(), sizeof(p));
+			std::memcpy(&p.first, value.data(), sizeof(p.first));
+			std::memcpy(&p.second, value.data()+sizeof(p.first), sizeof(p.second));
 			fmt::print("{}, ", p);
 			value.remove_prefix(sizeof(p));
 

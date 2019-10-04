@@ -163,8 +163,10 @@ T unmarshal_from_string(lmdb::dbi& db, lmdb::txn& txn, std::string_view key) {
 
 void marshal_nullseparated(lmdb::dbi& db, lmdb::txn& txn, std::string_view key, const vector<std::string>& data) {
 	//We could use MDB_RESERVE here, but I am assuming this is uncommon code...
+#ifndef NDEBUG
 	for (const std::string& x : data)
 		assert(x.find('\0') == std::string::npos);
+#endif //NDEBUG
 	std::string value = join(data, "\0");
 	if (!db.put(txn, key, value))
 		//put only returns false if we passed MDB_NOOVERWRITE and the key existed
