@@ -323,6 +323,11 @@ struct Batcher {
 }//end anonymous namespace
 
 int db_equiv_mode(std::vector<std::string_view>& args) {
+	if (isatty(1)) {
+		fmt::print(stderr, "error: I won't write binary output to a terminal.\n");
+		return 1;
+	}
+
 	std::array<std::string_view, 2> db_paths = {};
 	unsigned int db_paths_index = 0;
 	unsigned int read_threads = std::numeric_limits<unsigned int>::max(),
@@ -441,10 +446,22 @@ int db_equiv_mode(std::vector<std::string_view>& args) {
 			}, concatenate_vectors());
 
 	deque<pair<uint64_t, uint64_t>> sorted_results = sort_unique_and_merge(std::move(unsorted_results), cpu_threads);
+	uint64_t prev_key = 0;
+	std::array<std::byte, 4096> buf;
+	std::byte* p = buf.data();
 	while (!sorted_results.empty()) {
-		fmt::print("{} {}\n", sorted_results.front().first, sorted_results.front().second);
+		//The key is delta-coded.  The value cannot be because the delta might
+		//be negative, but we can varint-encode it.
+		varint64::write(p, sorted_results.front().first - prev_key);
+		varint64::write(p, sorted_results.front().second);
+		prev_key = sorted_results.front().first;
 		sorted_results.pop_front();
+		if (std::distance(p, buf.end()) < 9*2) {
+			std::fwrite(buf.data(), 1, std::distance(buf.data(), p), stdout);
+			p = buf.data();
+		}
 	}
+	std::fwrite(buf.data(), 1, std::distance(buf.data(), p), stdout);
 
 	return 0;
 }
