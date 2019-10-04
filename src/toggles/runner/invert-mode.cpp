@@ -92,6 +92,22 @@ struct concatenate_vectors {
 	}
 };
 
+struct concatenate_deques {
+	template<typename T>
+	deque<T> operator()(deque<T>&& left_rref, deque<T>&& right_rref) {
+		//I'm not sure if it's safe to return the left argument object, because
+		//that might result in a self-move assignment.  Moves are cheap, so be
+		//safe and move into a fresh object.
+		deque<T> left(std::move(left_rref)), right(std::move(right_rref));
+		//TODO: could be using pop_front_iterator!
+		while (!right.empty()) {
+			left.push_back(std::move(right.front()));
+			right.pop_front();
+		}
+		return left;
+	}
+};
+
 //TODO: use deque with larger page sizes; we'll have millions of objects so the default 512 is bad
 vector<deque<pair<uint32_t, uint32_t>>> invert_skinny(lmdb::env& env, lmdb::dbi& database, unsigned int threads) {
 	uint64_t max_id = get_current_max_gadget_id(env);
@@ -554,24 +570,44 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 		sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
 	}
 
-	//We could use threads here, but I think the inverted indices will be small
-	//enough to be fully prefetched.  If not, or we want to lazily load them for
-	//some other reason, we should definitely use threads to get more in-flight
-	//page faults.
-	deque<uint64_t> worklist(sources.begin(), sources.end());
-	tsl::ordered_set<uint64_t, farmhash_hash> closed(worklist.begin(), worklist.end());
-	while (!worklist.empty()) {
-		uint64_t cur = worklist.front();
-		worklist.pop_front();
-		for (const Mapping& m : mappings) {
-			pair<const std::byte*, const std::byte*> range = lookup_edge_range(m, cur);
-			uint64_t prev = 0;
-			while (range.first != range.second) { //handles nullptr pairs
-				uint64_t next = prev + varint64::read(range.first); //delta-decode
-				if (closed.insert(next).second)
-					worklist.push_back(next);
-				prev = next;
-			}
+	//Parallel BFS, using an index in closed to delimit the current frontier.
+	//This gives significant speedup over the serial implementation, but we're
+	//bottlenecked by inserting the accumulated result into closed, despite
+	//knowing all elements are unique and not already present.
+	tsl::ordered_set<uint64_t, farmhash_hash> closed(sources.begin(), sources.end());
+	std::size_t curgen_start = 0;
+	while (curgen_start != closed.size()) {
+		vector<pair<std::size_t, std::size_t>> pending = {{curgen_start, closed.size()}};
+		unsigned int threads = std::thread::hardware_concurrency();
+		std::size_t chunk_size = std::max<std::size_t>(10, (pending[0].second - pending[0].first) / (4 * threads));
+		std::deque<uint64_t> result = transform_reduce(interval_chunk(pending.begin(), pending.end(), chunk_size), threads,
+				[&](vector<pair<std::size_t, std::size_t>> chunk) {
+					assert(chunk.size() == 1);
+					std::deque<uint64_t> ret;
+					for (const Mapping& m : mappings) {
+						for (auto cur = closed.values_container().begin()+chunk[0].first,
+								end = closed.values_container().begin()+chunk[0].second;
+								cur != end; ++cur) {
+							pair<const std::byte*, const std::byte*> range = lookup_edge_range(m, *cur);
+							uint64_t prev = 0;
+							while (range.first != range.second) { //handles nullptr pairs
+								uint64_t next = prev + varint64::read(range.first); //delta-decode
+								if (!closed.count(next))
+									ret.push_back(next);
+								prev = next;
+							}
+						}
+					}
+
+					std::sort(ret.begin(), ret.end());
+					ret.erase(std::unique(ret.begin(), ret.end()), ret.end());
+					return ret;
+				}, merge_deques());
+
+		curgen_start = closed.size();
+		while (!result.empty()) {
+			closed.insert(result.front());
+			result.pop_front();
 		}
 	}
 
@@ -588,6 +624,7 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 			p = buf.data();
 		}
 	}
+	std::fwrite(buf.data(), 1, std::distance(buf.data(), p), stdout);
 
 	return 0;
 }
