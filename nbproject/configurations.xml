@@ -89,8 +89,6 @@
       <in>intervals.hpp</in>
       <in>ioutils.cpp</in>
       <in>maybe_owning_ptr.hpp</in>
-      <in>natural_map.hpp</in>
-      <in>natural_set.cpp</in>
       <in>nfa-optimize.cpp</in>
       <in>pack-detail.hpp</in>
       <in>pack.cpp</in>
@@ -237,8 +235,6 @@
         </ccTool>
       </item>
       <item path="src/maybe_owning_ptr.hpp" ex="false" tool="3" flavor2="0">
-      </item>
-      <item path="src/natural_map.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/nfa-optimize.cpp" ex="false" tool="1" flavor2="0">
       </item>
