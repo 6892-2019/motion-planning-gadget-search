@@ -1148,6 +1148,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			completeness_opts.multiplayer = true;
 		else if (argv[i] == "--precision"sv)
 			completeness_opts.precision = to_uint(argv[++i]);
+		else if (argv[i] == "--combine-max-left-locations"sv || argv[i] == "--combine-left-max-locations"sv)
+			completeness_opts.combine_max_left_locations = to_uint(argv[++i]);
 		else if (argv[i] == "--max-states"sv)
 			completeness_opts.combine_max_left_states = completeness_opts.connect_max_states
 					= completeness_opts.close_max_states = completeness_opts.mirror_max_states = to_uint(argv[++i]);
