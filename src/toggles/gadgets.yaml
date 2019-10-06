@@ -505,4 +505,19 @@ gadgets:
     dedges: [[0, 3, 1, 2], [2, 3, 1, 2]]
     state-names: {0: null}
 
+  tripwire-lock-tripwire: # from https://arxiv.org/pdf/1806.03539.pdf
+    uedges: [[0, 0, 1, 1], [0, 4, 3, 1], [0, 5, 2, 0]]
+    state-names: {0: open, 1: closed}
+  ditripwire-dilock-ditripwire-rrr: # TODO: nomenclature describing interior crossings? (these are planar)
+    dedges: [[0, 0, 1, 1], [1, 0, 1, 0], [0, 4, 3, 1], [1, 4, 3, 0], [0, 5, 2, 0]]
+    state-names: {0: open, 1: closed}
+  ditripwire-dilock-ditripwire-rrl:
+    dedges: [[0, 0, 1, 1], [1, 0, 1, 0], [0, 3, 4, 1], [1, 3, 4, 0], [0, 5, 2, 0]]
+    state-names: {0: open, 1: closed}
+  ditripwire-dilock-ditripwire-rlr:
+    dedges: [[0, 0, 1, 1], [1, 0, 1, 0], [0, 4, 3, 1], [1, 4, 3, 0], [0, 2, 5, 0]]
+    state-names: {0: open, 1: closed}
+  # TODO: also generate ditripwire-lock-tripwire etc., tripwire-tripwire-lock etc.
+  # TODO: ditripwire-flipdiodelock-ditripwire (where the middle line can be closed or flipped)
+
 aliases: {}
