@@ -16,25 +16,22 @@ namespace automaton {
 
 namespace impl {
 
-template<class Target>
-constexpr auto cast = boost::dynamic_pointer_cast<Target, const Expr>;
-
 template<unsigned int AlphabetSize>
 Automaton<AlphabetSize> interpret(Expr::const_ptr expr) {
 	auto recurse = interpret<AlphabetSize>;
-	if (auto e = cast<const EmptyLanguage>(expr))
+	if (auto e = boost::dynamic_pointer_cast<const EmptyLanguage>(expr))
 		return empty<AlphabetSize>();
-	else if (auto a = cast<const AllStringsLanguage>(expr))
+	else if (auto a = boost::dynamic_pointer_cast<const AllStringsLanguage>(expr))
 		return all<AlphabetSize>();
-	else if (auto e = cast<const Epsilon>(expr))
+	else if (auto e = boost::dynamic_pointer_cast<const Epsilon>(expr))
 		return epsilon<AlphabetSize>();
-	else if (auto a = cast<const Any>(expr))
+	else if (auto a = boost::dynamic_pointer_cast<const Any>(expr))
 		return any<AlphabetSize>();
-	else if (auto l = cast<const Literal>(expr))
+	else if (auto l = boost::dynamic_pointer_cast<const Literal>(expr))
 		return lit<AlphabetSize>(l->symbol());
-	else if (auto c = cast<const Complement>(expr))
+	else if (auto c = boost::dynamic_pointer_cast<const Complement>(expr))
 		return comp<AlphabetSize>(recurse(c->child()));
-	else if (auto r = cast<const Repetition>(expr)) {
+	else if (auto r = boost::dynamic_pointer_cast<const Repetition>(expr)) {
 		auto child = recurse(r->child());
 		if (r->isStar())
 			return star<AlphabetSize>(std::move(child));
@@ -48,7 +45,7 @@ Automaton<AlphabetSize> interpret(Expr::const_ptr expr) {
 			return nOrMore<AlphabetSize>(std::move(child), r->min());
 		else if (r->isBounded())
 			return range<AlphabetSize>(std::move(child), r->min(), r->max());
-	} else if (auto e = cast<const Intersection>(expr)) {
+	} else if (auto e = boost::dynamic_pointer_cast<const Intersection>(expr)) {
 		assert(e->children().size() > 0);
 		//We minimize intersection inputs, but not outputs.
 		auto c = recurse(e->children()[0]);
@@ -59,13 +56,13 @@ Automaton<AlphabetSize> interpret(Expr::const_ptr expr) {
 			c = conj(c, child);
 		}
 		return c;
-	} else if (auto e = cast<const Concatenation>(expr)) {
+	} else if (auto e = boost::dynamic_pointer_cast<const Concatenation>(expr)) {
 		std::vector<Automaton<AlphabetSize>> children;
 		children.reserve(e->children().size());
 		for (typename Expr::ptr p : e->children())
 			children.push_back(recurse(p));
 		return cat(children.begin(), children.end());
-	} else if (auto e = cast<const Alternation>(expr)) {
+	} else if (auto e = boost::dynamic_pointer_cast<const Alternation>(expr)) {
 		std::vector<Automaton<AlphabetSize>> children;
 		children.reserve(e->children().size());
 		for (typename Expr::ptr p : e->children())
