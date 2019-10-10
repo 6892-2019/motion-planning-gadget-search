@@ -26,6 +26,9 @@ struct farmhash_hash {
 	std::uint64_t operator()(const std::vector<unsigned long>& x) const noexcept {
 		return farmhash::Hash(reinterpret_cast<const char*>(x.data()), x.size());
 	}
+	std::uint64_t operator()(std::string_view x) const noexcept {
+		return farmhash::Hash(x.data(), x.size());
+	}
 };
 
 #endif /* FARMHASH_UTIL_HPP */

@@ -10,12 +10,16 @@
 #include "../completions.hpp"
 #include "../anyprov.hpp"
 #include "intervals.hpp"
+#include "ioutils.hpp"
 #include "varint.hpp"
+#include "lmdb++.h"
 #include "hopscotch/hopscotch_map.h"
 #include <boost/container/static_vector.hpp>
 #include <msgpack.hpp>
-#include "lmdb++.h"
 #include <cstdio>
+#include <sys/mman.h>
+#include <sys/fcntl.h>
+#include <sys/stat.h>
 
 using namespace automaton;
 using std::uint64_t;
@@ -30,6 +34,164 @@ static std::string g_database_path;
 
 //forward declaration:
 void write_output(const void* data, size_t size);
+
+
+
+namespace {
+//TODO: based on code from invert-mode.cpp; have common mmap helper
+pair<const std::byte*, std::size_t> do_mmap(const std::string& filename) {
+	int fd = open(filename.c_str(), O_RDONLY);
+	if (fd == -1)
+		throw std::runtime_error(fmt::format("failed to open {} for mapping: {} ({})", filename, strerror(errno), errno));
+	struct stat s;
+	if (fstat(fd, &s) == -1)
+		throw std::runtime_error(fmt::format("error: fstat {}: {} ({})\n", filename, strerror(errno), errno));
+	const void* addr = mmap(nullptr, s.st_size, PROT_READ, MAP_SHARED_VALIDATE, fd, 0);
+	if (addr == MAP_FAILED)
+		throw std::runtime_error(fmt::format("error: failed to map {}: {} ({})\n", filename, strerror(errno), errno));
+	close(fd); //map persists
+	return {reinterpret_cast<const std::byte*>(addr), s.st_size};
+}
+}
+
+struct FirsthalfStatistics {
+	std::size_t gadgets, gadgets_size;
+	std::size_t provs, provs_size;
+	std::string filename;
+	MSGPACK_DEFINE_ARRAY(gadgets, gadgets_size, provs, provs_size, filename)
+};
+
+struct FirsthalfHeader {
+	uint64_t database_id;
+	EdgeKind kind;
+	std::size_t pruned, skipped;
+	std::size_t prov_offset;
+	std::size_t input_intervals_offset; //0 for combines because we don't store it
+	std::size_t gadget_offset;
+};
+
+template<class Provenance>
+FirsthalfStatistics write_firsthalf(const std::string& filename, uint64_t database_id, EdgeKind kind,
+		vector<vector<std::byte>>&& gadgets, vector<Provenance>&& provs,
+		std::size_t pruned, std::size_t skipped,
+		vector<pair<uint64_t, uint64_t>> input_intervals = vector<pair<uint64_t, uint64_t>>()) {
+	FirsthalfStatistics stats = {};
+	stats.filename = filename;
+	stats.provs = provs.size();
+	stats.provs_size = provs.size() * sizeof(provs.front());
+	stats.gadgets = gadgets.size();
+
+	FirsthalfHeader header = {};
+	header.database_id = database_id;
+	header.kind = kind;
+	header.pruned = pruned;
+	header.skipped = skipped;
+	header.prov_offset = sizeof(header);
+	header.input_intervals_offset = header.prov_offset + provs.size() * sizeof(provs.front());
+	header.gadget_offset = header.input_intervals_offset + input_intervals.size() * sizeof(input_intervals.front());
+	if (input_intervals.empty())
+		header.input_intervals_offset = 0;
+
+	FILE* file = std::fopen(filename.c_str(), "w+x");
+	if (!file)
+		throw std::runtime_error(fmt::format("failed to open {}: {} ({})", filename, strerror(errno), errno));
+
+	std::fwrite(&header, sizeof(header), 1, file);
+	std::fwrite(provs.data(), sizeof(Provenance), provs.size(), file);
+	std::fwrite(input_intervals.data(), sizeof(input_intervals.front()), input_intervals.size(), file);
+
+	for (const vector<std::byte>& g : gadgets) {
+		stats.gadgets_size += g.size();
+		std::array<std::byte, 9> varintbuf;
+		std::byte* vp = varintbuf.data();
+		varint64::write(vp, g.size());
+		std::fwrite(varintbuf.data(), 1, vp - varintbuf.data(), file);
+		std::fwrite(g.data(), 1, g.size(), file);
+	}
+
+	std::fflush(file);
+	if (std::ferror(file))
+		throw std::runtime_error(fmt::format("error writing {}: {} ({})", filename, strerror(errno), errno));
+	std::fclose(file);
+	return stats;
+}
+
+template<class Provenance>
+struct Refinisher {
+	uint64_t database_id_;
+	EdgeKind kind_;
+	std::size_t pruned_, skipped_;
+	tsl::ordered_set<std::string_view, farmhash_hash> gadgets_;
+	vector<Provenance> prov_;
+	vector<pair<uint64_t, uint64_t>> input_intervals_;
+	Refinisher(uint64_t database_id, EdgeKind kind) : database_id_(database_id), kind_(kind), pruned_(0), skipped_(0) {}
+
+	void read(std::string filename) {
+		const std::byte* data;
+		std::size_t len;
+		std::tie(data, len) = do_mmap(filename);
+		if (len < sizeof(FirsthalfHeader))
+			throw std::runtime_error(fmt::format("error reading {}: too small {}", filename, len));
+		const FirsthalfHeader* header = reinterpret_cast<const FirsthalfHeader*>(data);
+		if (header->database_id != database_id_)
+			throw std::runtime_error(fmt::format("{} is for {:x}, but we're committing to {:x}",
+					filename, header->database_id, database_id_));
+		if (header->kind != kind_)
+			throw std::runtime_error(fmt::format("{} is for {}, but we're committing {}",
+					filename, header->kind, kind_));
+		pruned_ += header->pruned;
+		skipped_ += header->skipped;
+
+		vector<unsigned int> local_to_globalish; //"global" to the Refinisher
+		const std::byte* gp = data + header->gadget_offset;
+		while (gp != data+len) {
+			std::size_t glen = varint64::read(gp);
+			std::string_view value(reinterpret_cast<const char*>(gp), glen);
+			auto pair = gadgets_.insert(value);
+			if (!pair.second)
+				++pruned_;
+			local_to_globalish.push_back(numeric_cast<unsigned int>(std::distance(gadgets_.begin(), pair.first)));
+			gp += glen;
+		}
+
+		const Provenance* pfirst = reinterpret_cast<const Provenance*>(data + header->prov_offset),
+				*plast = reinterpret_cast<const Provenance*>(data +
+						(header->input_intervals_offset ? header->input_intervals_offset : header->gadget_offset));
+		//Append then remap, instead of remapping while appending, to allow bulk copy.
+		std::size_t new_prov_start = prov_.size();
+		prov_.insert(prov_.end(), pfirst, plast);
+		for (std::size_t i = new_prov_start; i < prov_.size(); ++i)
+			prov_[i].output1 = local_to_globalish[prov_[i].output1];
+
+		if (header->input_intervals_offset) {
+			const std::pair<uint64_t, uint64_t>* ifirst = reinterpret_cast<const std::pair<uint64_t, uint64_t>*>(data + header->input_intervals_offset);
+			const std::pair<uint64_t, uint64_t>* ilast = reinterpret_cast<const std::pair<uint64_t, uint64_t>*>(data + header->gadget_offset);
+			input_intervals_ = interval_union(input_intervals_.begin(), input_intervals_.end(), ifirst, ilast);
+		}
+
+		//We leak the mapping because gadgets_ still points at it, and as it's
+		//file-backed there's not much cost to doing so.  If that causes a
+		//problem with unlinking the files at termination, we can keep the
+		//data-len pairs around for unmapping.
+	}
+
+	//We have to copy because selsert expects vector<std::byte>, and in other
+	//modes we do want selsert to use owning objects so it can release memory
+	//during the pruning loops.  If this is a big problem, we can template
+	//or otherwise modify selsert to also support gadgets that are pointers at
+	//the mapped regions.
+	vector<vector<std::byte>> gadgets() const {
+		vector<vector<std::byte>> ret;
+		ret.reserve(gadgets_.size());
+		for (std::string_view g : gadgets_) {
+			const std::byte* c = reinterpret_cast<const std::byte*>(g.data());
+			ret.emplace_back(c, c + g.size());
+		}
+		return ret;
+		//could &&-qualify this function and clear gadgets_ as we shouldn't need it again
+	}
+};
+
 
 
 struct identity_subscript {
@@ -163,29 +325,6 @@ Finisher<SimpleProvenance> do_mirror(vector<pair<std::uint64_t, vector<std::byte
 
 
 
-
-////return type is just to satisfy rpc machinery; we don't special-case for void
-////and msgpack can't handle nullptr_t
-//[[noreturn]] int do_batch_combine(vector<pair<uint64_t, vector<std::byte>>> inputs,
-//		vector<uint64_t> lefts, vector<uint64_t> rights, unsigned int precision) {
-//	tsl::hopscotch_map<std::uint64_t, vector<std::byte>, farmhash_hash> map;
-//	for (auto& p : inputs)
-//		map[p.first] = std::move(p.second);
-//	inputs.clear();
-//	inputs.shrink_to_fit();
-//	Finisher<CombineProvenance> finisher = do_combine(std::move(map), std::move(lefts), std::move(rights), precision);
-//	//TODO: We'd like to use the same sequence number here, but we don't have
-//	//access.  Introduce a seqno_t "strong typedef" that handler_adapter
-//	//recognizes and fills in (in addition to whatever other args are present).
-//	simple_buffer buf = pack_call(0, "batch-combine-commit", finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-//	//By printing to stdout and exiting, we emit an RPC call rather than a
-//	//response.  If we threw an exception, though, the dispatcher will generate
-//	//an error response as normal, so we'll detect the failure when trying to
-//	//commit the results.
-//	write_output(buf.data(), buf.size());
-//	std::exit(0);
-//}
-
 namespace {
 //I guess this could be a generalized projection function...
 template<class T>
@@ -198,32 +337,6 @@ auto extract_first(const vector<T>& inputs) {
 }
 }
 
-//[[noreturn]] int do_batch_connect(vector<pair<uint64_t, vector<std::byte>>> inputs) {
-//	vector<uint64_t> input_gids = extract_first(inputs);
-//	Finisher<ConnectProvenance> finisher = do_connect(std::move(inputs));
-//	simple_buffer buf = pack_call(0, "batch-connect-commit", input_gids,
-//			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-//	write_output(buf.data(), buf.size());
-//	std::exit(0);
-//}
-//
-//[[noreturn]] int do_batch_close(vector<pair<uint64_t, vector<std::byte>>> inputs) {
-//	vector<uint64_t> input_gids = extract_first(inputs);
-//	Finisher<SimpleProvenance> finisher = do_close(std::move(inputs));
-//	simple_buffer buf = pack_call(0, "batch-close-commit", input_gids,
-//			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-//	write_output(buf.data(), buf.size());
-//	std::exit(0);
-//}
-//
-//[[noreturn]] int do_batch_mirror(vector<pair<uint64_t, vector<std::byte>>> inputs) {
-//	vector<uint64_t> input_gids = extract_first(inputs);
-//	Finisher<SimpleProvenance> finisher = do_mirror(std::move(inputs));
-//	simple_buffer buf = pack_call(0, "batch-mirror-commit", input_gids,
-//			finisher.rows_.values_container(), finisher.prov_, finisher.pruned_);
-//	write_output(buf.data(), buf.size());
-//	std::exit(0);
-//}
 
 Finisher<CombineProvenance> operate_combine(lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
 		vector<pair<uint64_t, uint64_t>> left_intervals, vector<std::uint64_t> right_gids,
@@ -492,6 +605,67 @@ DatabaseOperationStatistics do_combine_db_full(vector<pair<uint64_t, uint64_t>> 
 			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
+FirsthalfStatistics do_combine_db_firsthalf(vector<pair<uint64_t, uint64_t>> left_intervals,
+		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		txn.commit();
+	}
+
+	Finisher<CombineProvenance> outputs = operate_combine(env, gadget_hashtable, gadget_index,
+			std::move(left_intervals), std::move(right_gids), precision, max_left_states);
+
+	DatabaseMetadata meta = read_meta(env);
+	std::string filename = fmt::format("/var/tmp/toggles/combine-{:x}-{}.bin", meta.id, getpid());
+	return write_firsthalf(filename, meta.id, EdgeKind::combine, std::move(outputs.rows_).values_container(),
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
+}
+
+DatabaseOperationStatistics do_combine_db_secondhalf(vector<std::string> firsthalves) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+	DatabaseMetadata meta = read_meta(env);
+
+	Refinisher<CombineProvenance> refinisher(meta.id, EdgeKind::combine);
+	for (const std::string& filename : firsthalves)
+		refinisher.read(filename);
+	tsl::ordered_set<uint64_t, farmhash_hash> right_gids;
+	//We could store this in the firsthalves or try to open all the edge tables.
+	//Both avoid a pass over all the provs at the cost of some code complexity.
+	for (const CombineProvenance& p : refinisher.prov_)
+		right_gids.insert(p.input2);
+
+	lmdb::dbi gadget_hashtable, gadget_index, completions;
+	vector<pair<uint64_t, lmdb::dbi>> edge_tables;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		for (uint64_t i : right_gids) //just assuming they all already exist
+			edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", i).c_str()));
+		txn.commit();
+	}
+
+	auto stats = commit_combine_result_skinny(env, gadget_hashtable, gadget_index, edge_tables, completions,
+			refinisher.gadgets(), std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
+
+	for (const std::string& filename : firsthalves)
+		if (std::remove(filename.c_str()))
+			//std::remove isn't documented to set errno, but maybe its implementation does anyway
+			fmt::print(stderr, "warning: failed to delete {}: {} ({})\n", filename, strerror(errno), errno);
+
+	return stats;
+}
 
 Finisher<ConnectProvenance> operate_connect(lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
 		vector<pair<uint64_t, uint64_t>>& input_intervals, unsigned int max_states) {
@@ -834,28 +1008,6 @@ vector<pair<uint64_t, vector<unsigned int>>> do_deleted_locations(vector<AnyProv
 
 
 
-//DatabaseOperationStatistics do_batch_combine_commit(vector<vector<std::byte>> rows, vector<CombineProvenance> prov, std::size_t pruned) {
-//	pqxx::connection conn(g_database_connect_string);
-//	return commit_combine_result(conn, std::move(rows), std::move(prov), pruned);
-//}
-//DatabaseOperationStatistics do_batch_connect_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
-//		vector<ConnectProvenance> prov, std::size_t pruned) {
-//	pqxx::connection conn(g_database_connect_string);
-//	return commit_connect_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
-//}
-//DatabaseOperationStatistics do_batch_close_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
-//		vector<SimpleProvenance> prov, std::size_t pruned) {
-//	pqxx::connection conn(g_database_connect_string);
-//	return commit_close_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
-//}
-//DatabaseOperationStatistics do_batch_mirror_commit(vector<uint64_t> input_gids, vector<vector<std::byte>> rows,
-//		vector<SimpleProvenance> prov, std::size_t pruned) {
-//	pqxx::connection conn(g_database_connect_string);
-//	return commit_mirror_result(conn, std::move(input_gids), std::move(rows), std::move(prov), pruned);
-//}
-
-
-
 /**
  * @return a string containing various information about this worker
  */
@@ -882,15 +1034,6 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
 
 	{"deleted-locations"sv, &handler_adapter<do_deleted_locations>},
-//
-//	{"batch-combine"sv, &handler_adapter<do_batch_combine>},
-//	{"batch-combine-commit"sv, &handler_adapter<do_batch_combine_commit>},
-//	{"batch-connect"sv, &handler_adapter<do_batch_connect>},
-//	{"batch-connect-commit"sv, &handler_adapter<do_batch_connect_commit>},
-//	{"batch-close"sv, &handler_adapter<do_batch_close>},
-//	{"batch-close-commit"sv, &handler_adapter<do_batch_close_commit>},
-//	{"batch-mirror"sv, &handler_adapter<do_batch_mirror>},
-//	{"batch-mirror-commit"sv, &handler_adapter<do_batch_mirror_commit>},
 };
 
 
