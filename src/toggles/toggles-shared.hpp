@@ -30,6 +30,13 @@ struct DatabaseOperationStatistics {
 	MSGPACK_DEFINE(skipped, pruned_locally, pruned_database, novel_gadgets, edges)
 };
 
+struct FirsthalfStatistics {
+	std::size_t gadgets, gadgets_size;
+	std::size_t provs, provs_size;
+	std::string filename;
+	MSGPACK_DEFINE(gadgets, gadgets_size, provs, provs_size, filename)
+};
+
 
 
 //These are the "right halves" of edges stored as (arrays of) values in the database.

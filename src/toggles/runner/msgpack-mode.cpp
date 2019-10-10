@@ -54,13 +54,6 @@ pair<const std::byte*, std::size_t> do_mmap(const std::string& filename) {
 }
 }
 
-struct FirsthalfStatistics {
-	std::size_t gadgets, gadgets_size;
-	std::size_t provs, provs_size;
-	std::string filename;
-	MSGPACK_DEFINE_ARRAY(gadgets, gadgets_size, provs, provs_size, filename)
-};
-
 struct FirsthalfHeader {
 	uint64_t database_id;
 	EdgeKind kind;
@@ -1029,6 +1022,8 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"connect-db"sv, &handler_adapter<do_connect_db>},
 	{"connect-db-full"sv, &handler_adapter<do_connect_db_full>},
 	{"combine-db"sv, &handler_adapter<do_combine_db>},
+	{"combine-db-firsthalf"sv, &handler_adapter<do_combine_db_firsthalf>},
+	{"combine-db-secondhalf"sv, &handler_adapter<do_combine_db_secondhalf>},
 	{"combine-db-full"sv, &handler_adapter<do_combine_db_full>},
 	{"close-db"sv, &handler_adapter<do_close_db>},
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},

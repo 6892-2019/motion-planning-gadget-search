@@ -552,7 +552,7 @@ private:
 			Stopwatch stopwatch = Stopwatch::process();
 			auto [needy_lefts, needy_pairs] = combine_needs_sizes();
 			if (needy_pairs / runtime_opts_.combine_pairs_per_task < runtime_opts_.combine_task_batch_threshold) {
-				DatabaseOperationStatistics stats = do_combine_operation();
+				DatabaseOperationStatistics stats = do_combine_operation(workers_->size() > 1 && needy_pairs > runtime_opts_.combine_pairs_per_task);
 				fmt::print("Combine operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else {
@@ -821,7 +821,7 @@ private:
 		return do_generic_operation(std::move(tasks));
 	}
 
-	DatabaseOperationStatistics do_combine_operation() {
+	DatabaseOperationStatistics do_combine_operation(bool use_halves) {
 		assert(!combine_needs_.empty());
 		std::vector<simple_buffer> tasks;
 		std::uint32_t seqno = 0;
@@ -829,13 +829,14 @@ private:
 			vector<vector<pair<uint64_t, uint64_t>>> chunks = interval_chunk(combine_needs_[outer_index].second.cbegin(), combine_needs_[outer_index].second.cend(),
 					std::max<std::uint64_t>(runtime_opts_.combine_pairs_per_task / combine_needs_[outer_index].first.size(), 1));
 			for (std::size_t inner_index = 0; inner_index < chunks.size(); ++inner_index)
-				tasks.push_back(pack_call(seqno++, "combine-db", chunks[inner_index], combine_needs_[outer_index].first,
-					complete_opts_.precision, complete_opts_.combine_max_left_states));
+				tasks.push_back(pack_call(seqno++, use_halves ? "combine-db-firsthalf" : "combine-db",
+						chunks[inner_index], combine_needs_[outer_index].first,
+						complete_opts_.precision, complete_opts_.combine_max_left_states));
 		}
-		return do_generic_operation(std::move(tasks));
+		return do_generic_operation(std::move(tasks), use_halves ? std::optional("combine-db-secondhalf"sv) : std::nullopt);
 	}
 
-	DatabaseOperationStatistics do_generic_operation(std::vector<simple_buffer> tasks) {
+	DatabaseOperationStatistics do_generic_operation(std::vector<simple_buffer> tasks, std::optional<std::string_view> secondhalf_cmd = std::nullopt) {
 		std::reverse(tasks.begin(), tasks.end());
 
 		if (unsigned int dead_count = check_for_stale_readers(database_))
@@ -848,18 +849,29 @@ private:
 		DatabaseOperationStatistics overall_stats = {};
 		const std::size_t tasks_total = tasks.size();
 		std::uint32_t tasks_dispatched = 0, tasks_completed = 0;
+		std::uint32_t secondhalf_seq = 0; //0 when secondhalf not running, else > tasks_total
+		vector<std::string> pending_firsthalves; //filenames for the next secondhalf
 		coarse_monotonic_clock::time_point operation_start = coarse_monotonic_clock::now();
 		vector<pair<std::uint32_t, coarse_monotonic_clock::time_point>> task_starts;
 		bool error_happened = false;
 		workers_->run([&](simple_buffer& buffer) {
 			if (error_happened) return false; //stop generating work, but let existing issued work finish
-			if (tasks.empty()) return false;
 			buffer.clear();
-			buffer.write(static_cast<const char*>(tasks.back().data()), tasks.back().size());
-			tasks.pop_back();
-			//tasks_dispatched matches sequence number because we dispatch tasks in order
-			task_starts.emplace_back(tasks_dispatched++, coarse_monotonic_clock::now());
-			return true;
+			if (!secondhalf_seq && !pending_firsthalves.empty()) {
+				//We could count up starting at tasks_total if we cared.
+				secondhalf_seq = std::numeric_limits<unsigned int>::max();
+				pack_call(buffer, secondhalf_seq, secondhalf_cmd.value(), std::move(pending_firsthalves));
+				pending_firsthalves.clear();
+				task_starts.emplace_back(secondhalf_seq, coarse_monotonic_clock::now());
+				return true;
+			} else if (!tasks.empty()) {
+				buffer.write(static_cast<const char*>(tasks.back().data()), tasks.back().size());
+				tasks.pop_back();
+				//tasks_dispatched matches sequence number because we dispatch tasks in order
+				task_starts.emplace_back(tasks_dispatched++, coarse_monotonic_clock::now());
+				return true;
+			}
+			return false;
 		}, [&](simple_buffer& buffer) {
 			if (unsigned int dead_count = check_for_stale_readers(database_))
 				fmt::print("cleaned up {} stale readers\n", dead_count);
@@ -890,7 +902,7 @@ private:
 			std::swap(*start_it, task_starts.back()); //may be a self-swap, but that's okay
 			task_starts.pop_back();
 
-			++tasks_completed;
+			if (resp->seq() < tasks_total) ++tasks_completed;
 			coarse_monotonic_clock::duration operation_time = coarse_monotonic_clock::now() - operation_start;
 			auto operation_eta = operation_time / tasks_completed * (tasks_total - tasks_completed);
 			auto hours = duration_cast<std::chrono::hours>(operation_eta);
@@ -900,13 +912,29 @@ private:
 					minutes.count() ? fmt::format("{}m{}s", minutes.count(), seconds.count()) :
 					fmt::format("{}s", seconds.count());
 
-			DatabaseOperationStatistics stats = resp->result_as<DatabaseOperationStatistics>();
-			overall_stats += stats;
-
-			fmt::print("{} {}.{} {}/{} {:.1f}s/{}: {} s, {:6d} p, {:6d} k, {:6d} n, {:6d} e\n",
-					operation_name, generation_, subgeneration_,
-					resp->seq(), tasks_total, task_time.count(), eta,
-					stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			if (resp->seq() < tasks_total && !secondhalf_cmd) {
+				DatabaseOperationStatistics stats = resp->result_as<DatabaseOperationStatistics>();
+				overall_stats += stats;
+				fmt::print("{} {}.{} {}/{} {:.1f}s/{}: {} s, {:6d} p, {:6d} k, {:6d} n, {:6d} e\n",
+						operation_name, generation_, subgeneration_,
+						resp->seq(), tasks_total, task_time.count(), eta,
+						stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
+			} else if (resp->seq() < tasks_total) {
+				FirsthalfStatistics stats = resp->result_as<FirsthalfStatistics>();
+				pending_firsthalves.push_back(std::move(stats.filename));
+				fmt::print("{} {}.{} {}/{} {:.1f}s/{}: {:6d} g ({} kiB), {:6d} p ({} kiB); {} pfh\n",
+						operation_name, generation_, subgeneration_,
+						resp->seq(), tasks_total, task_time.count(), eta,
+						stats.gadgets, stats.gadgets_size / 1024, stats.provs, stats.provs / 1024, pending_firsthalves.size());
+			} else {
+				DatabaseOperationStatistics stats = resp->result_as<DatabaseOperationStatistics>();
+				overall_stats += stats;
+				secondhalf_seq = 0;
+				fmt::print("{} {}.{} write {:.1f}s/{}: {:6d} p, {:6d} k, {:6d} n, {:6d} e; {} pfh\n",
+						operation_name, generation_, subgeneration_,
+						task_time.count(), eta,
+						stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges, pending_firsthalves.size());
+			}
 		});
 		if (error_happened)
 			throw std::runtime_error("one or more tasks failed; exiting to prevent generating a corrupt checkpoint");
