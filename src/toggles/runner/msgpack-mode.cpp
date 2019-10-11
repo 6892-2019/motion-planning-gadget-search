@@ -816,6 +816,60 @@ DatabaseOperationStatistics do_connect_db_full(vector<pair<uint64_t, uint64_t>> 
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
+FirsthalfStatistics do_connect_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals, unsigned int max_states) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		txn.commit();
+	}
+
+	Finisher<ConnectProvenance> outputs = operate_connect(env, gadget_hashtable, gadget_index, input_intervals, max_states);
+
+	DatabaseMetadata meta = read_meta(env);
+	std::string filename = fmt::format("/var/tmp/toggles/connect-{:x}-{}.bin", meta.id, getpid());
+	return write_firsthalf(filename, meta.id, EdgeKind::connect, std::move(outputs.rows_).values_container(),
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
+}
+
+DatabaseOperationStatistics do_connect_db_secondhalf(vector<std::string> firsthalves) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+	DatabaseMetadata meta = read_meta(env);
+
+	Refinisher<ConnectProvenance> refinisher(meta.id, EdgeKind::connect);
+	for (const std::string& filename : firsthalves)
+		refinisher.read(filename);
+
+	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		connect_edges = lmdb::dbi::open(txn, "edges-skinny-connect");
+		txn.commit();
+	}
+
+	auto stats = commit_connect_result_skinny(env, gadget_hashtable, gadget_index, connect_edges, completions,
+			std::move(refinisher.input_intervals_), refinisher.gadgets(), std::move(refinisher.prov_),
+			refinisher.pruned_, refinisher.skipped_);
+
+	for (const std::string& filename : firsthalves)
+		if (std::remove(filename.c_str()))
+			//std::remove isn't documented to set errno, but maybe its implementation does anyway
+			fmt::print(stderr, "warning: failed to delete {}: {} ({})\n", filename, strerror(errno), errno);
+
+	return stats;
+}
+
 DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
 		std::string_view completion_kind, bool idempotent,
@@ -906,6 +960,60 @@ DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_i
 	return do_close_db0(std::move(input_intervals), env, gadget_hashtable, gadget_index, close_edges, completions);
 }
 
+FirsthalfStatistics do_close_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		txn.commit();
+	}
+	DatabaseMetadata meta = read_meta(env);
+	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, input_intervals);
+	Finisher<SimpleProvenance> outputs = do_close(std::move(inputs));
+	std::string filename = fmt::format("/var/tmp/toggles/close-{:x}-{}.bin", meta.id, getpid());
+	return write_firsthalf(filename, meta.id, EdgeKind::close, std::move(outputs.rows_).values_container(),
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
+}
+
+DatabaseOperationStatistics do_close_db_secondhalf(vector<std::string> firsthalves) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+	DatabaseMetadata meta = read_meta(env);
+
+	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::close);
+	for (const std::string& filename : firsthalves)
+		refinisher.read(filename);
+
+	lmdb::dbi gadget_hashtable, gadget_index, completions, close_edges;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		close_edges = lmdb::dbi::open(txn, "edges-close");
+		txn.commit();
+	}
+
+	auto stats = commit_close_result(env, gadget_hashtable, gadget_index, close_edges, completions,
+			std::move(refinisher.input_intervals_), refinisher.gadgets(),
+			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
+
+	for (const std::string& filename : firsthalves)
+		if (std::remove(filename.c_str()))
+			//std::remove isn't documented to set errno, but maybe its implementation does anyway
+			fmt::print(stderr, "warning: failed to delete {}: {} ({})\n", filename, strerror(errno), errno);
+
+	return stats;
+}
+
 DatabaseOperationStatistics commit_mirror_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges, lmdb::dbi& completions,
 		vector<pair<uint64_t, uint64_t>>&& input_intervals,	vector<vector<std::byte>>&& gadgets,
@@ -946,7 +1054,59 @@ DatabaseOperationStatistics do_mirror_db(vector<pair<uint64_t, uint64_t>> input_
 	return do_mirror_db0(std::move(input_intervals), env, gadget_hashtable, gadget_index, mirror_edges, completions);
 }
 
+FirsthalfStatistics do_mirror_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
+	lmdb::dbi gadget_hashtable, gadget_index;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		txn.commit();
+	}
+	DatabaseMetadata meta = read_meta(env);
+	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(
+			env, gadget_hashtable, gadget_index, input_intervals);
+	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
+	std::string filename = fmt::format("/var/tmp/toggles/mirror-{:x}-{}.bin", meta.id, getpid());
+	return write_firsthalf(filename, meta.id, EdgeKind::mirror, std::move(outputs.rows_).values_container(),
+			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
+}
 
+DatabaseOperationStatistics do_mirror_db_secondhalf(vector<std::string> firsthalves) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+	DatabaseMetadata meta = read_meta(env);
+
+	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::mirror);
+	for (const std::string& filename : firsthalves)
+		refinisher.read(filename);
+
+	lmdb::dbi gadget_hashtable, gadget_index, completions, mirror_edges;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		mirror_edges = lmdb::dbi::open(txn, "edges-mirror");
+		txn.commit();
+	}
+
+	auto stats = commit_mirror_result(env, gadget_hashtable, gadget_index, mirror_edges, completions,
+			std::move(refinisher.input_intervals_), refinisher.gadgets(),
+			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
+
+	for (const std::string& filename : firsthalves)
+		if (std::remove(filename.c_str()))
+			//std::remove isn't documented to set errno, but maybe its implementation does anyway
+			fmt::print(stderr, "warning: failed to delete {}: {} ({})\n", filename, strerror(errno), errno);
+
+	return stats;
+}
 
 
 
@@ -1021,12 +1181,18 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 
 	{"connect-db"sv, &handler_adapter<do_connect_db>},
 	{"connect-db-full"sv, &handler_adapter<do_connect_db_full>},
+	{"connect-db-firsthalf"sv, &handler_adapter<do_connect_db_firsthalf>},
+	{"connect-db-secondhalf"sv, &handler_adapter<do_connect_db_secondhalf>},
 	{"combine-db"sv, &handler_adapter<do_combine_db>},
 	{"combine-db-firsthalf"sv, &handler_adapter<do_combine_db_firsthalf>},
 	{"combine-db-secondhalf"sv, &handler_adapter<do_combine_db_secondhalf>},
 	{"combine-db-full"sv, &handler_adapter<do_combine_db_full>},
 	{"close-db"sv, &handler_adapter<do_close_db>},
+	{"close-db-firsthalf"sv, &handler_adapter<do_close_db_firsthalf>},
+	{"close-db-secondhalf"sv, &handler_adapter<do_close_db_secondhalf>},
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
+	{"mirror-db-firsthalf"sv, &handler_adapter<do_mirror_db_firsthalf>},
+	{"mirror-db-secondhalf"sv, &handler_adapter<do_mirror_db_secondhalf>},
 
 	{"deleted-locations"sv, &handler_adapter<do_deleted_locations>},
 };

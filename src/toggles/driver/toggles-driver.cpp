@@ -809,16 +809,21 @@ private:
 		state_(std::move(targets));
 	}
 
-	DatabaseOperationStatistics do_unary_operation(std::string_view operation,
+	DatabaseOperationStatistics do_unary_operation(std::string operation,
 			const vector<vector<pair<uint64_t, uint64_t>>>& chunks,
 			unsigned int max_states = 0) {
+		std::optional<std::string> secondhalf_cmd;
+		if (workers_->size() > 1 && chunks.size() > 1) {
+			secondhalf_cmd = operation + "-secondhalf";
+			operation += "-firsthalf";
+		}
 		std::vector<simple_buffer> tasks;
 		for (std::uint32_t seqno = 0; seqno < chunks.size(); ++seqno)
 			if (max_states)
 				tasks.push_back(pack_call(seqno, operation, chunks[seqno], max_states));
 			else
 				tasks.push_back(pack_call(seqno, operation, chunks[seqno]));
-		return do_generic_operation(std::move(tasks));
+		return do_generic_operation(std::move(tasks), secondhalf_cmd);
 	}
 
 	DatabaseOperationStatistics do_combine_operation(bool use_halves) {
