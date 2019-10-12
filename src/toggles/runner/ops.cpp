@@ -107,7 +107,53 @@ AutomatonBase::SymbolSet connect_at(const Automaton<N>& a, unsigned int activeAl
 	connected.minimize();
 	auto active = connected.activeAlphabet();
 	if (active.size() <= 1) return {}; //there are no interesting 1-symbol automata
-	//TODO: if this check usually doesn't fire, we can use active_alphabet_size instead of activeAlphabet
+
+	using state_type = typename WorkingAutomaton::state_type;
+	using symbol_type = typename WorkingAutomaton::symbol_type;
+	bitset<N> known_not_nop;
+	boost::container::small_vector<pair<state_type, symbol_type>, 16> check_again;
+	//Strictly speaking, we only need two bits (0, 1, >1) but a saturating 2-bit
+	//counter is nontrivial to implement.
+	std::vector<unsigned int> indegree(connected.state_size(), 0);
+	for (state_type s = 0, end = connected.state_size(); s < end && known_not_nop.size() != active.size(); ++s) {
+		if (!connected.accept(s)) continue;
+		for (auto&& [symbols, next] : connected.edges(s)) {
+			indegree[next] += symbols.size();
+			if (symbols.size() > 1) {
+				for (symbol_type a : symbols)
+					known_not_nop.set(a);
+				continue;
+			}
+
+			auto dests = connected.destinations(next);
+			if (dests.size() > 1) {
+				known_not_nop.set(symbols.front());
+				continue;
+			}
+			auto labels = connected.labels(next, dests.front());
+			if (labels.size() > 1 || labels.front() != symbols.front()) {
+				known_not_nop.set(symbols.front());
+				for (symbol_type a : labels)
+					known_not_nop.set(a);
+				continue;
+			}
+
+			//remember next as needing revalidation
+			check_again.emplace_back(next, symbols.front());
+		}
+	}
+	for (auto i = check_again.begin(); i != check_again.end(); ++i)
+		//If i->second was later found to be not-nop, this won't change anything.
+		if (indegree[i->first] != 1)
+			known_not_nop.set(i->second);
+
+	if (known_not_nop.size() != active.size()) {
+		for (unsigned int i = active.size(); i-- > 0;)
+			if (!known_not_nop[active[i]])
+				active.erase(active.begin()+i);
+		if (active.size() <= 1) return {}; //there are no interesting 1-symbol automata
+	}
+
 	if (active.size() != (activeAlphabetSize - 2)) {
 		//compress the alphabet
 		active.sort();
@@ -115,9 +161,9 @@ AutomatonBase::SymbolSet connect_at(const Automaton<N>& a, unsigned int activeAl
 		std::copy(active.begin(), active.end(), compression.begin());
 		std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
 		connected.renumberAlphabet(compression.begin());
-		//Because we're deleting unused symbols, we don't need to
-		//minimize again; any two equivalent states would differ only in
-		//the symbols we deleted, but those symbols were inactive.
+		//If we only deleted unused symbols, we don't need to minimize again;
+		//any two equivalent states would differ only in the symbols we deleted,
+		//but those symbols were inactive.
 		//TODO: improve Automaton to notice this, or add a renumberAlphabet variant,
 		//so that we actually skip minimizing in the finisher's canonicalize.
 	}
