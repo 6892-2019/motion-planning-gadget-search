@@ -96,7 +96,7 @@ auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
 }
 
 template<unsigned int N, class Provenance>
-AutomatonBase::SymbolSet connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
+void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 		Provenance prov, Finisher<Provenance>& finisher) {
 	Automaton<N> connected = a;
 	enjoin(connected, prov.connectPoint, (prov.connectPoint+1) % activeAlphabetSize);
@@ -105,17 +105,16 @@ AutomatonBase::SymbolSet connect_at(const Automaton<N>& a, unsigned int activeAl
 	connected.renumberAlphabet(alphamap.begin());
 
 	connected.minimize();
-	auto active = connected.activeAlphabet();
-	if (active.size() <= 1) return {}; //there are no interesting 1-symbol automata
 
 	using state_type = typename WorkingAutomaton::state_type;
 	using symbol_type = typename WorkingAutomaton::symbol_type;
-	bitset<N> known_not_nop;
+	bitset<N> active, known_not_nop;
 	boost::container::small_vector<pair<state_type, symbol_type>, 16> check_again;
 	//Strictly speaking, we only need two bits (0, 1, >1) but a saturating 2-bit
 	//counter is nontrivial to implement.
 	std::vector<unsigned int> indegree(connected.state_size(), 0);
-	for (state_type s = 0, end = connected.state_size(); s < end && known_not_nop.size() != active.size(); ++s) {
+	for (state_type s = 0, end = connected.state_size(); s < end && (known_not_nop & active).count() != (activeAlphabetSize-2); ++s) {
+		active |= connected.outgoing_mask(s);
 		if (!connected.accept(s)) continue;
 		for (auto&& [symbols, next] : connected.edges(s)) {
 			indegree[next] += symbols.size();
@@ -146,20 +145,16 @@ AutomatonBase::SymbolSet connect_at(const Automaton<N>& a, unsigned int activeAl
 		//If i->second was later found to be not-nop, this won't change anything.
 		if (indegree[i->first] != 1)
 			known_not_nop.set(i->second);
+	active &= known_not_nop;
 
-	if (known_not_nop.size() != active.size()) {
-		for (unsigned int i = active.size(); i-- > 0;)
-			if (!known_not_nop[active[i]])
-				active.erase(active.begin()+i);
-		if (active.size() <= 1) return {}; //there are no interesting 1-symbol automata
-	}
-
-	if (active.size() != (activeAlphabetSize - 2)) {
+	if (active.count() <= 1) return; //there are no interesting 1-symbol automata
+	if (active.count() != (activeAlphabetSize - 2)) {
 		//compress the alphabet
-		active.sort();
-		std::array<typename Automaton<N>::symbol_type, Automaton<N>::alphabet_size_v> compression;
-		std::copy(active.begin(), active.end(), compression.begin());
-		std::fill(compression.begin()+active.size(), compression.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
+		std::array<symbol_type, Automaton<N>::alphabet_size_v> compression;
+		auto i = compression.begin();
+		for (unsigned int b = active.find_first(); b < active.size(); b = active.find_next(b))
+			*i++ = b;
+		std::fill(i, compression.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
 		connected.renumberAlphabet(compression.begin());
 		//If we only deleted unused symbols, we don't need to minimize again;
 		//any two equivalent states would differ only in the symbols we deleted,
@@ -169,7 +164,6 @@ AutomatonBase::SymbolSet connect_at(const Automaton<N>& a, unsigned int activeAl
 	}
 
 	finisher(std::move(connected), prov);
-	return active;
 }
 
 template<unsigned int N>
@@ -225,9 +219,8 @@ AutomatonBase::SymbolSet connect_deleted_symbols(const AutomatonBase& a, unsigne
 	Finisher<ConnectProvenance> finisher;
 	auto active_alphabet_size = a.active_alphabet_size();
 
-	AutomatonBase::SymbolSet active;
 	switch (a.alphabet_size()) {
-#define TOGGLESRUNNER_CONNECT_CASE(N) case N: active = connect_at(static_cast<const Automaton<N>&>(a), active_alphabet_size, prov, finisher); break;
+#define TOGGLESRUNNER_CONNECT_CASE(N) case N: connect_at(static_cast<const Automaton<N>&>(a), active_alphabet_size, prov, finisher); break;
 		TOGGLESRUNNER_CONNECT_CASE(4)
 		TOGGLESRUNNER_CONNECT_CASE(5)
 		TOGGLESRUNNER_CONNECT_CASE(6)
@@ -248,7 +241,7 @@ AutomatonBase::SymbolSet connect_deleted_symbols(const AutomatonBase& a, unsigne
 			std::terminate();
 	}
 
-	AutomatonBase::SymbolSet deleted;
+	AutomatonBase::SymbolSet active = a.activeAlphabet(), deleted;
 	if (active_alphabet_size < 2) return deleted; //can't happen?
 	//We should now be dense for 0..alpha-2.
 	for (unsigned int i = 0; i < active_alphabet_size-2; ++i)
