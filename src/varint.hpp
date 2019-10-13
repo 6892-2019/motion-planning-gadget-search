@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <bit>
 
 namespace upv {
 /* Functions for unary-prefix varints, which are like the traditional
@@ -48,7 +49,7 @@ inline std::byte* write(std::byte*& dest, std::uint64_t value) {
 	if (value < (1ul << 56)) {
 		//We still need a bit to encode zero.  This is annoying because lzcnt would
 		//give 64, which is 0 after subtraction, so this actually is a branch.
-		int sigbits = value ? 64 - __builtin_clzl(value) : 1;
+		int sigbits = value ? 64 - std::countl_zero(value) : 1;
 		unsigned int length = static_cast<unsigned int>((sigbits + 6)/7);
 		std::byte high_byte;
 		std::memcpy(&high_byte, reinterpret_cast<char*>(&value)+(length-1), 1);
@@ -70,9 +71,8 @@ inline std::byte* write(std::byte* const& dest, std::uint64_t value) {
 
 inline std::uint64_t read(const std::byte*& src) {
 	std::uint64_t ret = 0;
-	//Count the number of leading 1s in the first byte, working around __builtin_clz undefinedness.
-	unsigned int header_comp = std::to_integer<unsigned int>(~*src);
-	int trailers = header_comp ? __builtin_clz(header_comp) - 24 : 8;
+	//std::byte can't have its bits inspected for some reason.
+	int trailers = std::countl_one(static_cast<unsigned char>(*src));
 	std::memcpy(&ret, src+1, trailers);
 	if (trailers < 8) {//8 is special: no significant bits in the first byte
 		std::byte high_byte_bits = *src & ~prefixes[trailers];
@@ -115,7 +115,7 @@ inline void write(std::byte*& dest, std::uint64_t value) {
 	} else {
 		//TODO: this might be too clever (making the write length not a constant)
 		//Compute the minimum number of bytes to represent the value.
-		std::size_t amount = sizeof(std::uint64_t) - (__builtin_clzl(value) / 8);
+		std::size_t amount = sizeof(std::uint64_t) - (std::countl_zero(value) / 8);
 		write(VARINT_TWO - 1 + amount, 1);
 		write(value, amount);
 	}
