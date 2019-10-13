@@ -116,30 +116,29 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 	for (state_type s = 0, end = connected.state_size(); s < end && (known_not_nop & active).count() != (activeAlphabetSize-2); ++s) {
 		active |= connected.outgoing_mask(s);
 		if (!connected.accept(s)) continue;
-		for (auto&& [symbols, next] : connected.edges(s)) {
-			indegree[next] += symbols.size();
-			if (symbols.size() > 1) {
-				for (symbol_type a : symbols)
-					known_not_nop.set(a);
-				continue;
+		connected.for_each_edge(s, [&](bitset<N> symbols, state_type next) {
+			indegree[next] += symbols.count();
+			if (symbols.count() > 1) {
+				known_not_nop |= symbols;
+				return; //continue
 			}
 
 			auto dests = connected.destinations(next);
 			if (dests.size() > 1) {
-				known_not_nop.set(symbols.front());
-				continue;
+				known_not_nop |= symbols;
+				return; //continue
 			}
-			auto labels = connected.labels(next, dests.front());
-			if (labels.size() > 1 || labels.front() != symbols.front()) {
-				known_not_nop.set(symbols.front());
-				for (symbol_type a : labels)
-					known_not_nop.set(a);
-				continue;
+
+			bitset<N> labels = connected.labels_mask(next, dests.front());
+			if (labels != symbols) {
+				known_not_nop |= symbols;
+				known_not_nop |= labels;
+				return; //continue
 			}
 
 			//remember next as needing revalidation
-			check_again.emplace_back(next, symbols.front());
-		}
+			check_again.emplace_back(next, symbols.find_first());
+		});
 	}
 	for (auto i = check_again.begin(); i != check_again.end(); ++i)
 		//If i->second was later found to be not-nop, this won't change anything.
