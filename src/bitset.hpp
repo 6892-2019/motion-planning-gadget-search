@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <cassert>
+#include <bit>
 #include <boost/integer.hpp>
 #include <farmhash/farmhash.h>
 
@@ -27,17 +28,6 @@ struct bitset_promote {
 };
 template<typename Integral>
 using bitset_promote_t = typename bitset_promote<Integral>::type;
-
-unsigned int ctz(unsigned int x);
-unsigned int ctz(unsigned long x);
-unsigned int ctz(unsigned long long x);
-unsigned int ctz(unsigned char x);
-unsigned int ctz(unsigned short x);
-unsigned int popcount(unsigned int x);
-unsigned int popcount(unsigned long x);
-unsigned int popcount(unsigned long long x);
-unsigned int popcount(unsigned char x);
-unsigned int popcount(unsigned short x);
 
 [[noreturn, gnu::cold]] void bitset_throw_out_of_range(unsigned int index, unsigned int size);
 
@@ -180,7 +170,7 @@ bool bitset<storage_type, N>::at(size_type pos) const {
 
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::count() const -> size_type {
-	return popcount(bits_);
+	return std::popcount(bits_);
 }
 template<typename storage_type, unsigned int N>
 bool bitset<storage_type, N>::any() const {
@@ -281,13 +271,13 @@ bool bitset<storage_type, N>::test_reset(size_type pos) {
 
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::find_first() const -> size_type {
-   return ctz(bits_);
+   return std::countr_zero(bits_);
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::find_next(size_type prev) const -> size_type {
    assert(prev < capacity());
    //shifting by prev+1 all at once might be undefined behavior
-   return ctz((bitset_promote_t<storage_type>(bits_) >> (prev)) >> 1) + prev + 1;
+   return std::countr_zero((bitset_promote_t<storage_type>(bits_) >> (prev)) >> 1) + prev + 1;
 }
 
 template<typename storage_type, unsigned int N>

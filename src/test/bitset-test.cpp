@@ -29,7 +29,7 @@ TEST_CASE("BitsetTest_FindFirst8High") {
 }
 TEST_CASE("BitsetTest_FindFirst8None") {
 	bitset<8> a;
-	CHECK_GT(a.find_first(), a.capacity());
+	CHECK_GE(a.find_first(), a.capacity());
 }
 TEST_CASE("BitsetTest_FindFirst12Low") {
 	bitset<12> a;
@@ -67,7 +67,7 @@ TEST_CASE("BitsetTest_FindFirst16High") {
 }
 TEST_CASE("BitsetTest_FindFirst16None") {
 	bitset<16> a;
-	CHECK_GT(a.find_first(), a.capacity());
+	CHECK_GE(a.find_first(), a.capacity());
 }
 
 TEST_CASE("BitsetTest_FindNext16") {
