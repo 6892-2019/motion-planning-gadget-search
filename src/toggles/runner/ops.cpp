@@ -125,7 +125,7 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 			}
 
 			auto dests = connected.destinations(next);
-			if (dests.size() > 1) {
+			if (dests.size() != 1 || dests.front() != s) {
 				known_not_nop |= symbols;
 				known_not_nop |= connected.outgoing_mask(next);
 				return; //continue
