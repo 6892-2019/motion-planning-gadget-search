@@ -172,7 +172,7 @@ auto Automaton<AlphabetSize>::labels_mask(state_type from, state_type to) const 
 template<unsigned int AlphabetSize>
 void Automaton<AlphabetSize>::for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const {
 	for (const Transition& t : transitions_[state])
-		for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
+		for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.capacity(); a = t.symbols_.find_next(a))
 			action(a, t.next_);
 }
 
@@ -180,7 +180,7 @@ template<unsigned int AlphabetSize>
 void Automaton<AlphabetSize>::for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const {
 	for (state_type s = 0; s < state_size(); ++s)
 		for (const Transition& t : transitions_[s])
-			for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
+			for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.capacity(); a = t.symbols_.find_next(a))
 				action(s, a, t.next_);
 }
 

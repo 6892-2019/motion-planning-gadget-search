@@ -134,7 +134,7 @@ template<unsigned int N>
 SymbolSet set_of_indices(automaton::bitset<N> mask) {
 	SymbolSet set;
 	set.reserve(mask.count());
-	for (auto s = mask.find_first(); s < mask.size(); s = mask.find_next(s))
+	for (auto s = mask.find_first(); s < mask.capacity(); s = mask.find_next(s))
 		set.insert_absent(s);
 	return set;
 }
@@ -670,7 +670,7 @@ namespace detail {
 template<unsigned int AlphabetSize, class RandomAccessIterator>
 bitset<AlphabetSize> renumberAlphabet(bitset<AlphabetSize> cur, RandomAccessIterator map) {
 	bitset<AlphabetSize> ns;
-	for (symbol_type a = 0; a < ns.size(); ++a) {
+	for (symbol_type a = 0; a < ns.capacity(); ++a) {
 		symbol_type i = map[a];
 		if (i == std::numeric_limits<symbol_type>::max())
 			ns.reset(a); //no-op, because we initialized to 0 above
@@ -686,7 +686,7 @@ template<unsigned int AlphabetSize, class RandomAccessIterator>
 bitset<AlphabetSize> permuteAlphabet(bitset<AlphabetSize> cur, RandomAccessIterator map) {
 	//just like renumberAlphabet above, but constant 0 and 1 are illegal
 	bitset<AlphabetSize> ns;
-	for (symbol_type a = 0; a < ns.size(); ++a)
+	for (symbol_type a = 0; a < ns.capacity(); ++a)
 		ns.set(a, cur[map[a]]);
 	return ns;
 }

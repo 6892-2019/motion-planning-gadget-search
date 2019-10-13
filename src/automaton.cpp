@@ -377,7 +377,7 @@ bool determinize_64_fastpath(const AutomatonBase& source, AddStateAction addStat
 
 	while (!worklist.empty()) {
 		auto [current_set, current_state] = worklist.pop_back();
-		for (state_type f = current_set.find_first(); f < current_set.size(); f = current_set.find_next(f))
+		for (state_type f = current_set.find_first(); f < current_set.capacity(); f = current_set.find_next(f))
 			source.for_each_transition(f, [&nexts](symbol_type symbol, state_type dest) {
 				nexts[symbol].set(dest);
 			});
@@ -389,7 +389,7 @@ bool determinize_64_fastpath(const AutomatonBase& source, AddStateAction addStat
 			if (inserted) {
 				++newStates;
 				bool accepting = false;
-				for (auto q = next.find_first(); !accepting && q < next.size(); q = next.find_next(q))
+				for (auto q = next.find_first(); !accepting && q < next.capacity(); q = next.find_next(q))
 					accepting |= source.accept(q);
 				addState(accepting);
 				worklist.push_back(*it);

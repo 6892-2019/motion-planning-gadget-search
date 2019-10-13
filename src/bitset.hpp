@@ -64,7 +64,10 @@ public:
 	bitset();
 	bitset(const bitset&) = default;
 
-	size_type size() const;
+	//We deliberately do not define size() because it is ambiguous between
+	//capacity() (when thinking of the bitset as a group of bits) and count()
+	//(when thinking of the bitset as a container of small integers).
+	size_type capacity() const;
 
 	reference operator[](size_type pos);
 	bool operator[](size_type pos) const;
@@ -130,7 +133,7 @@ private:
 
 template<typename storage_type, unsigned int N>
 bitset<storage_type, N>::reference::reference(bitset& bitset, size_type i) : bitset_(bitset), i_(i) {
-	assert(i < bitset.size());
+	assert(i < bitset.capacity());
 }
 template<typename storage_type, unsigned int N>
 bitset<storage_type, N>::reference::operator bool() const {
@@ -150,28 +153,28 @@ bitset<storage_type, N>::bitset() : bits_(0) {}
 //bitset<storage_type, N>::bitset(const bitset&) = default;
 
 template<typename storage_type, unsigned int N>
-auto bitset<storage_type, N>::size() const -> size_type {
+auto bitset<storage_type, N>::capacity() const -> size_type {
 	return N;
 }
 
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::operator[](size_type pos) -> reference {
-	assert(pos < size());
+	assert(pos < capacity());
 	return reference(*this, pos);
 }
 template<typename storage_type, unsigned int N>
 bool bitset<storage_type, N>::operator[](size_type pos) const {
-	assert(pos < size());
+	assert(pos < capacity());
 	return bits_ & posmask(pos);
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::at(size_type pos) -> reference {
-	if (pos < size()) bitset_throw_out_of_range(pos, size());
+	if (pos < capacity()) bitset_throw_out_of_range(pos, capacity());
 	return (*this)[pos];
 }
 template<typename storage_type, unsigned int N>
 bool bitset<storage_type, N>::at(size_type pos) const {
-	if (pos < size()) bitset_throw_out_of_range(pos, size());
+	if (pos < capacity()) bitset_throw_out_of_range(pos, capacity());
 	return (*this)[pos];
 }
 
@@ -190,7 +193,7 @@ bool bitset<storage_type, N>::none() const {
 template<typename storage_type, unsigned int N>
 bool bitset<storage_type, N>::all() const {
 	//(~bits & (N 1s)) == 0 may be faster
-	return count() == size();
+	return count() == capacity();
 }
 
 template<typename storage_type, unsigned int N>
@@ -205,7 +208,7 @@ auto bitset<storage_type, N>::set() -> bitset& {
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::set(size_type pos) -> bitset& {
-	assert(pos < size());
+	assert(pos < capacity());
 	do_or(posmask(pos));
 	return *this;
 }
@@ -224,7 +227,7 @@ auto bitset<storage_type, N>::reset() -> bitset& {
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::reset(size_type pos) -> bitset& {
-	assert(pos < size());
+	assert(pos < capacity());
 	do_and(static_cast<storage_type>(~posmask(pos)));
 	return *this;
 }
@@ -243,7 +246,7 @@ auto bitset<storage_type, N>::flip() -> bitset& {
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::flip(size_type pos) -> bitset& {
-	assert(pos < size());
+	assert(pos < capacity());
 	do_xor(posmask(pos));
 	return *this;
 }
@@ -266,7 +269,7 @@ auto bitset<storage_type, N>::set(size_type startInclusive, size_type endExclusi
 
 template<typename storage_type, unsigned int N>
 bool bitset<storage_type, N>::test_set(size_type pos, bool value) {
-	assert(pos < size());
+	assert(pos < capacity());
 	bool old = (*this)[pos];
 	(*this)[pos] = value;
 	return old;
@@ -282,7 +285,7 @@ auto bitset<storage_type, N>::find_first() const -> size_type {
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::find_next(size_type prev) const -> size_type {
-   assert(prev < size());
+   assert(prev < capacity());
    //shifting by prev+1 all at once might be undefined behavior
    return ctz((bitset_promote_t<storage_type>(bits_) >> (prev)) >> 1) + prev + 1;
 }
@@ -397,7 +400,7 @@ auto operator<<(const bitset<storage_type, N>& left, int distance) {
 
 template<typename storage_type, unsigned int N>
 std::ostream& operator<<(std::ostream& o, const bitset<storage_type, N>& b) {
-	for (auto i = b.size(); i-- > 0;)
+	for (auto i = b.capacity(); i-- > 0;)
 		o << (b[i] ? '1' : '0');
 	return o;
 }

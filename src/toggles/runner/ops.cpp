@@ -151,7 +151,7 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 		//compress the alphabet
 		std::array<symbol_type, Automaton<N>::alphabet_size_v> compression;
 		auto i = compression.begin();
-		for (unsigned int b = active.find_first(); b < active.size(); b = active.find_next(b))
+		for (unsigned int b = active.find_first(); b < active.capacity(); b = active.find_next(b))
 			*i++ = b;
 		std::fill(i, compression.end(), std::numeric_limits<typename Automaton<N>::symbol_type>::max());
 		connected.renumberAlphabet(compression.begin());

@@ -29,7 +29,7 @@ TEST_CASE("BitsetTest_FindFirst8High") {
 }
 TEST_CASE("BitsetTest_FindFirst8None") {
 	bitset<8> a;
-	CHECK_GT(a.find_first(), a.size());
+	CHECK_GT(a.find_first(), a.capacity());
 }
 TEST_CASE("BitsetTest_FindFirst12Low") {
 	bitset<12> a;
@@ -48,7 +48,7 @@ TEST_CASE("BitsetTest_FindFirst12High") {
 }
 TEST_CASE("BitsetTest_FindFirst12None") {
 	bitset<12> a;
-	CHECK_GT(a.find_first(), a.size());
+	CHECK_GT(a.find_first(), a.capacity());
 }
 TEST_CASE("BitsetTest_FindFirst16Low") {
 	bitset<16> a;
@@ -67,7 +67,7 @@ TEST_CASE("BitsetTest_FindFirst16High") {
 }
 TEST_CASE("BitsetTest_FindFirst16None") {
 	bitset<16> a;
-	CHECK_GT(a.find_first(), a.size());
+	CHECK_GT(a.find_first(), a.capacity());
 }
 
 TEST_CASE("BitsetTest_FindNext16") {
@@ -75,10 +75,10 @@ TEST_CASE("BitsetTest_FindNext16") {
 	a.set(3);
 	a.set(4);
 	CHECK_EQ(a.find_next(3), 4);
-	CHECK_GT(a.find_next(4), a.size());
+	CHECK_GT(a.find_next(4), a.capacity());
 	a.set(15);
 	CHECK_EQ(a.find_next(4), 15);
-	CHECK_GT(a.find_next(15), a.size());
+	CHECK_GT(a.find_next(15), a.capacity());
 }
 
 TEST_CASE("BitsetTest_DefaultConstruct64") {
@@ -146,7 +146,7 @@ TEST_CASE("BitsetTest_FindNext64_00") {
 		for (int j = 0; j < i; ++j)
 			CHECK_EQ(a.find_next(j), i);
 		for (int j = i; j < 64; ++j)
-			CHECK_GE(a.find_next(j), a.size());
+			CHECK_GE(a.find_next(j), a.capacity());
 	}
 }
 
