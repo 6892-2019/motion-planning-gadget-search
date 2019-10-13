@@ -150,6 +150,8 @@
           <preBuildFirst>true</preBuildFirst>
         </preBuild>
       </makefileType>
+      <item path="automaton-regexesque-basic.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <folder path="0/nonogram">
         <ccTool>
           <incDir>
@@ -187,6 +189,8 @@
       <item path="src/automaton-instantiations-1.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/automaton-io.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/automaton-regexesque.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/automaton.cpp" ex="false" tool="1" flavor2="0">
       </item>

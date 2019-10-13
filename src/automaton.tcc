@@ -1,5 +1,6 @@
 #include "hopcroft.hpp"
 #include "nfa-optimize.hpp"
+#include "automaton-regexesque-basic.hpp" // empty, epsilon, all
 #include <sparsehash/dense_hash_set>
 
 namespace automaton {

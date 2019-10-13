@@ -2,6 +2,7 @@
 #define AUTOMATON_TEST_UTIL_HPP_INCLUDED
 
 #include "automaton.hpp"
+#include "automaton-regexesque.hpp" //for compare_languages
 #include <doctest.h>
 
 //for custom assertion failure messages

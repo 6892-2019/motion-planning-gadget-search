@@ -11,6 +11,7 @@
 #include "precompiled.hpp"
 #include "expr.hpp"
 #include "automaton.hpp"
+#include "automaton-regexesque.hpp"
 
 namespace automaton {
 
