@@ -12,6 +12,7 @@
 #include "automatonbase.hpp"
 #include "bitset.hpp"
 #include "n_copies_iterator.hpp"
+#include <function_view.hpp>
 
 //uncomment the line below to enable debugging logging expressions
 //#define AUTOMATON_DEBUG(expr) do {expr;} while(0);
@@ -275,10 +276,14 @@ public:
 	//object's actual type is known (not via AutomatonBase)
 
 	SymbolSet labels(state_type from, state_type to) const override;
+	symbol_mask_type labels_mask(state_type from, state_type to) const;
 
 	void for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const override;
 
 	void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const override;
+
+	void for_each_edge(state_type state, function_view<void(symbol_mask_type, state_type)> action) const;
+	void for_each_edge(function_view<void(state_type, symbol_mask_type, state_type)> action) const;
 
 	void reserve(state_type state_capacity) override;
 
