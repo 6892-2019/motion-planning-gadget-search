@@ -120,12 +120,14 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 			indegree[next] += symbols.count();
 			if (symbols.count() > 1) {
 				known_not_nop |= symbols;
+				known_not_nop |= connected.outgoing_mask(next);
 				return; //continue
 			}
 
 			auto dests = connected.destinations(next);
 			if (dests.size() > 1) {
 				known_not_nop |= symbols;
+				known_not_nop |= connected.outgoing_mask(next);
 				return; //continue
 			}
 
