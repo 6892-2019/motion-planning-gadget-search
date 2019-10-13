@@ -271,43 +271,43 @@ bool bitset<storage_type, N>::test_reset(size_type pos) {
 
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::find_first() const -> size_type {
-   return std::countr_zero(bits_);
+	return std::countr_zero(bits_);
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::find_next(size_type prev) const -> size_type {
-   assert(prev < capacity());
-   //shifting by prev+1 all at once might be undefined behavior
-   return std::countr_zero((bitset_promote_t<storage_type>(bits_) >> (prev)) >> 1) + prev + 1;
+	assert(prev < capacity());
+	//shifting by prev+1 all at once might be undefined behavior
+	return std::countr_zero((bitset_promote_t<storage_type>(bits_) >> (prev)) >> 1) + prev + 1;
 }
 
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::operator&=(const bitset& other) -> bitset& {
-   do_and(other.bits_);
-   return *this;
+	do_and(other.bits_);
+	return *this;
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::operator|=(const bitset& other) -> bitset& {
-   do_or(other.bits_);
-   return *this;
+	do_or(other.bits_);
+	return *this;
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::operator^=(const bitset& other) -> bitset& {
-   do_xor(other.bits_);
-   return *this;
+	do_xor(other.bits_);
+	return *this;
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::operator~() const -> bitset {
-   return bitset(*this).flip();
+	return bitset(*this).flip();
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::operator>>=(int distance) -> bitset& {
-   bits_ = static_cast<storage_type>(distance >= 0 ? bits_ >> distance : bits_ << -distance);
-   return *this;
+	bits_ = static_cast<storage_type>(distance >= 0 ? bits_ >> distance : bits_ << -distance);
+	return *this;
 }
 template<typename storage_type, unsigned int N>
 auto bitset<storage_type, N>::operator<<=(int distance) -> bitset& {
-   bits_ = static_cast<storage_type>(distance >= 0 ? bits_ << distance : bits_ >> -distance);
-   return *this;
+	bits_ = static_cast<storage_type>(distance >= 0 ? bits_ << distance : bits_ >> -distance);
+	return *this;
 }
 
 template<typename storage_type, unsigned int N>
