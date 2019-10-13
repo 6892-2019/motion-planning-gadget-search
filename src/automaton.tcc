@@ -162,6 +162,14 @@ SymbolSet Automaton<AlphabetSize>::labels(state_type from, state_type to) const 
 }
 
 template<unsigned int AlphabetSize>
+auto Automaton<AlphabetSize>::labels_mask(state_type from, state_type to) const -> symbol_mask_type {
+	for (const Transition& t : transitions_[from])
+		if (t.next_ == to)
+			return t.symbols_;
+	return {};
+}
+
+template<unsigned int AlphabetSize>
 void Automaton<AlphabetSize>::for_each_transition(state_type state, std::function<void(symbol_type, state_type)> action) const {
 	for (const Transition& t : transitions_[state])
 		for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
@@ -174,6 +182,19 @@ void Automaton<AlphabetSize>::for_each_transition(std::function<void(state_type,
 		for (const Transition& t : transitions_[s])
 			for (symbol_type a = t.symbols_.find_first(); a < t.symbols_.size(); a = t.symbols_.find_next(a))
 				action(s, a, t.next_);
+}
+
+template<unsigned int AlphabetSize>
+void Automaton<AlphabetSize>::for_each_edge(state_type state, function_view<void(symbol_mask_type, state_type)> action) const {
+	for (const Transition& t : transitions_[state])
+		action(t.symbols_, t.next_);
+}
+
+template<unsigned int AlphabetSize>
+void Automaton<AlphabetSize>::for_each_edge(function_view<void(state_type, symbol_mask_type, state_type)> action) const {
+	for (state_type s = 0; s < state_size(); ++s)
+		for (const Transition& t : transitions_[s])
+			action(s, t.symbols_, t.next_);
 }
 
 template<unsigned int AlphabetSize>
