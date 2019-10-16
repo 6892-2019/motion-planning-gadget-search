@@ -926,7 +926,8 @@ private:
 						stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else if (resp->seq() < tasks_total) {
 				FirsthalfStatistics stats = resp->result_as<FirsthalfStatistics>();
-				pending_firsthalves.push_back(std::move(stats.filename));
+				pending_firsthalves.insert(pending_firsthalves.end(),
+						std::move_iterator(stats.filenames.begin()), std::move_iterator(stats.filenames.end()));
 				fmt::print("{} {}.{} {}/{} {:.1f}s/{}: {:6d} g ({} kiB), {:6d} p ({} kiB); {} pfh\n",
 						operation_name, generation_, subgeneration_,
 						resp->seq(), tasks_total, task_time.count(), eta,

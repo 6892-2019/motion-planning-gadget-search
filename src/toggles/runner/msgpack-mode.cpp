@@ -11,9 +11,12 @@
 #include "../anyprov.hpp"
 #include "intervals.hpp"
 #include "ioutils.hpp"
+#include "randutils.hpp"
+#include "stringutils.hpp"
 #include "varint.hpp"
 #include "lmdb++.h"
 #include "hopscotch/hopscotch_map.h"
+#include "proj_compare.hpp"
 #include <boost/container/static_vector.hpp>
 #include <msgpack.hpp>
 #include <cstdio>
@@ -23,6 +26,7 @@
 
 using namespace automaton;
 using std::uint64_t;
+using std::uint32_t;
 using std::size_t;
 using std::pair;
 using std::vector;
@@ -46,8 +50,9 @@ void delete_many_files(Iterator first, Iterator last) {
 			fmt::print(stderr, "warning: failed to delete {}: {} ({})\n", *i, strerror(errno), errno);
 }
 
+using mmapping = pair<const std::byte*, std::size_t>;
 //TODO: based on code from invert-mode.cpp; have common mmap helper
-pair<const std::byte*, std::size_t> do_mmap(const std::string& filename) {
+mmapping do_mmap(const std::string& filename) {
 	int fd = open(filename.c_str(), O_RDONLY);
 	if (fd == -1)
 		throw std::runtime_error(fmt::format("failed to open {} for mapping: {} ({})", filename, strerror(errno), errno));
@@ -60,139 +65,27 @@ pair<const std::byte*, std::size_t> do_mmap(const std::string& filename) {
 	close(fd); //map persists
 	return {reinterpret_cast<const std::byte*>(addr), s.st_size};
 }
+void do_unmap(mmapping m) {
+	munmap(const_cast<void*>(static_cast<const void*>(m.first)), m.second);
 }
 
-struct FirsthalfHeader {
-	uint64_t database_id;
-	EdgeKind kind;
-	std::size_t pruned, skipped;
-	std::size_t prov_offset;
-	std::size_t input_intervals_offset; //0 for combines because we don't store it
-	std::size_t gadget_offset;
-};
-
-template<class Provenance>
-FirsthalfStatistics write_firsthalf(uint64_t database_id, EdgeKind kind,
-		vector<vector<std::byte>>&& gadgets, vector<Provenance>&& provs,
-		std::size_t pruned, std::size_t skipped,
-		vector<pair<uint64_t, uint64_t>> input_intervals = vector<pair<uint64_t, uint64_t>>()) {
-	std::string filename = fmt::format("/var/tmp/toggles/{}-{:x}-{}.bin", kind, database_id, getpid());
-	FirsthalfStatistics stats = {};
-	stats.filename = filename;
-	stats.provs = provs.size();
-	stats.provs_size = provs.size() * sizeof(provs.front());
-	stats.gadgets = gadgets.size();
-
-	FirsthalfHeader header = {};
-	header.database_id = database_id;
-	header.kind = kind;
-	header.pruned = pruned;
-	header.skipped = skipped;
-	header.prov_offset = sizeof(header);
-	header.input_intervals_offset = header.prov_offset + provs.size() * sizeof(provs.front());
-	header.gadget_offset = header.input_intervals_offset + input_intervals.size() * sizeof(input_intervals.front());
-	if (input_intervals.empty())
-		header.input_intervals_offset = 0;
-
-	FILE* file = std::fopen(filename.c_str(), "w+x");
-	if (!file)
-		throw std::runtime_error(fmt::format("failed to open {}: {} ({})", filename, strerror(errno), errno));
-
-	std::fwrite(&header, sizeof(header), 1, file);
-	std::fwrite(provs.data(), sizeof(Provenance), provs.size(), file);
-	std::fwrite(input_intervals.data(), sizeof(input_intervals.front()), input_intervals.size(), file);
-
-	for (const vector<std::byte>& g : gadgets) {
-		stats.gadgets_size += g.size();
-		std::array<std::byte, 9> varintbuf;
-		std::byte* vp = varintbuf.data();
-		varint64::write(vp, g.size());
-		std::fwrite(varintbuf.data(), 1, vp - varintbuf.data(), file);
-		std::fwrite(g.data(), 1, g.size(), file);
-	}
-
-	std::fflush(file);
-	if (std::ferror(file))
-		throw std::runtime_error(fmt::format("error writing {}: {} ({})", filename, strerror(errno), errno));
-	std::fclose(file);
-	return stats;
+void fwrite_varint(FILE* file, uint64_t value) {
+	std::array<std::byte, 9> varintbuf;
+	std::byte* vp = varintbuf.data();
+	varint64::write(vp, value);
+	std::fwrite(varintbuf.data(), 1, vp - varintbuf.data(), file);
 }
 
-template<class Provenance>
-struct Refinisher {
-	uint64_t database_id_;
-	EdgeKind kind_;
-	std::size_t pruned_, skipped_;
-	tsl::ordered_set<std::string_view, farmhash_hash> gadgets_;
-	vector<Provenance> prov_;
-	vector<pair<uint64_t, uint64_t>> input_intervals_;
-	Refinisher(uint64_t database_id, EdgeKind kind) : database_id_(database_id), kind_(kind), pruned_(0), skipped_(0) {}
 
-	void read(std::string filename) {
-		const std::byte* data;
-		std::size_t len;
-		std::tie(data, len) = do_mmap(filename);
-		if (len < sizeof(FirsthalfHeader))
-			throw std::runtime_error(fmt::format("error reading {}: too small {}", filename, len));
-		const FirsthalfHeader* header = reinterpret_cast<const FirsthalfHeader*>(data);
-		if (header->database_id != database_id_)
-			throw std::runtime_error(fmt::format("{} is for {:x}, but we're committing to {:x}",
-					filename, header->database_id, database_id_));
-		if (header->kind != kind_)
-			throw std::runtime_error(fmt::format("{} is for {}, but we're committing {}",
-					filename, header->kind, kind_));
-		pruned_ += header->pruned;
-		skipped_ += header->skipped;
-
-		vector<unsigned int> local_to_globalish; //"global" to the Refinisher
-		const std::byte* gp = data + header->gadget_offset;
-		while (gp != data+len) {
-			std::size_t glen = varint64::read(gp);
-			std::string_view value(reinterpret_cast<const char*>(gp), glen);
-			auto pair = gadgets_.insert(value);
-			if (!pair.second)
-				++pruned_;
-			local_to_globalish.push_back(numeric_cast<unsigned int>(std::distance(gadgets_.begin(), pair.first)));
-			gp += glen;
-		}
-
-		const Provenance* pfirst = reinterpret_cast<const Provenance*>(data + header->prov_offset),
-				*plast = reinterpret_cast<const Provenance*>(data +
-						(header->input_intervals_offset ? header->input_intervals_offset : header->gadget_offset));
-		//Append then remap, instead of remapping while appending, to allow bulk copy.
-		std::size_t new_prov_start = prov_.size();
-		prov_.insert(prov_.end(), pfirst, plast);
-		for (std::size_t i = new_prov_start; i < prov_.size(); ++i)
-			prov_[i].output1 = local_to_globalish[prov_[i].output1];
-
-		if (header->input_intervals_offset) {
-			const std::pair<uint64_t, uint64_t>* ifirst = reinterpret_cast<const std::pair<uint64_t, uint64_t>*>(data + header->input_intervals_offset);
-			const std::pair<uint64_t, uint64_t>* ilast = reinterpret_cast<const std::pair<uint64_t, uint64_t>*>(data + header->gadget_offset);
-			input_intervals_ = interval_union(input_intervals_.begin(), input_intervals_.end(), ifirst, ilast);
-		}
-
-		//We leak the mapping because gadgets_ still points at it, and as it's
-		//file-backed there's not much cost to doing so.  If that causes a
-		//problem with unlinking the files at termination, we can keep the
-		//data-len pairs around for unmapping.
+struct less_input2 {
+	bool operator()(const CombineProvenance& a, const CombineProvenance& b) const noexcept {
+		return a.input2 < b.input2;
 	}
-
-	//We have to copy because selsert expects vector<std::byte>, and in other
-	//modes we do want selsert to use owning objects so it can release memory
-	//during the pruning loops.  If this is a big problem, we can template
-	//or otherwise modify selsert to also support gadgets that are pointers at
-	//the mapped regions.
-	vector<vector<std::byte>> gadgets() const {
-		vector<vector<std::byte>> ret;
-		ret.reserve(gadgets_.size());
-		for (std::string_view g : gadgets_) {
-			const std::byte* c = reinterpret_cast<const std::byte*>(g.data());
-			ret.emplace_back(c, c + g.size());
-		}
-		return ret;
-		//could &&-qualify this function and clear gadgets_ as we shouldn't need it again
+	bool operator()(const CombineProvenance* a, const CombineProvenance* b) const noexcept {
+		return a->input2 < b->input2;
 	}
 };
+}
 
 
 
@@ -280,6 +173,347 @@ void insert_skinny_edges(lmdb::txn& txn, lmdb::dbi& edges, std::vector<SkinnyPag
 	}
 	std::vector<SkinnyPage> ensure_memory_is_freed(std::move(pages));
 }
+
+
+
+//The number of slices.  We won't write a slice if no gadgets fall in it, but if
+//the hash is any good, we'll cover all slices for reasonably large gadgets.
+constexpr unsigned int firsthalf_slices = 256;
+//Divide a database hash (i.e., matching selsert) by this value to get the slice number.
+constexpr std::size_t firsthalf_slice_divisor = static_cast<std::size_t>(1) << (64 - 8);
+
+//Header at the beginning of slices.
+struct FirsthalfSliceHeader {
+	uint64_t database_id;
+	uint64_t firsthalf_id;
+	uint32_t slice;
+	uint32_t gadgets;
+	//Gadgets follow as delta-coded varint local index, varint byte length, bytes.
+	//That implies gadgets are sorted by local index, not hash.
+	//We could store the database hash, but experiments show the cost to compute
+	//the hash is insignificant compared to the random memory reference in the
+	//hash table.  If we add an overload of selsert taking non-owning pointers
+	//instead of vector<std::byte> (i.e., basically taking ProposedInsert but
+	//with a string_view/span), it might be worth it again, as we can sort to
+	//deduplicate and already be hash-sorted for selsert.
+};
+
+//Header at the beginning of provs.  There's exactly one of these per firsthalf.
+//If there were no edges,
+struct FirsthalfProvHeader {
+	uint64_t database_id;
+	uint64_t firsthalf_id;
+	EdgeKind kind;
+	uint32_t total_gadgets; //total across all slices
+	std::size_t pruned, skipped;
+	std::size_t provs_offset;
+	std::size_t input_intervals_offset; //if none, points at end-of-file, as usual for empty ranges
+};
+
+template<class Provenance>
+FirsthalfStatistics write_firsthalf(uint64_t database_id, EdgeKind kind,
+		vector<vector<std::byte>>&& allgadgets, vector<Provenance>&& provs,
+		std::size_t pruned, std::size_t skipped,
+		vector<pair<uint64_t, uint64_t>> input_intervals = vector<pair<uint64_t, uint64_t>>()) {
+	std::string database_temp = fmt::format("/var/tmp/toggles/{:x}", database_id);
+	if (mkdir(database_temp.c_str(), 0755) < 0 && errno != EEXIST)
+		throw std::runtime_error(fmt::format("failed to create database temp directory {}: {} ({})",
+				database_temp, strerror(errno), errno));
+
+	//We could build an id from the database id, the pid, the time, etc., but
+	//we can rely on the filesystem for uniqueness.
+	std::string dirname;
+	uint64_t firsthalf_id;
+	for (unsigned int attempts = 0; dirname.empty() && attempts < 100; ++attempts) {
+		firsthalf_id = get_random_integer<uint64_t>();
+		dirname = fmt::format("{}/{:x}", database_temp, firsthalf_id);
+		if (mkdir(dirname.c_str(), 0755) < 0)
+			if (errno == EEXIST)
+				dirname.clear();
+			else
+				throw std::runtime_error(fmt::format("failed to create firsthalf directory {}: {} ({})",
+						dirname, strerror(errno), errno));
+	}
+	if (dirname.empty())
+		throw std::runtime_error("gave up on creating firsthalf directory");
+
+	std::size_t total_gadgets = allgadgets.size();
+	using Slice = vector<pair<unsigned int, vector<std::byte>>>;
+	vector<Slice> slices(firsthalf_slices);
+	for (std::size_t i = 0; i < allgadgets.size(); ++i) {
+		std::size_t hash = farmhash::Fingerprint64(allgadgets[i]);
+		std::size_t slice = hash / firsthalf_slice_divisor;
+		slices[slice].emplace_back(i, std::move(allgadgets[i]));
+	}
+
+	FirsthalfStatistics stats = {};
+	stats.firsthalf_id = firsthalf_id;
+	stats.provs = provs.size();
+	stats.provs_size = provs.size() * sizeof(provs.front());
+	stats.gadgets = allgadgets.size();
+	for (unsigned int i = 0; i < slices.size(); ++i) {
+		Slice& s = slices[i];
+		if (s.empty()) continue;
+		//Sort by local index so we can delta-code them.  If we ever
+		std::sort(s.begin(), s.end(), proj_less<0>());
+
+		std::string filename = fmt::format("{}/{:03d}.bin", dirname, i);
+		FILE* file = std::fopen(filename.c_str(), "w+x");
+		if (!file)
+			throw std::runtime_error(fmt::format("failed to create slice {}: {} ({})", filename, strerror(errno), errno));
+
+		FirsthalfSliceHeader header = {};
+		header.database_id = database_id;
+		header.firsthalf_id = firsthalf_id;
+		header.slice = i;
+		header.gadgets = numeric_cast<uint32_t>(s.size());
+		std::fwrite(&header, sizeof(header), 1, file);
+
+		unsigned int prev_idx = 0;
+		for (const auto& p : s) {
+			fwrite_varint(file, p.first - prev_idx);
+			prev_idx = p.first;
+			fwrite_varint(file, p.second.size());
+			std::fwrite(p.second.data(), 1, p.second.size(), file);
+			stats.gadgets_size += p.second.size();
+		}
+
+		std::fflush(file);
+		if (std::ferror(file))
+			throw std::runtime_error(fmt::format("error writing {}: {} ({})", filename, strerror(errno), errno));
+		std::fclose(file);
+		stats.filenames.push_back(std::move(filename));
+	}
+
+	std::sort(provs.begin(), provs.end(), InputGroupingProvCmp());
+	{
+		FirsthalfProvHeader header = {database_id, firsthalf_id, kind, numeric_cast<unsigned int>(total_gadgets),
+				pruned, skipped, sizeof(header), header.provs_offset + provs.size() * sizeof(provs.front())};
+		std::string filename = dirname + "/prov.bin";
+		FILE* file = std::fopen((dirname + "/prov.bin").c_str(), "w+x");
+		if (!file)
+			throw std::runtime_error(fmt::format("failed to open {}: {} ({})", filename, strerror(errno), errno));
+
+		std::fwrite(&header, sizeof(header), 1, file);
+		std::fwrite(provs.data(), sizeof(Provenance), provs.size(), file);
+		std::fwrite(input_intervals.data(), sizeof(input_intervals.front()), input_intervals.size(), file);
+
+		std::fflush(file);
+		if (std::ferror(file))
+			throw std::runtime_error(fmt::format("error writing {}: {} ({})", filename, strerror(errno), errno));
+		std::fclose(file);
+		//We return prov filenames to ensure the secondhalf processes them even if
+		//we didn't build any gadgets (e.g., connects).
+		stats.filenames.push_back(std::move(filename));
+	}
+
+	return stats;
+}
+
+DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
+	lmdb::env env = lmdb::env::create(); //TODO: flags?
+	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_max_dbs(64);
+	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+	DatabaseMetadata meta = read_meta(env);
+	lmdb::dbi gadget_hashtable, gadget_index, completions, edges_connect, edges_close, edges_mirror;
+	vector<pair<uint64_t, lmdb::dbi>> edges_combine;
+	{
+		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		completions = lmdb::dbi::open(txn, "completions");
+		edges_connect = lmdb::dbi::open(txn, "edges-skinny-connect");
+		edges_close = lmdb::dbi::open(txn, "edges-close");
+		edges_mirror = lmdb::dbi::open(txn, "edges-mirror");
+
+		const std::string_view edges_combine_prefix = "edges-skinny-combine-"sv;
+		lmdb::dbi main = lmdb::dbi::open(txn, nullptr);
+		lmdb::cursor cur = lmdb::cursor::open(txn, main);
+		std::string_view key = edges_combine_prefix;
+		if (!cur.get(key, MDB_SET_RANGE))
+			throw std::logic_error("no combine edge subdatabases?");
+		while (key.compare(0, edges_combine_prefix.size(), edges_combine_prefix) == 0) {
+			//I'm not sure the key is null-terminated.
+			std::string dbname(key);
+			key.remove_prefix(edges_combine_prefix.size());
+			edges_combine.emplace_back(from_string<uint64_t>(key), lmdb::dbi::open(txn, dbname.c_str()));
+			if (!cur.get(key, MDB_NEXT)) break;
+		}
+
+		txn.commit();
+	}
+
+	std::vector<mmapping> ungrouped_slices, provs;
+	for (const std::string& f : filenames)
+		if (f.find("prov.bin") != std::string::npos)
+			provs.push_back(do_mmap(f));
+		else
+			ungrouped_slices.push_back(do_mmap(f));
+	//A mapping counts as having the file open, so we can go ahead and delete
+	//these files.  TODO: also clean up the resulting empty directories
+	//For debugging malformed files/bad parsing, comment this out.
+	delete_many_files(filenames.begin(), filenames.end());
+
+	DatabaseOperationStatistics stats = {};
+	tsl::hopscotch_map<uint64_t, vector<uint64_t>, farmhash_hash> firsthalf_to_globals;
+	std::optional<EdgeKind> prov_kind;
+	for (const mmapping& m : provs) {
+		const FirsthalfProvHeader* header = reinterpret_cast<const FirsthalfProvHeader*>(m.first);
+		if (header->database_id != meta.id)
+			throw std::runtime_error(fmt::format("firsthalf {:x}'s prov is for database {:x}, but we opened database {:x}",
+					header->firsthalf_id, header->database_id, meta.id));
+		firsthalf_to_globals.try_emplace(header->firsthalf_id, header->total_gadgets, std::numeric_limits<uint64_t>::max());
+		stats.pruned_locally += header->pruned;
+		stats.skipped += header->skipped;
+		if (!prov_kind)
+			prov_kind = header->kind;
+		else if (header->kind != *prov_kind)
+			//Strictly speaking, this is not an error; we'll commit the different
+			//kinds separately, and everything will be fine.  But it probably
+			//means something went wrong with how the driver is calling us.
+			throw std::runtime_error(fmt::format("firsthalf {:x}'s provs are {}, but others are {}",
+					header->firsthalf_id, header->kind, *prov_kind));
+	}
+
+	vector<vector<mmapping>> grouped_slices(firsthalf_slices);
+	for (const mmapping& m : ungrouped_slices) {
+		const FirsthalfSliceHeader* header = reinterpret_cast<const FirsthalfSliceHeader*>(m.first);
+		if (header->database_id != meta.id)
+			throw std::runtime_error(fmt::format("firsthalf {:x}'s slice {} is for database {:x}, but we opened database {:x}",
+					header->firsthalf_id, header->slice, header->database_id, meta.id));
+		grouped_slices[header->slice].push_back(m);
+	}
+
+	for (vector<mmapping>& slices : grouped_slices) {
+		tsl::ordered_set<std::string_view, farmhash_hash> gadgets;
+		vector<pair<uint64_t, vector<pair<unsigned int, unsigned int>>>> remap;
+		for (mmapping& slice : slices) {
+			vector<pair<unsigned int, unsigned int>> oldlocal_to_newlocal;
+			const FirsthalfSliceHeader* header = reinterpret_cast<const FirsthalfSliceHeader*>(slice.first);
+			const std::byte* begin = slice.first + sizeof(FirsthalfSliceHeader), *end = slice.first + slice.second;
+			const std::byte* data = begin;
+			uint64_t prev_local_index = 0;
+			unsigned int count;
+			for (count = 0; count < header->gadgets && data < end; ++count) {
+				uint64_t local_index = varint64::read(data) + prev_local_index;
+				prev_local_index = local_index;
+				std::size_t gadget_length = varint64::read(data);
+				std::string_view value(reinterpret_cast<const char*>(data), gadget_length);
+				auto pair = gadgets.insert(value);
+				if (!pair.second)
+					++stats.pruned_locally;
+				oldlocal_to_newlocal.emplace_back(numeric_cast<unsigned int>(local_index),
+						numeric_cast<unsigned int>(std::distance(gadgets.begin(), pair.first)));
+				data += gadget_length;
+			}
+			if (count < header->gadgets)
+				throw std::logic_error(fmt::format("in firsthalf {:x} slice {} expected {} gadgets but ran out of data after {}",
+						header->firsthalf_id, header->slice, header->gadgets, count));
+			if (data != end)
+				throw std::logic_error(fmt::format("in firsthalf {:x} slice {} expected {} gadgets to span {} bytes, but finished with {} bytes left",
+						header->firsthalf_id, header->slice, header->gadgets, end - begin, end - data));
+			remap.emplace_back(header->firsthalf_id, std::move(oldlocal_to_newlocal));
+		}
+
+		//We have to copy because selsert expects vector<std::byte>, and in other
+		//modes we do want selsert to use owning objects so it can release memory
+		//during the pruning loops.  If this is a big problem, we can template
+		//or otherwise modify selsert to also support gadgets that are pointers at
+		//the mapped regions.
+		vector<vector<std::byte>> gadgets_mat;
+		gadgets_mat.reserve(gadgets.size());
+		for (std::string_view g : gadgets) {
+			const std::byte* c = reinterpret_cast<const std::byte*>(g.data());
+			gadgets_mat.emplace_back(c, c + g.size());
+		}
+		auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets_mat));
+		stats.pruned_database += selsert_result.early_pruned + selsert_result.late_pruned;
+		stats.novel_gadgets += selsert_result.novel_size();
+		for (pair<uint64_t, vector<pair<unsigned int, unsigned int>>>& remap_record : remap) {
+			vector<uint64_t>& map = firsthalf_to_globals[remap_record.first];
+			for (pair<unsigned int, unsigned int> p : remap_record.second)
+				map[p.first] = selsert_result.local_to_global[p.second];
+		}
+
+		for (mmapping& slice : slices)
+			do_unmap(slice);
+		slices.clear();
+	}
+
+	for (const mmapping& prov : provs) {
+		const FirsthalfProvHeader* header = reinterpret_cast<const FirsthalfProvHeader*>(prov.first);
+		auto local_to_global = firsthalf_to_globals.find(header->firsthalf_id);
+		if (local_to_global == firsthalf_to_globals.end())
+			throw std::logic_error(fmt::format("can't happen: didn't make firsthalf_to_globals for {:x}?", header->firsthalf_id));
+
+		switch (header->kind) {
+			case EdgeKind::combine: {
+				vector<pair<lmdb::dbi*, vector<SkinnyPage>>> pages;
+				vector<pair<std::string, vector<pair<uint64_t, uint64_t>>>> pending_completions;
+				auto begin = reinterpret_cast<const CombineProvenance*>(prov.first + header->provs_offset),
+						end = reinterpret_cast<const CombineProvenance*>(prov.first + header->input_intervals_offset);
+				stats.edges += end - begin;
+				while (begin != end) {
+					auto [first, last] = std::equal_range(begin, end, *begin, less_input2());
+					auto edge_db_iter = std::find_if(edges_combine.begin(), edges_combine.end(),
+							[input2=first->input2](const auto& p){return p.first == input2;});
+					if (edge_db_iter == edges_combine.end())
+						throw std::logic_error(fmt::format("can't happen: didn't open edge db for {}?", first->input2));
+					pages.emplace_back(&edge_db_iter->second, paginate_for_skinny_edges(first, last, local_to_global->second.begin()));
+					interval_accumulator<uint64_t> comp_input1(512);
+					for (auto i = first; i != last; ++i)
+						comp_input1(i->input1);
+					pending_completions.emplace_back(fmt::format("combine-{}", first->input2), std::move(comp_input1).finish());
+					begin = last;
+				}
+
+				auto txn = lmdb::txn::begin(env);
+				for (std::size_t i = 0; i < pages.size(); ++i) {
+					if (!record_completion(txn, completions, pending_completions[i].first, pending_completions[i].second))
+						throw std::runtime_error(fmt::format(
+								"combine completion collision for skinny edges; completion key {}, first input interval {}",
+								pending_completions[i].first, pending_completions[i].second[0]));
+					insert_skinny_edges(txn, *pages[i].first, std::move(pages[i].second));
+				}
+				txn.commit();
+				break;
+			}
+			case EdgeKind::connect: {
+				auto begin = reinterpret_cast<const ConnectProvenance*>(prov.first + header->provs_offset),
+						end = reinterpret_cast<const ConnectProvenance*>(prov.first + header->input_intervals_offset);
+				stats.edges += end - begin;
+				vector<SkinnyPage> pages = paginate_for_skinny_edges(begin, end, local_to_global->second.begin());
+				//TODO: avoid this copy
+				auto interval_begin = reinterpret_cast<const pair<uint64_t, uint64_t>*>(prov.first + header->input_intervals_offset),
+						interval_end = reinterpret_cast<const pair<uint64_t, uint64_t>*>(prov.first + prov.second);
+				vector<pair<uint64_t, uint64_t>> input_intervals(interval_begin, interval_end);
+				auto txn = lmdb::txn::begin(env);
+				if (!record_completion(txn, completions, "connect", input_intervals))
+					throw std::runtime_error(fmt::format(
+							"connect completion collision for skinny edges; adding {}", fmt::join(input_intervals, ", ")));
+				insert_skinny_edges(txn, edges_connect, std::move(pages));
+				txn.commit();
+				break;
+			}
+			case EdgeKind::close: {
+				throw std::logic_error("TODO secondhalf close provs");
+				break;
+			}
+			case EdgeKind::mirror: {
+				throw std::logic_error("TODO secondhalf mirror provs");
+				break;
+			}
+			default:
+				throw std::logic_error(fmt::format("bad edge kind in prov {:x}: {}", header->firsthalf_id, header->kind));
+		}
+		firsthalf_to_globals.erase(local_to_global);
+		do_unmap(prov);
+	}
+
+	return stats;
+}
+
 
 
 Finisher<ConnectProvenance> do_connect(vector<pair<std::uint64_t, vector<std::byte>>> inputs) {
@@ -398,12 +632,6 @@ Finisher<CombineProvenance> operate_combine(lmdb::env& env, lmdb::dbi& gadget_ha
 	return outputs;
 }
 
-struct less_input2 {
-	bool operator()(const CombineProvenance& a, const CombineProvenance& b) const noexcept {
-		return a.input2 < b.input2;
-	}
-};
-
 DatabaseOperationStatistics commit_combine_result_full(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, vector<pair<uint64_t, lmdb::dbi>>& edge_tables, lmdb::dbi& completions,
 		vector<vector<std::byte>>&& gadgets, vector<CombineProvenance>&& prov, std::size_t pruned, std::size_t skipped) {
@@ -517,7 +745,7 @@ DatabaseOperationStatistics commit_combine_result_skinny(lmdb::env& env, lmdb::d
 		for (auto i = first; i != last; ++i)
 			comp_input1(i->input1);
 		pending_completions.emplace_back(fmt::format("combine-{}", first->input2), std::move(comp_input1).finish());
-		prov.erase(first, last);
+		prov.erase(first, last); //TODO: this erase isn't even helpful, it can't release memory
 	}
 	{vector<CombineProvenance> ensure_memory_is_freed(std::move(prov));}
 
@@ -629,39 +857,39 @@ FirsthalfStatistics do_combine_db_firsthalf(vector<pair<uint64_t, uint64_t>> lef
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
-DatabaseOperationStatistics do_combine_db_secondhalf(vector<std::string> firsthalves) {
-	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-	env.set_max_dbs(64);
-	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-	DatabaseMetadata meta = read_meta(env);
-
-	Refinisher<CombineProvenance> refinisher(meta.id, EdgeKind::combine);
-	for (const std::string& filename : firsthalves)
-		refinisher.read(filename);
-	tsl::ordered_set<uint64_t, farmhash_hash> right_gids;
-	//We could store this in the firsthalves or try to open all the edge tables.
-	//Both avoid a pass over all the provs at the cost of some code complexity.
-	for (const CombineProvenance& p : refinisher.prov_)
-		right_gids.insert(p.input2);
-
-	lmdb::dbi gadget_hashtable, gadget_index, completions;
-	vector<pair<uint64_t, lmdb::dbi>> edge_tables;
-	{
-		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-		completions = lmdb::dbi::open(txn, "completions");
-		for (uint64_t i : right_gids) //just assuming they all already exist
-			edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", i).c_str()));
-		txn.commit();
-	}
-
-	auto stats = commit_combine_result_skinny(env, gadget_hashtable, gadget_index, edge_tables, completions,
-			refinisher.gadgets(), std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
-	delete_many_files(firsthalves.begin(), firsthalves.end());
-	return stats;
-}
+//DatabaseOperationStatistics do_combine_db_secondhalf(vector<std::string> firsthalves) {
+//	lmdb::env env = lmdb::env::create(); //TODO: flags?
+//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+//	env.set_max_dbs(64);
+//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+//	DatabaseMetadata meta = read_meta(env);
+//
+//	Refinisher<CombineProvenance> refinisher(meta.id, EdgeKind::combine);
+//	for (const std::string& filename : firsthalves)
+//		refinisher.read(filename);
+//	tsl::ordered_set<uint64_t, farmhash_hash> right_gids;
+//	//We could store this in the firsthalves or try to open all the edge tables.
+//	//Both avoid a pass over all the provs at the cost of some code complexity.
+//	for (const CombineProvenance& p : refinisher.prov_)
+//		right_gids.insert(p.input2);
+//
+//	lmdb::dbi gadget_hashtable, gadget_index, completions;
+//	vector<pair<uint64_t, lmdb::dbi>> edge_tables;
+//	{
+//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+//		completions = lmdb::dbi::open(txn, "completions");
+//		for (uint64_t i : right_gids) //just assuming they all already exist
+//			edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", i).c_str()));
+//		txn.commit();
+//	}
+//
+//	auto stats = commit_combine_result_skinny(env, gadget_hashtable, gadget_index, edge_tables, completions,
+//			refinisher.gadgets(), std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
+//	delete_many_files(firsthalves.begin(), firsthalves.end());
+//	return stats;
+//}
 
 Finisher<ConnectProvenance> operate_connect(lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
 		vector<pair<uint64_t, uint64_t>>& input_intervals, unsigned int max_states) {
@@ -839,33 +1067,33 @@ FirsthalfStatistics do_connect_db_firsthalf(vector<pair<uint64_t, uint64_t>> inp
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
-DatabaseOperationStatistics do_connect_db_secondhalf(vector<std::string> firsthalves) {
-	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-	env.set_max_dbs(64);
-	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-	DatabaseMetadata meta = read_meta(env);
-
-	Refinisher<ConnectProvenance> refinisher(meta.id, EdgeKind::connect);
-	for (const std::string& filename : firsthalves)
-		refinisher.read(filename);
-
-	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
-	{
-		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-		completions = lmdb::dbi::open(txn, "completions");
-		connect_edges = lmdb::dbi::open(txn, "edges-skinny-connect");
-		txn.commit();
-	}
-
-	auto stats = commit_connect_result_skinny(env, gadget_hashtable, gadget_index, connect_edges, completions,
-			std::move(refinisher.input_intervals_), refinisher.gadgets(), std::move(refinisher.prov_),
-			refinisher.pruned_, refinisher.skipped_);
-	delete_many_files(firsthalves.begin(), firsthalves.end());
-	return stats;
-}
+//DatabaseOperationStatistics do_connect_db_secondhalf(vector<std::string> firsthalves) {
+//	lmdb::env env = lmdb::env::create(); //TODO: flags?
+//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+//	env.set_max_dbs(64);
+//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+//	DatabaseMetadata meta = read_meta(env);
+//
+//	Refinisher<ConnectProvenance> refinisher(meta.id, EdgeKind::connect);
+//	for (const std::string& filename : firsthalves)
+//		refinisher.read(filename);
+//
+//	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
+//	{
+//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+//		completions = lmdb::dbi::open(txn, "completions");
+//		connect_edges = lmdb::dbi::open(txn, "edges-skinny-connect");
+//		txn.commit();
+//	}
+//
+//	auto stats = commit_connect_result_skinny(env, gadget_hashtable, gadget_index, connect_edges, completions,
+//			std::move(refinisher.input_intervals_), refinisher.gadgets(), std::move(refinisher.prov_),
+//			refinisher.pruned_, refinisher.skipped_);
+//	delete_many_files(firsthalves.begin(), firsthalves.end());
+//	return stats;
+//}
 
 DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
@@ -970,33 +1198,33 @@ FirsthalfStatistics do_close_db_firsthalf(vector<pair<uint64_t, uint64_t>> input
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
-DatabaseOperationStatistics do_close_db_secondhalf(vector<std::string> firsthalves) {
-	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-	env.set_max_dbs(64);
-	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-	DatabaseMetadata meta = read_meta(env);
-
-	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::close);
-	for (const std::string& filename : firsthalves)
-		refinisher.read(filename);
-
-	lmdb::dbi gadget_hashtable, gadget_index, completions, close_edges;
-	{
-		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-		completions = lmdb::dbi::open(txn, "completions");
-		close_edges = lmdb::dbi::open(txn, "edges-close");
-		txn.commit();
-	}
-
-	auto stats = commit_close_result(env, gadget_hashtable, gadget_index, close_edges, completions,
-			std::move(refinisher.input_intervals_), refinisher.gadgets(),
-			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
-	delete_many_files(firsthalves.begin(), firsthalves.end());
-	return stats;
-}
+//DatabaseOperationStatistics do_close_db_secondhalf(vector<std::string> firsthalves) {
+//	lmdb::env env = lmdb::env::create(); //TODO: flags?
+//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+//	env.set_max_dbs(64);
+//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+//	DatabaseMetadata meta = read_meta(env);
+//
+//	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::close);
+//	for (const std::string& filename : firsthalves)
+//		refinisher.read(filename);
+//
+//	lmdb::dbi gadget_hashtable, gadget_index, completions, close_edges;
+//	{
+//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+//		completions = lmdb::dbi::open(txn, "completions");
+//		close_edges = lmdb::dbi::open(txn, "edges-close");
+//		txn.commit();
+//	}
+//
+//	auto stats = commit_close_result(env, gadget_hashtable, gadget_index, close_edges, completions,
+//			std::move(refinisher.input_intervals_), refinisher.gadgets(),
+//			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
+//	delete_many_files(firsthalves.begin(), firsthalves.end());
+//	return stats;
+//}
 
 DatabaseOperationStatistics commit_mirror_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges, lmdb::dbi& completions,
@@ -1051,33 +1279,33 @@ FirsthalfStatistics do_mirror_db_firsthalf(vector<pair<uint64_t, uint64_t>> inpu
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
-DatabaseOperationStatistics do_mirror_db_secondhalf(vector<std::string> firsthalves) {
-	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-	env.set_max_dbs(64);
-	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-	DatabaseMetadata meta = read_meta(env);
-
-	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::mirror);
-	for (const std::string& filename : firsthalves)
-		refinisher.read(filename);
-
-	lmdb::dbi gadget_hashtable, gadget_index, completions, mirror_edges;
-	{
-		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-		completions = lmdb::dbi::open(txn, "completions");
-		mirror_edges = lmdb::dbi::open(txn, "edges-mirror");
-		txn.commit();
-	}
-
-	auto stats = commit_mirror_result(env, gadget_hashtable, gadget_index, mirror_edges, completions,
-			std::move(refinisher.input_intervals_), refinisher.gadgets(),
-			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
-	delete_many_files(firsthalves.begin(), firsthalves.end());
-	return stats;
-}
+//DatabaseOperationStatistics do_mirror_db_secondhalf(vector<std::string> firsthalves) {
+//	lmdb::env env = lmdb::env::create(); //TODO: flags?
+//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+//	env.set_max_dbs(64);
+//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
+//	DatabaseMetadata meta = read_meta(env);
+//
+//	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::mirror);
+//	for (const std::string& filename : firsthalves)
+//		refinisher.read(filename);
+//
+//	lmdb::dbi gadget_hashtable, gadget_index, completions, mirror_edges;
+//	{
+//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
+//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+//		completions = lmdb::dbi::open(txn, "completions");
+//		mirror_edges = lmdb::dbi::open(txn, "edges-mirror");
+//		txn.commit();
+//	}
+//
+//	auto stats = commit_mirror_result(env, gadget_hashtable, gadget_index, mirror_edges, completions,
+//			std::move(refinisher.input_intervals_), refinisher.gadgets(),
+//			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
+//	delete_many_files(firsthalves.begin(), firsthalves.end());
+//	return stats;
+//}
 
 
 
@@ -1153,17 +1381,17 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"connect-db"sv, &handler_adapter<do_connect_db>},
 	{"connect-db-full"sv, &handler_adapter<do_connect_db_full>},
 	{"connect-db-firsthalf"sv, &handler_adapter<do_connect_db_firsthalf>},
-	{"connect-db-secondhalf"sv, &handler_adapter<do_connect_db_secondhalf>},
+	{"connect-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
 	{"combine-db"sv, &handler_adapter<do_combine_db>},
 	{"combine-db-firsthalf"sv, &handler_adapter<do_combine_db_firsthalf>},
-	{"combine-db-secondhalf"sv, &handler_adapter<do_combine_db_secondhalf>},
+	{"combine-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
 	{"combine-db-full"sv, &handler_adapter<do_combine_db_full>},
 	{"close-db"sv, &handler_adapter<do_close_db>},
 	{"close-db-firsthalf"sv, &handler_adapter<do_close_db_firsthalf>},
-	{"close-db-secondhalf"sv, &handler_adapter<do_close_db_secondhalf>},
+	{"close-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
 	{"mirror-db-firsthalf"sv, &handler_adapter<do_mirror_db_firsthalf>},
-	{"mirror-db-secondhalf"sv, &handler_adapter<do_mirror_db_secondhalf>},
+	{"mirror-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
 
 	{"deleted-locations"sv, &handler_adapter<do_deleted_locations>},
 };

@@ -31,10 +31,11 @@ struct DatabaseOperationStatistics {
 };
 
 struct FirsthalfStatistics {
+	std::uint64_t firsthalf_id;
 	std::size_t gadgets, gadgets_size;
 	std::size_t provs, provs_size;
-	std::string filename;
-	MSGPACK_DEFINE(gadgets, gadgets_size, provs, provs_size, filename)
+	std::vector<std::string> filenames;
+	MSGPACK_DEFINE(firsthalf_id, gadgets, gadgets_size, provs, provs_size, filenames)
 };
 
 
