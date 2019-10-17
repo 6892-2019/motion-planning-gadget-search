@@ -69,13 +69,6 @@ void do_unmap(mmapping m) {
 	munmap(const_cast<void*>(static_cast<const void*>(m.first)), m.second);
 }
 
-void fwrite_varint(FILE* file, uint64_t value) {
-	std::array<std::byte, 9> varintbuf;
-	std::byte* vp = varintbuf.data();
-	varint64::write(vp, value);
-	std::fwrite(varintbuf.data(), 1, vp - varintbuf.data(), file);
-}
-
 
 struct less_input2 {
 	bool operator()(const CombineProvenance& a, const CombineProvenance& b) const noexcept {
@@ -182,132 +175,122 @@ constexpr unsigned int firsthalf_slices = 256;
 //Divide a database hash (i.e., matching selsert) by this value to get the slice number.
 constexpr std::size_t firsthalf_slice_divisor = static_cast<std::size_t>(1) << (64 - 8);
 
-//Header at the beginning of slices.
-struct FirsthalfSliceHeader {
+struct FirsthalfHeader {
 	uint64_t database_id;
 	uint64_t firsthalf_id;
-	uint32_t slice;
-	uint32_t gadgets;
-	//Gadgets follow as delta-coded varint local index, varint byte length, bytes.
-	//That implies gadgets are sorted by local index, not hash.
-	//We could store the database hash, but experiments show the cost to compute
-	//the hash is insignificant compared to the random memory reference in the
-	//hash table.  If we add an overload of selsert taking non-owning pointers
-	//instead of vector<std::byte> (i.e., basically taking ProposedInsert but
-	//with a string_view/span), it might be worth it again, as we can sort to
-	//deduplicate and already be hash-sorted for selsert.
+	std::size_t gadgets; //total across all slices
+	std::size_t pruned, skipped;
+	std::array<std::size_t, firsthalf_slices> slice_offset;
+	std::size_t provs_offset;
+	std::size_t input_intervals_offset;
+	//Should equal the file size.  Not strictly necessary, but allows us to use
+	//mmap without carrying the length around everywhere.
+	std::size_t end_offset;
+	EdgeKind kind;
 };
 
-//Header at the beginning of provs.  There's exactly one of these per firsthalf.
-//If there were no edges,
-struct FirsthalfProvHeader {
-	uint64_t database_id;
-	uint64_t firsthalf_id;
-	EdgeKind kind;
-	uint32_t total_gadgets; //total across all slices
-	std::size_t pruned, skipped;
-	std::size_t provs_offset;
-	std::size_t input_intervals_offset; //if none, points at end-of-file, as usual for empty ranges
-};
+FirsthalfStatistics write_firsthalf0(uint64_t database_id, EdgeKind kind,
+		vector<vector<std::byte>>&& allgadgets, std::string_view provs,
+		std::size_t prov_count, std::size_t pruned, std::size_t skipped,
+		vector<pair<uint64_t, uint64_t>> input_intervals = vector<pair<uint64_t, uint64_t>>()) {
+	struct SliceItem {
+		std::size_t hash;
+		const std::byte* data;
+		uint32_t length;
+		uint32_t local_index;
+	};
+
+	std::string database_temp = fmt::format("/var/tmp/toggles/{:016x}", database_id);
+	if (mkdir(database_temp.c_str(), 0755) < 0 && errno != EEXIST)
+		throw std::runtime_error(fmt::format("failed to create database temp directory {}: {} ({})",
+				database_temp, strerror(errno), errno));
+
+	FirsthalfHeader header;
+	std::memset(&header, 0, sizeof(header));
+	//We could build an id from the database id, the pid, the time, etc., but
+	//we can rely on the filesystem for uniqueness.
+	std::string filename;
+	FILE* file = nullptr;
+	for (unsigned int attempts = 0; !file && attempts < 100; ++attempts) {
+		header.firsthalf_id = get_random_integer<uint64_t>();
+		filename = fmt::format("{}/{:016x}.bin", database_temp, header.firsthalf_id);
+		file = std::fopen(filename.c_str(), "w+x");
+		if (!file && errno != EEXIST)
+			throw std::runtime_error(fmt::format("failed to create firsthalf {}: {} ({})",
+					filename, strerror(errno), errno));
+	}
+	if (!file)
+		throw std::runtime_error("gave up on creating firsthalf");
+
+	header.database_id = database_id;
+	header.gadgets = allgadgets.size();
+	header.kind = kind;
+	header.pruned = pruned;
+	header.skipped = skipped;
+	//Some of the header isn't filled yet, but write it to reserve space.  We'll
+	//overwrite it at the end.
+	std::fwrite(&header, sizeof(header), 1, file);
+
+	vector<vector<SliceItem>> slices(firsthalf_slices);
+	for (uint32_t i = 0; i < allgadgets.size(); ++i) {
+		std::size_t hash = farmhash::Fingerprint64(allgadgets[i]);
+		std::size_t slice = hash / firsthalf_slice_divisor;
+		slices[slice].push_back({});
+		slices[slice].back() = {hash, allgadgets[i].data(), numeric_cast<uint32_t>(allgadgets[i].size()), i};
+	}
+
+	FirsthalfStatistics stats = {};
+	stats.firsthalf_id = header.firsthalf_id;
+	stats.filenames.push_back(filename);
+	stats.provs = prov_count;
+	stats.provs_size = provs.size();
+	stats.gadgets = allgadgets.size();
+	for (unsigned int i = 0; i < slices.size(); ++i) {
+		header.slice_offset[i] = static_cast<std::size_t>(std::ftell(file));
+		vector<SliceItem> & s = slices[i];
+		if (s.empty()) continue;
+		//Sort by hash.  Previously we sorted by local index so we could
+		//delta-varint it, but hash sorting is more important.  (I guess we
+		//could delta-varint the hashes?)
+		std::sort(s.begin(), s.end(), [](const auto& left, const auto& right){return left.hash < right.hash;});
+
+		for (const SliceItem& p : s) {
+			std::fwrite(&p.hash, sizeof(p.hash), 1, file);
+			std::fwrite(&p.local_index, sizeof(p.local_index), 1, file);
+			std::fwrite(&p.length, sizeof(p.length), 1, file);
+			std::fwrite(p.data, p.length, 1, file);
+			stats.gadgets_size += p.length;
+		}
+	}
+
+	header.provs_offset = std::ftell(file);
+	std::fwrite(provs.data(), provs.size(), 1, file);
+
+	header.input_intervals_offset = std::ftell(file);
+	std::fwrite(input_intervals.data(), sizeof(input_intervals.front()), input_intervals.size(), file);
+
+	header.end_offset = std::ftell(file);
+	//Rewind and write the header now that we've filled in the offsets.
+	std::rewind(file);
+	std::fwrite(&header, sizeof(header), 1, file);
+
+	std::fflush(file);
+	if (std::ferror(file))
+		throw std::runtime_error(fmt::format("error writing {}: {} ({})", filename, strerror(errno), errno));
+	std::fclose(file);
+
+	return stats;
+}
 
 template<class Provenance>
 FirsthalfStatistics write_firsthalf(uint64_t database_id, EdgeKind kind,
 		vector<vector<std::byte>>&& allgadgets, vector<Provenance>&& provs,
 		std::size_t pruned, std::size_t skipped,
 		vector<pair<uint64_t, uint64_t>> input_intervals = vector<pair<uint64_t, uint64_t>>()) {
-	std::string database_temp = fmt::format("/var/tmp/toggles/{:x}", database_id);
-	if (mkdir(database_temp.c_str(), 0755) < 0 && errno != EEXIST)
-		throw std::runtime_error(fmt::format("failed to create database temp directory {}: {} ({})",
-				database_temp, strerror(errno), errno));
-
-	//We could build an id from the database id, the pid, the time, etc., but
-	//we can rely on the filesystem for uniqueness.
-	std::string dirname;
-	uint64_t firsthalf_id;
-	for (unsigned int attempts = 0; dirname.empty() && attempts < 100; ++attempts) {
-		firsthalf_id = get_random_integer<uint64_t>();
-		dirname = fmt::format("{}/{:x}", database_temp, firsthalf_id);
-		if (mkdir(dirname.c_str(), 0755) < 0)
-			if (errno == EEXIST)
-				dirname.clear();
-			else
-				throw std::runtime_error(fmt::format("failed to create firsthalf directory {}: {} ({})",
-						dirname, strerror(errno), errno));
-	}
-	if (dirname.empty())
-		throw std::runtime_error("gave up on creating firsthalf directory");
-
-	std::size_t total_gadgets = allgadgets.size();
-	using Slice = vector<pair<unsigned int, vector<std::byte>>>;
-	vector<Slice> slices(firsthalf_slices);
-	for (std::size_t i = 0; i < allgadgets.size(); ++i) {
-		std::size_t hash = farmhash::Fingerprint64(allgadgets[i]);
-		std::size_t slice = hash / firsthalf_slice_divisor;
-		slices[slice].emplace_back(i, std::move(allgadgets[i]));
-	}
-
-	FirsthalfStatistics stats = {};
-	stats.firsthalf_id = firsthalf_id;
-	stats.provs = provs.size();
-	stats.provs_size = provs.size() * sizeof(provs.front());
-	stats.gadgets = allgadgets.size();
-	for (unsigned int i = 0; i < slices.size(); ++i) {
-		Slice& s = slices[i];
-		if (s.empty()) continue;
-		//Sort by local index so we can delta-code them.  If we ever
-		std::sort(s.begin(), s.end(), proj_less<0>());
-
-		std::string filename = fmt::format("{}/{:03d}.bin", dirname, i);
-		FILE* file = std::fopen(filename.c_str(), "w+x");
-		if (!file)
-			throw std::runtime_error(fmt::format("failed to create slice {}: {} ({})", filename, strerror(errno), errno));
-
-		FirsthalfSliceHeader header = {};
-		header.database_id = database_id;
-		header.firsthalf_id = firsthalf_id;
-		header.slice = i;
-		header.gadgets = numeric_cast<uint32_t>(s.size());
-		std::fwrite(&header, sizeof(header), 1, file);
-
-		unsigned int prev_idx = 0;
-		for (const auto& p : s) {
-			fwrite_varint(file, p.first - prev_idx);
-			prev_idx = p.first;
-			fwrite_varint(file, p.second.size());
-			std::fwrite(p.second.data(), 1, p.second.size(), file);
-			stats.gadgets_size += p.second.size();
-		}
-
-		std::fflush(file);
-		if (std::ferror(file))
-			throw std::runtime_error(fmt::format("error writing {}: {} ({})", filename, strerror(errno), errno));
-		std::fclose(file);
-		stats.filenames.push_back(std::move(filename));
-	}
-
 	std::sort(provs.begin(), provs.end(), InputGroupingProvCmp());
-	{
-		FirsthalfProvHeader header = {database_id, firsthalf_id, kind, numeric_cast<unsigned int>(total_gadgets),
-				pruned, skipped, sizeof(header), header.provs_offset + provs.size() * sizeof(provs.front())};
-		std::string filename = dirname + "/prov.bin";
-		FILE* file = std::fopen((dirname + "/prov.bin").c_str(), "w+x");
-		if (!file)
-			throw std::runtime_error(fmt::format("failed to open {}: {} ({})", filename, strerror(errno), errno));
-
-		std::fwrite(&header, sizeof(header), 1, file);
-		std::fwrite(provs.data(), sizeof(Provenance), provs.size(), file);
-		std::fwrite(input_intervals.data(), sizeof(input_intervals.front()), input_intervals.size(), file);
-
-		std::fflush(file);
-		if (std::ferror(file))
-			throw std::runtime_error(fmt::format("error writing {}: {} ({})", filename, strerror(errno), errno));
-		std::fclose(file);
-		//We return prov filenames to ensure the secondhalf processes them even if
-		//we didn't build any gadgets (e.g., connects).
-		stats.filenames.push_back(std::move(filename));
-	}
-
-	return stats;
+	return write_firsthalf0(database_id, kind, std::move(allgadgets),
+			std::string_view(reinterpret_cast<char*>(provs.data()), provs.size() * sizeof(Provenance)),
+			provs.size(), pruned, skipped, std::move(input_intervals));
 }
 
 DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
@@ -344,75 +327,65 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
 		txn.commit();
 	}
 
-	std::vector<mmapping> ungrouped_slices, provs;
-	for (const std::string& f : filenames)
-		if (f.find("prov.bin") != std::string::npos)
-			provs.push_back(do_mmap(f));
-		else
-			ungrouped_slices.push_back(do_mmap(f));
-	//A mapping counts as having the file open, so we can go ahead and delete
-	//these files.  TODO: also clean up the resulting empty directories
-	//For debugging malformed files/bad parsing, comment this out.
-	delete_many_files(filenames.begin(), filenames.end());
-
 	DatabaseOperationStatistics stats = {};
+	std::vector<const FirsthalfHeader*> files;
 	tsl::hopscotch_map<uint64_t, vector<uint64_t>, farmhash_hash> firsthalf_to_globals;
 	std::optional<EdgeKind> prov_kind;
-	for (const mmapping& m : provs) {
-		const FirsthalfProvHeader* header = reinterpret_cast<const FirsthalfProvHeader*>(m.first);
+	for (const std::string& filename : filenames) {
+		mmapping m = do_mmap(filename);
+		auto header = reinterpret_cast<const FirsthalfHeader*>(m.first);
+		files.push_back(header);
+
+		if (header->end_offset != m.second)
+			throw std::runtime_error(fmt::format("firsthalf {:016x} has header length {} but physical length {}",
+					header->firsthalf_id, header->end_offset, m.second));
 		if (header->database_id != meta.id)
-			throw std::runtime_error(fmt::format("firsthalf {:x}'s prov is for database {:x}, but we opened database {:x}",
+			throw std::runtime_error(fmt::format("firsthalf {:016x} has is for database {:016x} but we're committing to database {:016x}",
 					header->firsthalf_id, header->database_id, meta.id));
-		firsthalf_to_globals.try_emplace(header->firsthalf_id, header->total_gadgets, std::numeric_limits<uint64_t>::max());
-		stats.pruned_locally += header->pruned;
-		stats.skipped += header->skipped;
-		if (!prov_kind)
+
+		if (!prov_kind) //TODO: use separate RPC entry points to pass in the expected kind
 			prov_kind = header->kind;
 		else if (header->kind != *prov_kind)
 			//Strictly speaking, this is not an error; we'll commit the different
 			//kinds separately, and everything will be fine.  But it probably
 			//means something went wrong with how the driver is calling us.
-			throw std::runtime_error(fmt::format("firsthalf {:x}'s provs are {}, but others are {}",
+			throw std::runtime_error(fmt::format("firsthalf {:016x}'s provs are {}, but others are {}",
 					header->firsthalf_id, header->kind, *prov_kind));
+
+		firsthalf_to_globals.try_emplace(header->firsthalf_id, header->gadgets, std::numeric_limits<uint64_t>::max());
+		stats.pruned_locally += header->pruned;
+		stats.skipped += header->skipped;
 	}
 
-	vector<vector<mmapping>> grouped_slices(firsthalf_slices);
-	for (const mmapping& m : ungrouped_slices) {
-		const FirsthalfSliceHeader* header = reinterpret_cast<const FirsthalfSliceHeader*>(m.first);
-		if (header->database_id != meta.id)
-			throw std::runtime_error(fmt::format("firsthalf {:x}'s slice {} is for database {:x}, but we opened database {:x}",
-					header->firsthalf_id, header->slice, header->database_id, meta.id));
-		grouped_slices[header->slice].push_back(m);
-	}
-
-	for (vector<mmapping>& slices : grouped_slices) {
+	for (unsigned int slice = 0; slice < firsthalf_slices; ++slice) {
 		tsl::ordered_set<std::string_view, farmhash_hash> gadgets;
 		vector<pair<uint64_t, vector<pair<unsigned int, unsigned int>>>> remap;
-		for (mmapping& slice : slices) {
+		for (const FirsthalfHeader* header : files) {
 			vector<pair<unsigned int, unsigned int>> oldlocal_to_newlocal;
-			const FirsthalfSliceHeader* header = reinterpret_cast<const FirsthalfSliceHeader*>(slice.first);
-			const std::byte* begin = slice.first + sizeof(FirsthalfSliceHeader), *end = slice.first + slice.second;
+			const std::byte* base = reinterpret_cast<const std::byte*>(header);
+			const std::byte* begin = base + header->slice_offset[slice];
+			const std::byte* end = base + ((slice+1) < header->slice_offset.size() ? header->slice_offset[slice+1] : header->provs_offset);
 			const std::byte* data = begin;
-			uint64_t prev_local_index = 0;
-			unsigned int count;
-			for (count = 0; count < header->gadgets && data < end; ++count) {
-				uint64_t local_index = varint64::read(data) + prev_local_index;
-				prev_local_index = local_index;
-				std::size_t gadget_length = varint64::read(data);
-				std::string_view value(reinterpret_cast<const char*>(data), gadget_length);
+			while (data != end) {
+				//TODO: use the hash.  maybe even sort instead of using the hashset?
+				//TODO: check the hash is actually in this slice
+				std::size_t hash;
+				uint32_t local_index, length;
+				std::memcpy(&hash, data, sizeof(hash));
+				data += sizeof(hash);
+				std::memcpy(&local_index, data, sizeof(local_index));
+				data += sizeof(local_index);
+				std::memcpy(&length, data, sizeof(length));
+				data += sizeof(length);
+				std::string_view value(reinterpret_cast<const char*>(data), length);
+				data += length;
+
 				auto pair = gadgets.insert(value);
 				if (!pair.second)
 					++stats.pruned_locally;
 				oldlocal_to_newlocal.emplace_back(numeric_cast<unsigned int>(local_index),
 						numeric_cast<unsigned int>(std::distance(gadgets.begin(), pair.first)));
-				data += gadget_length;
 			}
-			if (count < header->gadgets)
-				throw std::logic_error(fmt::format("in firsthalf {:x} slice {} expected {} gadgets but ran out of data after {}",
-						header->firsthalf_id, header->slice, header->gadgets, count));
-			if (data != end)
-				throw std::logic_error(fmt::format("in firsthalf {:x} slice {} expected {} gadgets to span {} bytes, but finished with {} bytes left",
-						header->firsthalf_id, header->slice, header->gadgets, end - begin, end - data));
 			remap.emplace_back(header->firsthalf_id, std::move(oldlocal_to_newlocal));
 		}
 
@@ -435,24 +408,21 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
 			for (pair<unsigned int, unsigned int> p : remap_record.second)
 				map[p.first] = selsert_result.local_to_global[p.second];
 		}
-
-		for (mmapping& slice : slices)
-			do_unmap(slice);
-		slices.clear();
 	}
 
-	for (const mmapping& prov : provs) {
-		const FirsthalfProvHeader* header = reinterpret_cast<const FirsthalfProvHeader*>(prov.first);
+	while (!files.empty()) {
+		const FirsthalfHeader* header = files.back();
+		const std::byte* base = reinterpret_cast<const std::byte*>(header);
 		auto local_to_global = firsthalf_to_globals.find(header->firsthalf_id);
 		if (local_to_global == firsthalf_to_globals.end())
-			throw std::logic_error(fmt::format("can't happen: didn't make firsthalf_to_globals for {:x}?", header->firsthalf_id));
+			throw std::logic_error(fmt::format("can't happen: didn't make firsthalf_to_globals for {:016x}?", header->firsthalf_id));
 
 		switch (header->kind) {
 			case EdgeKind::combine: {
 				vector<pair<lmdb::dbi*, vector<SkinnyPage>>> pages;
 				vector<pair<std::string, vector<pair<uint64_t, uint64_t>>>> pending_completions;
-				auto begin = reinterpret_cast<const CombineProvenance*>(prov.first + header->provs_offset),
-						end = reinterpret_cast<const CombineProvenance*>(prov.first + header->input_intervals_offset);
+				auto begin = reinterpret_cast<const CombineProvenance*>(base + header->provs_offset),
+						end = reinterpret_cast<const CombineProvenance*>(base + header->input_intervals_offset);
 				stats.edges += end - begin;
 				while (begin != end) {
 					auto [first, last] = std::equal_range(begin, end, *begin, less_input2());
@@ -480,13 +450,13 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
 				break;
 			}
 			case EdgeKind::connect: {
-				auto begin = reinterpret_cast<const ConnectProvenance*>(prov.first + header->provs_offset),
-						end = reinterpret_cast<const ConnectProvenance*>(prov.first + header->input_intervals_offset);
+				auto begin = reinterpret_cast<const ConnectProvenance*>(base + header->provs_offset),
+						end = reinterpret_cast<const ConnectProvenance*>(base + header->input_intervals_offset);
 				stats.edges += end - begin;
 				vector<SkinnyPage> pages = paginate_for_skinny_edges(begin, end, local_to_global->second.begin());
 				//TODO: avoid this copy
-				auto interval_begin = reinterpret_cast<const pair<uint64_t, uint64_t>*>(prov.first + header->input_intervals_offset),
-						interval_end = reinterpret_cast<const pair<uint64_t, uint64_t>*>(prov.first + prov.second);
+				auto interval_begin = reinterpret_cast<const pair<uint64_t, uint64_t>*>(base + header->input_intervals_offset),
+						interval_end = reinterpret_cast<const pair<uint64_t, uint64_t>*>(base + header->end_offset);
 				vector<pair<uint64_t, uint64_t>> input_intervals(interval_begin, interval_end);
 				auto txn = lmdb::txn::begin(env);
 				if (!record_completion(txn, completions, "connect", input_intervals))
@@ -507,8 +477,14 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
 			default:
 				throw std::logic_error(fmt::format("bad edge kind in prov {:x}: {}", header->firsthalf_id, header->kind));
 		}
+
 		firsthalf_to_globals.erase(local_to_global);
-		do_unmap(prov);
+		do_unmap({base, header->end_offset});
+		files.pop_back();
+		if (std::remove(filenames.back().c_str()))
+			//std::remove isn't documented to set errno, but maybe its implementation does anyway
+			fmt::print(stderr, "warning: failed to delete {}: {} ({})\n", filenames.back(), strerror(errno), errno);
+		filenames.pop_back();
 	}
 
 	return stats;
