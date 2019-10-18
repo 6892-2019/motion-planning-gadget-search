@@ -357,57 +357,221 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
 		stats.skipped += header->skipped;
 	}
 
+	struct ProposedInsert {
+		std::size_t hash;
+		uint64_t* global_id;
+		std::string_view data;
+		bool operator==(const ProposedInsert& o) const noexcept {
+			//for adjacent_find, so doesn't compare global_id
+			return std::tie(hash, data) == std::tie(hash, o.data);
+		}
+		bool operator<(const ProposedInsert& o) const noexcept {
+			return std::tie(hash, data) < std::tie(hash, o.data);
+		}
+	};
+
+	struct SortStats {
+		encoding::Stats stats;
+		//We break ties by hash for locality of later readers, and we do so
+		//explicitly rather than rely std::stable_sort's order preservation because
+		//std::stable_sort allocates more memory than explicitly storing the hash
+		//costs.  It turns out to be handy, anyway.
+		std::size_t hash;
+		uint64_t* global_id;
+		bool operator<(const SortStats& b) const noexcept {
+			//std::tie doesn't bind rvalues, so we have to explicitly compute some things.
+			//Single out uedges == 0 and dedges == 0 because those are natural queries;
+			//the rest of the edge sorts aren't super useful.  These are reversed because
+			//false sorts before true.
+			bool a_undirected = stats.directed_edges != 0,
+					a_directed = stats.undirected_edges != 0,
+					b_undirected = b.stats.directed_edges != 0,
+					b_directed = b.stats.undirected_edges != 0;
+			auto a_total_edges = stats.undirected_edges + stats.directed_edges,
+					b_total_edges = b.stats.undirected_edges + b.stats.directed_edges;
+			return std::tie(stats.components, stats.locations, stats.states, a_undirected, a_directed, stats.undirected_edges, stats.directed_edges, a_total_edges, hash) <
+					std::tie(b.stats.components, b.stats.locations, b.stats.states, b_undirected, b_directed, b.stats.undirected_edges, b.stats.directed_edges, b_total_edges, b.hash);
+		}
+	};
+
 	for (unsigned int slice = 0; slice < firsthalf_slices; ++slice) {
-		tsl::ordered_set<std::string_view, farmhash_hash> gadgets;
-		vector<pair<uint64_t, vector<pair<unsigned int, unsigned int>>>> remap;
+		vector<ProposedInsert> gadgets;
 		for (const FirsthalfHeader* header : files) {
-			vector<pair<unsigned int, unsigned int>> oldlocal_to_newlocal;
+			vector<uint64_t>& map = firsthalf_to_globals[header->firsthalf_id];
 			const std::byte* base = reinterpret_cast<const std::byte*>(header);
 			const std::byte* begin = base + header->slice_offset[slice];
 			const std::byte* end = base + ((slice+1) < header->slice_offset.size() ? header->slice_offset[slice+1] : header->provs_offset);
 			const std::byte* data = begin;
 			while (data != end) {
-				//TODO: use the hash.  maybe even sort instead of using the hashset?
-				//TODO: check the hash is actually in this slice
-				std::size_t hash;
+				ProposedInsert pi;
 				uint32_t local_index, length;
-				std::memcpy(&hash, data, sizeof(hash));
-				data += sizeof(hash);
+				std::memcpy(&pi.hash, data, sizeof(pi.hash));
+				data += sizeof(pi.hash);
 				std::memcpy(&local_index, data, sizeof(local_index));
 				data += sizeof(local_index);
+				pi.global_id = &map[local_index];
 				std::memcpy(&length, data, sizeof(length));
 				data += sizeof(length);
-				std::string_view value(reinterpret_cast<const char*>(data), length);
+				pi.data = std::string_view(reinterpret_cast<const char*>(data), length);
 				data += length;
-
-				auto pair = gadgets.insert(value);
-				if (!pair.second)
-					++stats.pruned_locally;
-				oldlocal_to_newlocal.emplace_back(numeric_cast<unsigned int>(local_index),
-						numeric_cast<unsigned int>(std::distance(gadgets.begin(), pair.first)));
+				gadgets.push_back(pi);
 			}
-			remap.emplace_back(header->firsthalf_id, std::move(oldlocal_to_newlocal));
+		}
+		std::sort(gadgets.begin(), gadgets.end());
+
+		//Early pruning.  We don't check for adjacent equality first because it
+		//is cheap to resolve against the database (the cursor won't move) and
+		//we'd have to remember to fill in the ids for any removed duplicates.
+		{
+			auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+			lmdb::cursor cur = lmdb::cursor::open(txn, gadget_hashtable);
+			vector<ProposedInsert>::iterator new_end = gadgets.begin();
+			for (vector<ProposedInsert>::iterator i = gadgets.begin(); i != gadgets.end(); ++i) {
+				const char* data_begin = i->data.data(), *data_end = data_begin + i->data.size();
+				std::string_view key = lmdb::to_sv(i->hash), existing;
+				while (cur.get(key, existing, MDB_SET))
+					//skip the appended ID (remove_suffix is a mutator)
+					if (std::equal(data_begin, data_end, existing.begin(), existing.end()-8)) {
+						*(i->global_id) = lmdb::from_sv<std::uint64_t>(existing.substr(existing.size()-8));
+						++stats.pruned_database;
+						goto labeled_continue; //don't increment new_end
+					} else
+						++(i->hash); //linear probing
+
+				if (i != new_end) //avoid vector's self-move-assignment
+					*new_end = std::move(*i);
+				++new_end;
+				labeled_continue: ;
+			}
+			txn.commit();
+			gadgets.erase(new_end, gadgets.end());
 		}
 
-		//We have to copy because selsert expects vector<std::byte>, and in other
-		//modes we do want selsert to use owning objects so it can release memory
-		//during the pruning loops.  If this is a big problem, we can template
-		//or otherwise modify selsert to also support gadgets that are pointers at
-		//the mapped regions.
-		vector<vector<std::byte>> gadgets_mat;
-		gadgets_mat.reserve(gadgets.size());
-		for (std::string_view g : gadgets) {
-			const std::byte* c = reinterpret_cast<const std::byte*>(g.data());
-			gadgets_mat.emplace_back(c, c + g.size());
+		//Now we have to deduplicate locally because we want to assign hashes
+		//based on a stats sort before doing the actual insertion.
+		vector<pair<uint64_t*, uint64_t*>> pending_stores; //*first = *second
+		{
+			auto first = std::adjacent_find(gadgets.begin(), gadgets.end()), last = gadgets.end();
+			//if we need to, prune like std::unique, but recording pending stores for things we remove
+			if (first != last) {
+				auto result = first;
+				while (++first != last) {
+					if (*result == *first)
+						pending_stores.emplace_back(first->global_id, result->global_id);
+					else if (++result != first)
+						*result = *first;
+				}
+				last = ++result;
+			}
+			gadgets.erase(last, gadgets.end());
 		}
-		auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(gadgets_mat));
-		stats.pruned_database += selsert_result.early_pruned + selsert_result.late_pruned;
-		stats.novel_gadgets += selsert_result.novel_size();
-		for (pair<uint64_t, vector<pair<unsigned int, unsigned int>>>& remap_record : remap) {
-			vector<uint64_t>& map = firsthalf_to_globals[remap_record.first];
-			for (pair<unsigned int, unsigned int> p : remap_record.second)
-				map[p.first] = selsert_result.local_to_global[p.second];
+		stats.novel_gadgets += gadgets.size();
+		if (gadgets.empty())
+			continue;
+
+		vector<SortStats> sorted_stats;
+		sorted_stats.reserve(gadgets.size());
+		for (ProposedInsert& pi : gadgets)
+			sorted_stats.push_back({encoding::stats(reinterpret_cast<const std::byte*>(pi.data.data())), pi.hash, pi.global_id});
+		std::sort(sorted_stats.begin(), sorted_stats.end());
+
+		{
+			std::vector<std::size_t> hashes;
+			hashes.reserve(sorted_stats.size());
+
+			auto txn = lmdb::txn::begin(env);
+			{ //extra scope for write cursors
+				lmdb::cursor hashtable_cur = lmdb::cursor::open(txn, gadget_hashtable);
+				//The only way a previous slice's commit could interfere with us is
+				//if a linear probing chain extends into our slice.  We can just
+				//check that the last hash in the previous slice is not used.  If
+				//hashes are uniformly distributed, we have seven-nines probability
+				//that these slots will be unused after 2^32 gadgets are committed.
+				if (slice != 0) {
+					std::size_t probe = slice * firsthalf_slice_divisor - 1;
+					std::string_view probe_key = lmdb::to_sv(probe);
+					if (hashtable_cur.get(probe_key, MDB_SET))
+						throw std::runtime_error(fmt::format("supreme unluckiness: hash {:x} at end of slice {} is used",
+								probe, slice - 1));
+				}
+
+				//This duplicates toggles-share's get_current_max_gadget_id, but
+				//we're going to keep using the cursor.
+				lmdb::cursor index_cur = lmdb::cursor::open(txn, gadget_index);
+				std::string_view last_index_key, last_index_value;
+				std::uint64_t last_id;
+				if (index_cur.get(last_index_key, last_index_value, MDB_LAST))
+					last_id = lmdb::from_sv<std::uint64_t>(last_index_key);
+				else
+					last_id = 0; //empty index; starting at 0 means first key will be 1
+				const std::uint64_t first_novel_id = last_id + 1;
+
+				for (const SortStats& ss : sorted_stats) {
+					assert(*ss.global_id == std::numeric_limits<uint64_t>::max());
+					*ss.global_id = ++last_id; //last_id is inclusive, so pre-increment
+					hashes.push_back(ss.hash);
+				}
+
+				for (ProposedInsert& pi : gadgets) {
+					//Constructing a string_view to nullptr is technically undefined
+					//behavior.  We have to const_cast it later again anyway, so
+					//string_view is just the wrong abstraction for MDB_RESERVE.
+					//TODO: rewrite lmdbxx using std::span (hah)
+					std::string_view target(nullptr, pi.data.size()+8);
+					if (!hashtable_cur.put(lmdb::to_sv(pi.hash), target, MDB_RESERVE | MDB_NOOVERWRITE))
+						//If there ever is a self-collision we can fix up the
+						//hash in the hashes vector by taking the difference
+						//between *pi.global_id and last_id's initial value.
+						throw std::runtime_error(fmt::format("collision for hash {} in slice {}; possible self-collision?", pi.hash, slice));
+					std::memcpy(const_cast<char*>(target.begin()), pi.data.data(), pi.data.size());
+					std::memcpy(const_cast<char*>(target.begin()) + pi.data.size(), pi.global_id, sizeof(*pi.global_id));
+				}
+
+				//TODO: this code copied from the old selsert could fairly
+				//easily be commoned.
+				//We pack hashes into pages to save space.  See the comment in
+				//select_gadget_id_to_hash.
+				std::size_t hashes_index = 0;
+				//LMDB overflow pages have a 16-byte header.
+				constexpr std::size_t index_page_bytes = (4096-16), index_page_size = index_page_bytes / sizeof(std::size_t);
+				//If the previous page wasn't full, fill it.
+				if (!last_index_value.empty() && last_index_value.size() != index_page_bytes) {
+					//We can't actually append to the last open page; instead we
+					//append a new page and delete the old one.
+					std::size_t current_size = last_index_value.size() / sizeof(std::size_t);
+					std::size_t new_elements = std::min(hashes.size(), index_page_size - current_size);
+					std::uint64_t current_key = lmdb::from_sv<uint64_t>(last_index_key);
+					std::uint64_t new_key = current_key + new_elements;
+					//See above comment about undefined behavior.
+					std::string_view new_page(nullptr, (current_size + new_elements) * sizeof(std::size_t));
+					if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
+						throw std::logic_error(fmt::format("failed to append while extending index page: {} {} {} {}",
+								current_key, current_size, new_key, new_page.size()));
+					std::memcpy(const_cast<char*>(new_page.data()), last_index_value.data(), last_index_value.size());
+					std::memcpy(const_cast<char*>(new_page.data()) + last_index_value.size(), hashes.data(), new_elements * sizeof(std::size_t));
+					if (!index_cur.get(last_index_key, MDB_SET))
+						throw std::logic_error(fmt::format("failed to position for deletion? {}", current_key));
+					index_cur.del(); //throws on failure
+					hashes_index += new_elements;
+				}
+
+				while (hashes_index < hashes.size()) {
+					std::size_t new_elements = std::min(hashes.size() - hashes_index, index_page_size);
+					std::size_t new_key = first_novel_id + hashes_index + new_elements - 1;
+					//See above comment about undefined behavior.
+					std::string_view new_page(nullptr, new_elements * sizeof(std::size_t));
+					if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
+						throw std::logic_error(fmt::format("failed to append new index page: {} {} {} {}",
+								hashes_index, new_key, new_elements, new_page.size()));
+					std::memcpy(const_cast<char*>(new_page.data()), hashes.data() + hashes_index, new_elements * sizeof(std::size_t));
+					hashes_index += new_elements;
+				}
+			}
+			txn.commit();
 		}
+
+		for (auto p : pending_stores)
+			*p.first = *p.second;
 	}
 
 	while (!files.empty()) {
