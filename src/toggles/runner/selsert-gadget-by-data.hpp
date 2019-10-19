@@ -18,5 +18,11 @@ struct SelsertGadgetByDataResult {
 SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, std::vector<std::vector<std::byte>>&& gadgets);
 
+//This is a hack to share some code between the "regular" selsert and the new
+//firsthalf/secondhalf selsert.  Not for general consumption.
+//Last argument could be a span<std::size_t> (we do exploit contiguity).
+void append_gadget_index(lmdb::txn& txn, lmdb::dbi& gadget_index, const std::vector<std::size_t>& hashes,
+		std::uint64_t first_novel_id);
+
 #endif /* SELSERT_GADGET_BY_DATA_HPP */
 
