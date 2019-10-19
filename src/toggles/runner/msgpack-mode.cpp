@@ -295,9 +295,7 @@ FirsthalfStatistics write_firsthalf(uint64_t database_id, EdgeKind kind,
 			provs.size(), pruned, skipped, std::move(input_intervals));
 }
 
-DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames) {
-	unsigned int num_reader_threads = 3; //TODO: should be an RPC parameter from the driver
-
+DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, unsigned int num_reader_threads) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);

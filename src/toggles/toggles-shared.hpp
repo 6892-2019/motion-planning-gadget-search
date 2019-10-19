@@ -35,6 +35,16 @@ struct FirsthalfStatistics {
 	std::size_t gadgets, gadgets_size;
 	std::size_t provs, provs_size;
 	std::vector<std::string> filenames;
+	FirsthalfStatistics& operator+=(const FirsthalfStatistics& o) {
+		//If it ever matters, we could keep a vector of ids.
+		firsthalf_id = 0;
+		gadgets += o.gadgets;
+		gadgets_size += o.gadgets_size;
+		provs += o.provs;
+		provs_size += o.provs_size;
+		filenames.insert(filenames.end(), o.filenames.begin(), o.filenames.end());
+		return *this;
+	}
 	MSGPACK_DEFINE(firsthalf_id, gadgets, gadgets_size, provs, provs_size, filenames)
 };
 

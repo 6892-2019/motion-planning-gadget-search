@@ -338,6 +338,17 @@ struct RuntimeOptions {
 	 */
 	unsigned int db_threads = 1;
 	/**
+	 * The number of threads to use for secondhalf reader tasks.
+	 */
+	unsigned int secondhalf_reader_threads = 3;
+	/**
+	 * Running small secondhalf tasks tends to fragment predicate indices by
+	 * defeating stats-sorted id assignment.  We can fix this by enforcing a
+	 * minimum number of tasks and/or total gadgets in each secondhalf task.
+	 */
+	unsigned int secondhalf_min_pending_tasks = 256;
+	std::size_t secondhalf_min_pending_gadget_bytes = 64 * 1024 * 1024;
+	/**
 	 * The directory to write batch tasks into.
 	 */
 	std::string batch_task_directory;
@@ -855,18 +866,25 @@ private:
 		const std::size_t tasks_total = tasks.size();
 		std::uint32_t tasks_dispatched = 0, tasks_completed = 0;
 		std::uint32_t secondhalf_seq = 0; //0 when secondhalf not running, else > tasks_total
-		vector<std::string> pending_firsthalves; //filenames for the next secondhalf
+		FirsthalfStatistics pending_firsthalves = {};
 		coarse_monotonic_clock::time_point operation_start = coarse_monotonic_clock::now();
 		vector<pair<std::uint32_t, coarse_monotonic_clock::time_point>> task_starts;
 		bool error_happened = false;
 		workers_->run([&](simple_buffer& buffer) {
 			if (error_happened) return false; //stop generating work, but let existing issued work finish
 			buffer.clear();
-			if (!secondhalf_seq && !pending_firsthalves.empty()) {
+			//We launch a secondhalf task if we aren't already running one and
+			//either we have enough pending work or all firsthalves have completed.
+			if (!secondhalf_seq && !pending_firsthalves.filenames.empty() &&
+					((tasks_completed == tasks_total) ||
+					//We're implicitly relying on firsthalves only producing one file.
+					(pending_firsthalves.filenames.size() >= runtime_opts_.secondhalf_min_pending_tasks &&
+					pending_firsthalves.gadgets_size >= runtime_opts_.secondhalf_min_pending_gadget_bytes))) {
 				//We could count up starting at tasks_total if we cared.
 				secondhalf_seq = std::numeric_limits<unsigned int>::max();
-				pack_call(buffer, secondhalf_seq, secondhalf_cmd.value(), std::move(pending_firsthalves));
-				pending_firsthalves.clear();
+				pack_call(buffer, secondhalf_seq, secondhalf_cmd.value(), std::move(pending_firsthalves.filenames),
+						runtime_opts_.secondhalf_reader_threads);
+				pending_firsthalves = {};
 				task_starts.emplace_back(secondhalf_seq, coarse_monotonic_clock::now());
 				return true;
 			} else if (!tasks.empty()) {
@@ -926,12 +944,11 @@ private:
 						stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			} else if (resp->seq() < tasks_total) {
 				FirsthalfStatistics stats = resp->result_as<FirsthalfStatistics>();
-				pending_firsthalves.insert(pending_firsthalves.end(),
-						std::move_iterator(stats.filenames.begin()), std::move_iterator(stats.filenames.end()));
+				pending_firsthalves += stats;
 				fmt::print("{} {}.{} {}/{} {:.1f}s/{}: {:6d} g ({} kiB), {:6d} p ({} kiB); {} pfh\n",
 						operation_name, generation_, subgeneration_,
 						resp->seq(), tasks_total, task_time.count(), eta,
-						stats.gadgets, stats.gadgets_size / 1024, stats.provs, stats.provs / 1024, pending_firsthalves.size());
+						stats.gadgets, stats.gadgets_size / 1024, stats.provs, stats.provs / 1024, pending_firsthalves.filenames.size());
 			} else {
 				DatabaseOperationStatistics stats = resp->result_as<DatabaseOperationStatistics>();
 				overall_stats += stats;
@@ -939,7 +956,7 @@ private:
 				fmt::print("{} {}.{} write {:.1f}s/{}: {:6d} p, {:6d} k, {:6d} n, {:6d} e; {} pfh\n",
 						operation_name, generation_, subgeneration_,
 						task_time.count(), eta,
-						stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges, pending_firsthalves.size());
+						stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges, pending_firsthalves.filenames.size());
 			}
 		});
 		if (error_happened)
@@ -1238,6 +1255,13 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			runtime_opts.mirror_task_batch_threshold = to_uint64(argv[++i]);
 		else if (argv[i] == "--batch-task-directory"sv)
 			runtime_opts.batch_task_directory = argv[++i];
+
+		else if (argv[i] == "--secondhalf-reader-threads"sv || argv[i] == "--secondhalf-readers"sv)
+			runtime_opts.secondhalf_reader_threads = to_uint(argv[++i]);
+		else if (argv[i] == "--secondhalf-nagle-tasks"sv)
+			runtime_opts.secondhalf_min_pending_tasks = to_uint(argv[++i]);
+		else if (argv[i] == "--secondhalf-nagle-gadget-bytes"sv)
+			runtime_opts.secondhalf_min_pending_gadget_bytes = to_uint(argv[++i]);
 
 		else
 			gid_specs.emplace_back(argv[i]);
