@@ -295,7 +295,7 @@ FirsthalfStatistics write_firsthalf(uint64_t database_id, EdgeKind kind,
 			provs.size(), pruned, skipped, std::move(input_intervals));
 }
 
-DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, unsigned int num_reader_threads) {
+DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, EdgeKind kind, unsigned int num_reader_threads) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
@@ -332,7 +332,6 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, unsi
 	DatabaseOperationStatistics stats = {};
 	std::vector<const FirsthalfHeader*> files;
 	tsl::hopscotch_map<uint64_t, vector<uint64_t>, farmhash_hash> firsthalf_to_globals;
-	std::optional<EdgeKind> prov_kind;
 	for (const std::string& filename : filenames) {
 		mmapping m = do_mmap(filename);
 		auto header = reinterpret_cast<const FirsthalfHeader*>(m.first);
@@ -345,14 +344,12 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, unsi
 			throw std::runtime_error(fmt::format("firsthalf {:016x} has is for database {:016x} but we're committing to database {:016x}",
 					header->firsthalf_id, header->database_id, meta.id));
 
-		if (!prov_kind) //TODO: use separate RPC entry points to pass in the expected kind
-			prov_kind = header->kind;
-		else if (header->kind != *prov_kind)
+		if (header->kind != kind)
 			//Strictly speaking, this is not an error; we'll commit the different
 			//kinds separately, and everything will be fine.  But it probably
 			//means something went wrong with how the driver is calling us.
-			throw std::runtime_error(fmt::format("firsthalf {:016x}'s provs are {}, but others are {}",
-					header->firsthalf_id, header->kind, *prov_kind));
+			throw std::runtime_error(fmt::format("firsthalf {:016x}'s provs are {}, but we're committing {}",
+					header->firsthalf_id, header->kind, kind));
 
 		firsthalf_to_globals.try_emplace(header->firsthalf_id, header->gadgets, std::numeric_limits<uint64_t>::max());
 		stats.pruned_locally += header->pruned;
@@ -1011,39 +1008,9 @@ FirsthalfStatistics do_combine_db_firsthalf(vector<pair<uint64_t, uint64_t>> lef
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
-//DatabaseOperationStatistics do_combine_db_secondhalf(vector<std::string> firsthalves) {
-//	lmdb::env env = lmdb::env::create(); //TODO: flags?
-//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-//	env.set_max_dbs(64);
-//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-//	DatabaseMetadata meta = read_meta(env);
-//
-//	Refinisher<CombineProvenance> refinisher(meta.id, EdgeKind::combine);
-//	for (const std::string& filename : firsthalves)
-//		refinisher.read(filename);
-//	tsl::ordered_set<uint64_t, farmhash_hash> right_gids;
-//	//We could store this in the firsthalves or try to open all the edge tables.
-//	//Both avoid a pass over all the provs at the cost of some code complexity.
-//	for (const CombineProvenance& p : refinisher.prov_)
-//		right_gids.insert(p.input2);
-//
-//	lmdb::dbi gadget_hashtable, gadget_index, completions;
-//	vector<pair<uint64_t, lmdb::dbi>> edge_tables;
-//	{
-//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-//		completions = lmdb::dbi::open(txn, "completions");
-//		for (uint64_t i : right_gids) //just assuming they all already exist
-//			edge_tables.emplace_back(i, lmdb::dbi::open(txn, fmt::format("edges-skinny-combine-{}", i).c_str()));
-//		txn.commit();
-//	}
-//
-//	auto stats = commit_combine_result_skinny(env, gadget_hashtable, gadget_index, edge_tables, completions,
-//			refinisher.gadgets(), std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
-//	delete_many_files(firsthalves.begin(), firsthalves.end());
-//	return stats;
-//}
+DatabaseOperationStatistics do_combine_db_secondhalf(vector<std::string> firsthalves, unsigned int num_reader_threads) {
+	return do_secondhalf_db(std::move(firsthalves), EdgeKind::combine, num_reader_threads);
+}
 
 Finisher<ConnectProvenance> operate_connect(lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index,
 		vector<pair<uint64_t, uint64_t>>& input_intervals, unsigned int max_states) {
@@ -1221,33 +1188,9 @@ FirsthalfStatistics do_connect_db_firsthalf(vector<pair<uint64_t, uint64_t>> inp
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
-//DatabaseOperationStatistics do_connect_db_secondhalf(vector<std::string> firsthalves) {
-//	lmdb::env env = lmdb::env::create(); //TODO: flags?
-//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-//	env.set_max_dbs(64);
-//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-//	DatabaseMetadata meta = read_meta(env);
-//
-//	Refinisher<ConnectProvenance> refinisher(meta.id, EdgeKind::connect);
-//	for (const std::string& filename : firsthalves)
-//		refinisher.read(filename);
-//
-//	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
-//	{
-//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-//		completions = lmdb::dbi::open(txn, "completions");
-//		connect_edges = lmdb::dbi::open(txn, "edges-skinny-connect");
-//		txn.commit();
-//	}
-//
-//	auto stats = commit_connect_result_skinny(env, gadget_hashtable, gadget_index, connect_edges, completions,
-//			std::move(refinisher.input_intervals_), refinisher.gadgets(), std::move(refinisher.prov_),
-//			refinisher.pruned_, refinisher.skipped_);
-//	delete_many_files(firsthalves.begin(), firsthalves.end());
-//	return stats;
-//}
+DatabaseOperationStatistics do_connect_db_secondhalf(vector<std::string> firsthalves, unsigned int num_reader_threads) {
+	return do_secondhalf_db(std::move(firsthalves), EdgeKind::connect, num_reader_threads);
+}
 
 DatabaseOperationStatistics commit_simple_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& edges, lmdb::dbi& completions,
@@ -1352,33 +1295,9 @@ FirsthalfStatistics do_close_db_firsthalf(vector<pair<uint64_t, uint64_t>> input
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
-//DatabaseOperationStatistics do_close_db_secondhalf(vector<std::string> firsthalves) {
-//	lmdb::env env = lmdb::env::create(); //TODO: flags?
-//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-//	env.set_max_dbs(64);
-//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-//	DatabaseMetadata meta = read_meta(env);
-//
-//	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::close);
-//	for (const std::string& filename : firsthalves)
-//		refinisher.read(filename);
-//
-//	lmdb::dbi gadget_hashtable, gadget_index, completions, close_edges;
-//	{
-//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-//		completions = lmdb::dbi::open(txn, "completions");
-//		close_edges = lmdb::dbi::open(txn, "edges-close");
-//		txn.commit();
-//	}
-//
-//	auto stats = commit_close_result(env, gadget_hashtable, gadget_index, close_edges, completions,
-//			std::move(refinisher.input_intervals_), refinisher.gadgets(),
-//			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
-//	delete_many_files(firsthalves.begin(), firsthalves.end());
-//	return stats;
-//}
+DatabaseOperationStatistics do_close_db_secondhalf(vector<std::string> firsthalves, unsigned int num_reader_threads) {
+	return do_secondhalf_db(std::move(firsthalves), EdgeKind::close, num_reader_threads);
+}
 
 DatabaseOperationStatistics commit_mirror_result(lmdb::env& env, lmdb::dbi& gadget_hashtable,
 		lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges, lmdb::dbi& completions,
@@ -1433,33 +1352,9 @@ FirsthalfStatistics do_mirror_db_firsthalf(vector<pair<uint64_t, uint64_t>> inpu
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
-//DatabaseOperationStatistics do_mirror_db_secondhalf(vector<std::string> firsthalves) {
-//	lmdb::env env = lmdb::env::create(); //TODO: flags?
-//	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
-//	env.set_max_dbs(64);
-//	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
-//	DatabaseMetadata meta = read_meta(env);
-//
-//	Refinisher<SimpleProvenance> refinisher(meta.id, EdgeKind::mirror);
-//	for (const std::string& filename : firsthalves)
-//		refinisher.read(filename);
-//
-//	lmdb::dbi gadget_hashtable, gadget_index, completions, mirror_edges;
-//	{
-//		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-//		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
-//		gadget_index = lmdb::dbi::open(txn, "gadget_index");
-//		completions = lmdb::dbi::open(txn, "completions");
-//		mirror_edges = lmdb::dbi::open(txn, "edges-mirror");
-//		txn.commit();
-//	}
-//
-//	auto stats = commit_mirror_result(env, gadget_hashtable, gadget_index, mirror_edges, completions,
-//			std::move(refinisher.input_intervals_), refinisher.gadgets(),
-//			std::move(refinisher.prov_), refinisher.pruned_, refinisher.skipped_);
-//	delete_many_files(firsthalves.begin(), firsthalves.end());
-//	return stats;
-//}
+DatabaseOperationStatistics do_mirror_db_secondhalf(vector<std::string> firsthalves, unsigned int num_reader_threads) {
+	return do_secondhalf_db(std::move(firsthalves), EdgeKind::mirror, num_reader_threads);
+}
 
 
 
@@ -1535,17 +1430,17 @@ const std::pair<string_view, handler_ptr> handlers[] = {
 	{"connect-db"sv, &handler_adapter<do_connect_db>},
 	{"connect-db-full"sv, &handler_adapter<do_connect_db_full>},
 	{"connect-db-firsthalf"sv, &handler_adapter<do_connect_db_firsthalf>},
-	{"connect-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
+	{"connect-db-secondhalf"sv, &handler_adapter<do_connect_db_secondhalf>},
 	{"combine-db"sv, &handler_adapter<do_combine_db>},
 	{"combine-db-firsthalf"sv, &handler_adapter<do_combine_db_firsthalf>},
-	{"combine-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
+	{"combine-db-secondhalf"sv, &handler_adapter<do_combine_db_secondhalf>},
 	{"combine-db-full"sv, &handler_adapter<do_combine_db_full>},
 	{"close-db"sv, &handler_adapter<do_close_db>},
 	{"close-db-firsthalf"sv, &handler_adapter<do_close_db_firsthalf>},
-	{"close-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
+	{"close-db-secondhalf"sv, &handler_adapter<do_close_db_secondhalf>},
 	{"mirror-db"sv, &handler_adapter<do_mirror_db>},
 	{"mirror-db-firsthalf"sv, &handler_adapter<do_mirror_db_firsthalf>},
-	{"mirror-db-secondhalf"sv, &handler_adapter<do_secondhalf_db>},
+	{"mirror-db-secondhalf"sv, &handler_adapter<do_mirror_db_secondhalf>},
 
 	{"deleted-locations"sv, &handler_adapter<do_deleted_locations>},
 };
