@@ -94,6 +94,9 @@ struct SkinnyPage {
 			last_input(a), header(std::move(b)), page(std::move(c)) {}
 	std::uint64_t last_input;
 	std::vector<std::byte> header, page;
+	bool operator<(const SkinnyPage& o) const {
+		return last_input < o.last_input;
+	}
 };
 
 template<class Iterator, class IdMapper = identity_subscript>
@@ -590,81 +593,130 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 	}
 
 
-	while (!files.empty()) {
-		const FirsthalfHeader* header = files.back();
-		const std::byte* base = reinterpret_cast<const std::byte*>(header);
-		auto local_to_global = firsthalf_to_globals.find(header->firsthalf_id);
-		if (local_to_global == firsthalf_to_globals.end())
-			throw std::logic_error(fmt::format("can't happen: didn't make firsthalf_to_globals for {:016x}?", header->firsthalf_id));
+	constexpr std::size_t minimum_transaction_size = 64 * 1024 * 1024;
+	switch (kind) {
+		case EdgeKind::combine: {
+			//Actual maps are overkill here; we actually want a linear_map that just does std::find.
+			tsl::hopscotch_map<lmdb::dbi*, vector<SkinnyPage>> pages;
+			tsl::hopscotch_map<uint64_t, vector<pair<uint64_t, uint64_t>>> pending_completions;
+			vector<std::string> delete_on_commit;
+			while (!files.empty()) {
+				pages.clear();
+				pending_completions.clear();
+				delete_on_commit.clear();
+				std::size_t pages_size = 0, completions_size = 0;
+				do {
+					const FirsthalfHeader* header = files.back();
+					const std::byte* base = reinterpret_cast<const std::byte*>(header);
+					auto local_to_global = firsthalf_to_globals.find(header->firsthalf_id);
+					if (local_to_global == firsthalf_to_globals.end())
+						throw std::logic_error(fmt::format("can't happen: didn't make firsthalf_to_globals for {:016x}?", header->firsthalf_id));
 
-		switch (header->kind) {
-			case EdgeKind::combine: {
-				vector<pair<lmdb::dbi*, vector<SkinnyPage>>> pages;
-				vector<pair<std::string, vector<pair<uint64_t, uint64_t>>>> pending_completions;
-				auto begin = reinterpret_cast<const CombineProvenance*>(base + header->provs_offset),
-						end = reinterpret_cast<const CombineProvenance*>(base + header->input_intervals_offset);
-				stats.edges += end - begin;
-				while (begin != end) {
-					auto [first, last] = std::equal_range(begin, end, *begin, less_input2());
-					auto edge_db_iter = std::find_if(edges_combine.begin(), edges_combine.end(),
-							[input2=first->input2](const auto& p){return p.first == input2;});
-					if (edge_db_iter == edges_combine.end())
-						throw std::logic_error(fmt::format("can't happen: didn't open edge db for {}?", first->input2));
-					pages.emplace_back(&edge_db_iter->second, paginate_for_skinny_edges(first, last, local_to_global->second.begin()));
-					interval_accumulator<uint64_t> comp_input1(512);
-					for (auto i = first; i != last; ++i)
-						comp_input1(i->input1);
-					pending_completions.emplace_back(fmt::format("combine-{}", first->input2), std::move(comp_input1).finish());
-					begin = last;
-				}
+					auto begin = reinterpret_cast<const CombineProvenance*>(base + header->provs_offset),
+							end = reinterpret_cast<const CombineProvenance*>(base + header->input_intervals_offset);
+					stats.edges += end - begin;
+					while (begin != end) {
+						auto [first, last] = std::equal_range(begin, end, *begin, less_input2());
+						auto edge_db_iter = std::find_if(edges_combine.begin(), edges_combine.end(),
+								[input2=first->input2](const auto& p){return p.first == input2;});
+						if (edge_db_iter == edges_combine.end())
+							throw std::logic_error(fmt::format("can't happen: didn't open edge db for {}?", first->input2));
+						vector<SkinnyPage>& subpages = pages[&edge_db_iter->second];
+						vector<SkinnyPage> more_pages = paginate_for_skinny_edges(first, last, local_to_global->second.begin());
+						for (const SkinnyPage& p : more_pages)
+							pages_size += std::min<std::size_t>(p.header.size() + p.page.size(), 4096);
+						subpages.insert(subpages.end(), std::move_iterator(more_pages.begin()), std::move_iterator(more_pages.end()));
+
+						interval_accumulator<uint64_t> comp_input1(512);
+						for (auto i = first; i != last; ++i)
+							comp_input1(i->input1);
+						auto new_intervals = std::move(comp_input1).finish();
+						auto& old_intervals = pending_completions[first->input2];
+						completions_size -= old_intervals.size();
+						old_intervals = interval_union(old_intervals.begin(), old_intervals.end(), new_intervals.begin(), new_intervals.end());
+						completions_size += old_intervals.size();
+
+						begin = last;
+					}
+
+					firsthalf_to_globals.erase(local_to_global);
+					do_unmap({base, header->end_offset});
+					files.pop_back();
+					delete_on_commit.push_back(std::move(filenames.back()));
+					filenames.pop_back();
+				} while (!files.empty() && (pages_size + completions_size * sizeof(pair<uint64_t, uint64_t>) < minimum_transaction_size));
+
+				for (auto i = pages.begin(); i != pages.end(); ++i)
+					std::sort(i.value().begin(), i.value().end());
 
 				auto txn = lmdb::txn::begin(env);
-				for (std::size_t i = 0; i < pages.size(); ++i) {
-					if (!record_completion(txn, completions, pending_completions[i].first, pending_completions[i].second))
+				for (auto i = pending_completions.begin(); i != pending_completions.end(); ++i)
+					if (!record_completion(txn, completions, fmt::format("combine-{}", i->first), i->second))
 						throw std::runtime_error(fmt::format(
 								"combine completion collision for skinny edges; completion key {}, first input interval {}",
-								pending_completions[i].first, pending_completions[i].second[0]));
-					insert_skinny_edges(txn, *pages[i].first, std::move(pages[i].second));
-				}
+								i->first, i->second[0]));
+				for (auto i = pages.begin(); i != pages.end(); ++i)
+					insert_skinny_edges(txn, *i->first, std::move(i.value()));
 				txn.commit();
-				break;
+				delete_many_files(delete_on_commit.begin(), delete_on_commit.end());
 			}
-			case EdgeKind::connect: {
-				auto begin = reinterpret_cast<const ConnectProvenance*>(base + header->provs_offset),
-						end = reinterpret_cast<const ConnectProvenance*>(base + header->input_intervals_offset);
-				stats.edges += end - begin;
-				vector<SkinnyPage> pages = paginate_for_skinny_edges(begin, end, local_to_global->second.begin());
-				//TODO: avoid this copy
-				auto interval_begin = reinterpret_cast<const pair<uint64_t, uint64_t>*>(base + header->input_intervals_offset),
-						interval_end = reinterpret_cast<const pair<uint64_t, uint64_t>*>(base + header->end_offset);
-				vector<pair<uint64_t, uint64_t>> input_intervals(interval_begin, interval_end);
-				auto txn = lmdb::txn::begin(env);
-				if (!record_completion(txn, completions, "connect", input_intervals))
-					throw std::runtime_error(fmt::format(
-							"connect completion collision for skinny edges; adding {}", fmt::join(input_intervals, ", ")));
-				insert_skinny_edges(txn, edges_connect, std::move(pages));
-				txn.commit();
-				break;
-			}
-			case EdgeKind::close: {
-				throw std::logic_error("TODO secondhalf close provs");
-				break;
-			}
-			case EdgeKind::mirror: {
-				throw std::logic_error("TODO secondhalf mirror provs");
-				break;
-			}
-			default:
-				throw std::logic_error(fmt::format("bad edge kind in prov {:x}: {}", header->firsthalf_id, header->kind));
+			break;
 		}
 
-		firsthalf_to_globals.erase(local_to_global);
-		do_unmap({base, header->end_offset});
-		files.pop_back();
-		if (std::remove(filenames.back().c_str()))
-			//std::remove isn't documented to set errno, but maybe its implementation does anyway
-			fmt::print(stderr, "warning: failed to delete {}: {} ({})\n", filenames.back(), strerror(errno), errno);
-		filenames.pop_back();
+		case EdgeKind::connect: {
+			vector<SkinnyPage> pages;
+			vector<pair<uint64_t, uint64_t>> pending_completions;
+			vector<std::string> delete_on_commit;
+			while (!files.empty()) {
+				pages.clear();
+				pending_completions.clear();
+				delete_on_commit.clear();
+				std::size_t pages_size = 0;
+				do {
+					const FirsthalfHeader* header = files.back();
+					const std::byte* base = reinterpret_cast<const std::byte*>(header);
+					auto local_to_global = firsthalf_to_globals.find(header->firsthalf_id);
+					if (local_to_global == firsthalf_to_globals.end())
+						throw std::logic_error(fmt::format("can't happen: didn't make firsthalf_to_globals for {:016x}?", header->firsthalf_id));
+
+					auto begin = reinterpret_cast<const ConnectProvenance*>(base + header->provs_offset),
+							end = reinterpret_cast<const ConnectProvenance*>(base + header->input_intervals_offset);
+					stats.edges += end - begin;
+					vector<SkinnyPage> more_pages = paginate_for_skinny_edges(begin, end, local_to_global->second.begin());
+					for (const SkinnyPage& p : more_pages)
+						pages_size += std::min<std::size_t>(p.header.size() + p.page.size(), 4096);
+					pages.insert(pages.end(), std::move_iterator(more_pages.begin()), std::move_iterator(more_pages.end()));
+
+					auto interval_begin = reinterpret_cast<const pair<uint64_t, uint64_t>*>(base + header->input_intervals_offset),
+							interval_end = reinterpret_cast<const pair<uint64_t, uint64_t>*>(base + header->end_offset);
+					pending_completions = interval_union(pending_completions.begin(), pending_completions.end(), interval_begin, interval_end);
+
+					firsthalf_to_globals.erase(local_to_global);
+					do_unmap({base, header->end_offset});
+					files.pop_back();
+					delete_on_commit.push_back(std::move(filenames.back()));
+					filenames.pop_back();
+				} while (!files.empty() && (pages_size + pending_completions.size() * sizeof(pair<uint64_t, uint64_t>) < minimum_transaction_size));
+
+				std::sort(pages.begin(), pages.end());
+
+				auto txn = lmdb::txn::begin(env);
+				if (!record_completion(txn, completions, "connect", pending_completions))
+					throw std::runtime_error(fmt::format(
+							"connect completion collision for skinny edges; adding {}", fmt::join(pending_completions, ", ")));
+				insert_skinny_edges(txn, edges_connect, std::move(pages));
+				txn.commit();
+				delete_many_files(delete_on_commit.begin(), delete_on_commit.end());
+			}
+			break;
+		}
+
+		case EdgeKind::close:
+			throw std::logic_error("TODO secondhalf close provs");
+		case EdgeKind::mirror:
+			throw std::logic_error("TODO secondhalf mirror provs");
+		default:
+			throw std::logic_error(fmt::format("can't happen: RPC endpoint passed bad kind? {}", kind));
 	}
 
 	return stats;
