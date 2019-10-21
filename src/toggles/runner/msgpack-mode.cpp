@@ -100,6 +100,11 @@ template<class Iterator, class IdMapper = identity_subscript>
 std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last, IdMapper map = IdMapper()) {
 	assert(std::is_sorted(first, last, InputGroupingProvCmp()));
 
+	//Reduce write transaction stalls defragmenting free lists by restricting
+	//the length of each page.  Specifically, we require the header to fit in
+	//one page.  (With some care and acceptance of waste we could limit pages
+	//to single LMDB pages, but this seems to be enough of a limit already.)
+	constexpr std::size_t optimal_page_size = 4096-16;
 	std::vector<SkinnyPage> ret;
 	if (first == last) return ret;
 	std::vector<std::byte> header, page;
@@ -141,7 +146,7 @@ std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last,
 		std::byte* length_end = length.data();
 		upv::write(length_end, chunk_end - chunk.data());
 
-		if (header.size() + (length_end - length.data()) > std::numeric_limits<std::uint16_t>::max() ||
+		if (header.size() + (length_end - length.data()) > optimal_page_size ||
 				input != previous_input + 1)
 			commit_page();
 
