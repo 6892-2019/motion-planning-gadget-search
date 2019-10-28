@@ -18,6 +18,8 @@
 #include "hopscotch/hopscotch_map.h"
 #include "proj_compare.hpp"
 #include "bounded_queue.hpp"
+#include "transform_reduce.hpp"
+#include "coarse_monotonic_clock.hpp"
 #include <boost/container/static_vector.hpp>
 #include <msgpack.hpp>
 #include <future>
@@ -408,6 +410,8 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 		unsigned int slice;
 	};
 
+	constexpr std::size_t fetches_between_tests = 1000;
+	constexpr std::chrono::milliseconds transaction_ttl(500);
 	auto read_and_prepare = [&](unsigned int slice) -> CommitData {
 		vector<ProposedInsert> gadgets;
 		for (const FirsthalfHeader* header : files) {
@@ -431,38 +435,8 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 				gadgets.push_back(pi);
 			}
 		}
+
 		std::sort(gadgets.begin(), gadgets.end());
-
-		//Early pruning.  We don't check for adjacent equality first because it
-		//is cheap to resolve against the database (the cursor won't move) and
-		//we'd have to remember to fill in the ids for any removed duplicates.
-		{
-			auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
-			lmdb::cursor cur = lmdb::cursor::open(txn, gadget_hashtable);
-			vector<ProposedInsert>::iterator new_end = gadgets.begin();
-			for (vector<ProposedInsert>::iterator i = gadgets.begin(); i != gadgets.end(); ++i) {
-				const char* data_begin = i->data.data(), *data_end = data_begin + i->data.size();
-				std::string_view key = lmdb::to_sv(i->hash), existing;
-				while (cur.get(key, existing, MDB_SET))
-					//skip the appended ID (remove_suffix is a mutator)
-					if (std::equal(data_begin, data_end, existing.begin(), existing.end()-8)) {
-						*(i->global_id) = lmdb::from_sv<std::uint64_t>(existing.substr(existing.size()-8));
-						++stats.pruned_database;
-						goto labeled_continue; //don't increment new_end
-					} else
-						++(i->hash); //linear probing
-
-				if (i != new_end) //avoid vector's self-move-assignment
-					*new_end = std::move(*i);
-				++new_end;
-				labeled_continue: ;
-			}
-			txn.commit();
-			gadgets.erase(new_end, gadgets.end());
-		}
-
-		//Now we have to deduplicate locally because we want to assign hashes
-		//based on a stats sort before doing the actual insertion.
 		vector<pair<uint64_t*, uint64_t*>> pending_stores; //*first = *second
 		{
 			auto first = std::adjacent_find(gadgets.begin(), gadgets.end()), last = gadgets.end();
@@ -479,15 +453,86 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 			}
 			gadgets.erase(last, gadgets.end());
 		}
+		assert(std::is_sorted(gadgets.begin(), gadgets.end()));
+
+		std::size_t task_size = (gadgets.size()+(num_reader_threads-1)) / num_reader_threads;
+		using proposed_range = pair<vector<ProposedInsert>::iterator, vector<ProposedInsert>::iterator>;
+		std::vector<proposed_range> tasks;
+		for (vector<ProposedInsert>::iterator i = gadgets.begin(); i != gadgets.end();) {
+			std::size_t size = std::min<std::size_t>(task_size, std::distance(i, gadgets.end()));
+			tasks.emplace_back(i, i+size);
+			i += size;
+		}
+		pair<vector<proposed_range>, vector<SortStats>> result = transform_reduce(std::move(tasks), num_reader_threads,
+		[&](proposed_range r) {
+			lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+			lmdb::cursor cursor = lmdb::cursor::open(txn, gadget_hashtable);
+
+			vector<ProposedInsert>::iterator cur = r.first, new_end = r.first;
+			auto txn_start = coarse_monotonic_clock::now();
+			while (cur != r.second) {
+				std::size_t chunk_size = std::min<std::size_t>(fetches_between_tests, std::distance(cur, r.second));
+				for (vector<ProposedInsert>::iterator chunk_end = cur + chunk_size; cur != chunk_end; ++cur) {
+					const char* data_begin = cur->data.data(), *data_end = data_begin + cur->data.size();
+					std::string_view key = lmdb::to_sv(cur->hash), existing;
+					while (cursor.get(key, existing, MDB_SET))
+						//skip the appended ID (remove_suffix is a mutator)
+						if (std::equal(data_begin, data_end, existing.begin(), existing.end()-8)) {
+							*(cur->global_id) = lmdb::from_sv<std::uint64_t>(existing.substr(existing.size()-8));
+							++stats.pruned_database;
+							goto labeled_continue; //don't increment new_end
+						} else
+							++(cur->hash); //linear probing
+
+					//ProposedInsert self-move-assignment is okay
+					*new_end = std::move(*cur);
+					++new_end;
+					labeled_continue: ;
+				}
+
+				auto now = coarse_monotonic_clock::now();
+				if (now - txn_start >= transaction_ttl && cur != r.second) {
+					txn.reset();
+					txn.renew();
+					cursor.renew(txn);
+					txn_start = now;
+				}
+			}
+			txn.commit();
+
+			vector<proposed_range> survivors;
+			survivors.emplace_back(r.first, new_end);
+			vector<SortStats> stats;
+			stats.reserve(std::distance(r.first, new_end));
+			for (vector<ProposedInsert>::iterator i = r.first; i != new_end; ++i)
+				stats.push_back({encoding::stats(reinterpret_cast<const std::byte*>(i->data.data())), i->hash, i->global_id});
+			return pair{std::move(survivors), std::move(stats)};
+		}, [&](pair<vector<proposed_range>, vector<SortStats>>&& left, pair<vector<proposed_range>, vector<SortStats>>&& right) {
+			pair<vector<proposed_range>, vector<SortStats>> ret = std::move(left);
+			ret.first.insert(ret.first.end(), right.first.begin(), right.first.end());
+			ret.second.insert(ret.second.end(), right.second.begin(), right.second.end());
+			return ret;
+		});
+
+		//results.first contains the surviving ranges.  Copy them to the left,
+		//then erase the leftovers.
+		//TODO: sorting to work around transform_reduce bug (GitHub issue #127)
+		std::sort(result.first.begin(), result.first.end());
+		vector<ProposedInsert>::iterator end = gadgets.begin();
+		for (std::size_t i = 0; i < result.first.size(); ++i) {
+			//If r[i].first == end, that range (even if empty) is already in place.
+			if (result.first[i].first == end)
+				end = result.first[i].second;
+			else
+				end = std::move(result.first[i].first, result.first[i].second, end);
+		}
+		gadgets.erase(end, gadgets.end());
+		assert(std::is_sorted(gadgets.begin(), gadgets.end()));
 		stats.novel_gadgets += gadgets.size();
+		//Sort the stats.  (We could sort and merge in parallel instead.)
+		std::sort(result.second.begin(), result.second.end());
 
-		vector<SortStats> sorted_stats;
-		sorted_stats.reserve(gadgets.size());
-		for (ProposedInsert& pi : gadgets)
-			sorted_stats.push_back({encoding::stats(reinterpret_cast<const std::byte*>(pi.data.data())), pi.hash, pi.global_id});
-		std::sort(sorted_stats.begin(), sorted_stats.end());
-
-		return {std::move(gadgets), std::move(sorted_stats), std::move(pending_stores), slice};
+		return {std::move(gadgets), std::move(result.second), std::move(pending_stores), slice};
 	};
 
 	auto commit_secondhalf = [&](vector<ProposedInsert> gadgets, vector<SortStats> sorted_stats,
@@ -550,46 +595,27 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 	};
 
 	{
-		bounded_queue<std::optional<std::packaged_task<CommitData()>>> task_queue(num_reader_threads);
-		auto reader_thread_proc = [&task_queue]() {
+		//A 1-element queue means a maximum of 3 in-flight slices: the writer
+		//thread's, a buffered slice, and the reader thread's.  Allowing more
+		//buffered slices might help if the writer gets stuck defragmenting, but
+		//the more slices in flight, the less likely the slice's pages are to
+		//still be in memory at commit time (i.e., prefetching is less effective).
+		//TODO: there's probably something better than bounded_queue here, maybe with C++20 waitable atomics
+		bounded_queue<std::optional<CommitData>> commitables(1);
+		auto writer_thread_proc = [&commitables, &commit_secondhalf]() {
 			while (true) {
-				auto task = task_queue.take();
+				std::optional<CommitData> task = commitables.take();
 				if (!task) return;
-				(*task)();
+				commit_secondhalf(std::move(task->gadgets), std::move(task->sorted_stats),
+						std::move(task->pending_stores), task->slice);
 			}
 		};
-		vector<std::thread> reader_threads;
-		for (unsigned int i = 0; i < num_reader_threads; ++i)
-			reader_threads.push_back(std::thread(reader_thread_proc));
+		std::thread writer_thread(writer_thread_proc);
 
-		std::deque<std::future<CommitData>> result_queue;
-		auto writer_thread_proc = [&]() {
-			unsigned int slice = 0;
-			auto enqueue_task = [&]() {
-				if (slice >= firsthalf_slices) return false;
-				std::packaged_task<CommitData()> task(std::bind_front(read_and_prepare, slice));
-				result_queue.push_back(task.get_future());
-				task_queue.put(std::optional(std::move(task)));
-				++slice;
-				return true;
-			};
-			for (unsigned int i = 0; i < num_reader_threads; ++i)
-				enqueue_task();
-
-			while (!result_queue.empty()) {
-				CommitData c = result_queue.front().get();
-				result_queue.pop_front();
-				commit_secondhalf(std::move(c.gadgets), std::move(c.sorted_stats), std::move(c.pending_stores), c.slice);
-				enqueue_task();
-			}
-			for (unsigned int i = 0; i < num_reader_threads; ++i)
-				task_queue.put(std::nullopt);
-		};
-
-		//We could launch a new writer thread, but this thread would immediately block on it anyway.
-		writer_thread_proc();
-		for (std::thread& r : reader_threads)
-			r.join();
+		for (unsigned int slice = 0; slice < firsthalf_slices; ++slice)
+			commitables.put(read_and_prepare(slice));
+		commitables.put(std::nullopt);
+		writer_thread.join();
 	}
 
 
