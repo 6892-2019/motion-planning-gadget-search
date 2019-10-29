@@ -10,10 +10,10 @@
 #include "tsl/ordered_set.h"
 #include "tsl/ordered_map.h"
 #include "lmdb++.h"
+#include "randutils.hpp"
 #include <fmt/chrono.h>
 #include <yaml-cpp/yaml.h>
 #include <ctime>
-#include <sys/random.h>
 #include <variant>
 
 using namespace automaton;
@@ -36,18 +36,6 @@ DatabaseOperationStatistics do_close_db0(vector<pair<uint64_t, uint64_t>> input_
 DatabaseOperationStatistics do_mirror_db0(vector<pair<uint64_t, uint64_t>> input_intervals,
 		lmdb::env& env, lmdb::dbi& gadget_hashtable, lmdb::dbi& gadget_index, lmdb::dbi& mirror_edges,
 		lmdb::dbi& completions);
-
-template<typename T>
-T get_random_integer() {
-	T ret;
-	ssize_t rc = getrandom(&ret, sizeof(ret), 0);
-	if (rc != sizeof(ret)) {
-		auto savederrno = errno;
-		throw std::runtime_error(fmt::format("getrandom failed: asked for {} bytes ({}), got {}: {} ({})",
-				sizeof(ret), typeid(ret).name(), rc, strerror(savederrno), savederrno));
-	}
-	return ret;
-}
 
 vector<pair<std::uint64_t, std::uint64_t>> maximal_ranges(vector<std::uint64_t>&& data) {
 	vector<std::uint64_t> ensure_memory_is_freed(std::move(data));

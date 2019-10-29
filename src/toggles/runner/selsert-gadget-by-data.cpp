@@ -1,6 +1,7 @@
 #include "precompiled.hpp"
 #include "selsert-gadget-by-data.hpp"
 #include "../gadget-encoding-stats.hpp"
+#include "../select-by-id.hpp"
 
 using std::uint64_t;
 using std::size_t;
@@ -55,6 +56,51 @@ vector<ProposedInsert> hash_and_move(vector<vector<std::byte>>&& gadgets) {
 	return ret;
 }
 }//anonymous namespace
+
+void append_gadget_index(lmdb::txn& txn, lmdb::dbi& gadget_index, const std::vector<std::size_t>& hashes,
+		std::uint64_t first_novel_id) {
+	lmdb::cursor index_cur = lmdb::cursor::open(txn, gadget_index);
+	std::string_view last_index_key, last_index_value;
+	index_cur.get(last_index_key, last_index_value, MDB_LAST);
+
+	//We pack hashes into pages to save space.  See the comment in
+	//select_gadget_id_to_hash.
+	std::size_t hashes_index = 0;
+	//LMDB overflow pages have a 16-byte header.
+	constexpr std::size_t index_page_bytes = (4096-16), index_page_size = index_page_bytes / sizeof(std::size_t);
+	//If the previous page wasn't full, fill it.
+	if (!last_index_value.empty() && last_index_value.size() != index_page_bytes) {
+		//We can't actually append to the last open page; instead we
+		//append a new page and delete the old one.
+		std::size_t current_size = last_index_value.size() / sizeof(std::size_t);
+		std::size_t new_elements = std::min(hashes.size(), index_page_size - current_size);
+		std::uint64_t current_key = lmdb::from_sv<uint64_t>(last_index_key);
+		std::uint64_t new_key = current_key + new_elements;
+		//See above comment about undefined behavior.
+		std::string_view new_page(nullptr, (current_size + new_elements) * sizeof(std::size_t));
+		if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
+			throw std::logic_error(fmt::format("failed to append while extending index page: {} {} {} {}",
+					current_key, current_size, new_key, new_page.size()));
+		std::memcpy(const_cast<char*>(new_page.data()), last_index_value.data(), last_index_value.size());
+		std::memcpy(const_cast<char*>(new_page.data()) + last_index_value.size(), hashes.data(), new_elements * sizeof(std::size_t));
+		if (!index_cur.get(last_index_key, MDB_SET))
+			throw std::logic_error(fmt::format("failed to position for deletion? {}", current_key));
+		index_cur.del(); //throws on failure
+		hashes_index += new_elements;
+	}
+
+	while (hashes_index < hashes.size()) {
+		std::size_t new_elements = std::min(hashes.size() - hashes_index, index_page_size);
+		std::size_t new_key = first_novel_id + hashes_index + new_elements - 1;
+		//See above comment about undefined behavior.
+		std::string_view new_page(nullptr, new_elements * sizeof(std::size_t));
+		if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
+			throw std::logic_error(fmt::format("failed to append new index page: {} {} {} {}",
+					hashes_index, new_key, new_elements, new_page.size()));
+		std::memcpy(const_cast<char*>(new_page.data()), hashes.data() + hashes_index, new_elements * sizeof(std::size_t));
+		hashes_index += new_elements;
+	}
+}
 
 /**
  * Returns the id of each of the given gadgets after inserting any gadgets not
@@ -152,15 +198,10 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 			if (self_collision) //TODO: unlikely
 				resolve_self_collision(txn, hashtable_cur);
 
-			//This duplicates toggles-share's get_current_max_gadget_id, but
-			//we're going to keep using the cursor.
-			lmdb::cursor index_cur = lmdb::cursor::open(txn, gadget_index);
-			std::string_view last_index_key, last_index_value;
-			std::uint64_t last_id;
-			if (index_cur.get(last_index_key, last_index_value, MDB_LAST))
-				last_id = lmdb::from_sv<std::uint64_t>(last_index_key);
-			else
-				last_id = 0; //empty index; starting at 0 means first key will be 1
+			//There's a slight inefficiency here: we're opening and closing a
+			//cursor here and then opening another index cursor later when
+			//appending to the index.  This costs one malloc and some stores.
+			uint64_t last_id = get_current_max_gadget_id(txn, gadget_index);
 
 			//Because we've late-pruned, we know exactly what will be inserted,
 			//so we can assign ids according to the stats sort rank (skipping
@@ -188,44 +229,7 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 						sizeof(ret.local_to_global[pi.local_index]));
 			}
 
-			//We pack hashes into pages to save space.  See the comment in
-			//select_gadget_id_to_hash.
-			std::size_t hashes_index = 0;
-			//LMDB overflow pages have a 16-byte header.
-			constexpr std::size_t index_page_bytes = (4096-16), index_page_size = index_page_bytes / sizeof(std::size_t);
-			//If the previous page wasn't full, fill it.
-			if (!last_index_value.empty() && last_index_value.size() != index_page_bytes) {
-				//We can't actually append to the last open page; instead we
-				//append a new page and delete the old one.
-				std::size_t current_size = last_index_value.size() / sizeof(std::size_t);
-				std::size_t new_elements = std::min(hashes.size(), index_page_size - current_size);
-				std::uint64_t current_key = lmdb::from_sv<uint64_t>(last_index_key);
-				std::uint64_t new_key = current_key + new_elements;
-				//See above comment about undefined behavior.
-				std::string_view new_page(nullptr, (current_size + new_elements) * sizeof(std::size_t));
-				if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
-					throw std::logic_error(fmt::format("failed to append while extending index page: {} {} {} {}",
-							current_key, current_size, new_key, new_page.size()));
-				std::memcpy(const_cast<char*>(new_page.data()), last_index_value.data(), last_index_value.size());
-				std::memcpy(const_cast<char*>(new_page.data()) + last_index_value.size(), hashes.data(), new_elements * sizeof(std::size_t));
-				if (!index_cur.get(last_index_key, MDB_SET))
-					throw std::logic_error(fmt::format("failed to position for deletion? {}", current_key));
-				index_cur.del(); //throws on failure
-				hashes_index += new_elements;
-			}
-
-			while (hashes_index < hashes.size()) {
-				std::size_t new_elements = std::min(hashes.size() - hashes_index, index_page_size);
-				std::size_t new_key = ret.novel_global_ids.first + hashes_index + new_elements - 1;
-				//See above comment about undefined behavior.
-				std::string_view new_page(nullptr, new_elements * sizeof(std::size_t));
-				if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
-					throw std::logic_error(fmt::format("failed to append new index page: {} {} {} {}",
-							hashes_index, new_key, new_elements, new_page.size()));
-				std::memcpy(const_cast<char*>(new_page.data()), hashes.data() + hashes_index, new_elements * sizeof(std::size_t));
-				hashes_index += new_elements;
-			}
-			assert(ret.novel_global_ids.first + hashes_index == ret.novel_global_ids.second);
+			append_gadget_index(txn, gadget_index, hashes, ret.novel_global_ids.first);
 		}
 		txn.commit();
 	}
