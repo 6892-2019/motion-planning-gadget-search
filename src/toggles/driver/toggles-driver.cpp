@@ -338,6 +338,11 @@ struct RuntimeOptions {
 	 */
 	unsigned int db_threads = 1;
 	/**
+	 * Nice value to be applied to firsthalf worker tasks (by the workers
+	 * themselves, based on the TOGGLES_FIRSTHALF_NICE environment variable).
+	 */
+	unsigned int firsthalf_niceness = 19;
+	/**
 	 * The number of threads to use for secondhalf reader tasks.
 	 */
 	unsigned int secondhalf_reader_threads = 3;
@@ -1256,6 +1261,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		else if (argv[i] == "--batch-task-directory"sv)
 			runtime_opts.batch_task_directory = argv[++i];
 
+		else if (argv[i] == "--firsthalf-nice"sv || argv[i] == "--firsthalf-niceness"sv)
+			runtime_opts.firsthalf_niceness = to_uint(argv[++i]);
 		else if (argv[i] == "--secondhalf-reader-threads"sv || argv[i] == "--secondhalf-readers"sv)
 			runtime_opts.secondhalf_reader_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--secondhalf-nagle-tasks"sv)
@@ -1285,6 +1292,14 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	if (db_path.empty()) {
 		fmt::print("ERROR: must specify --db-path\n");
 		return 1;
+	}
+
+	//Need to set this so it's inherited by socat if we're launching one.
+	{
+		//We could reuse the argument, but this way we check it's an integer.
+		std::string niceval = fmt::to_string(runtime_opts.firsthalf_niceness);
+		if (setenv("TOGGLES_FIRSTHALF_NICE", niceval.c_str(), 1))
+			throw std::logic_error(fmt::format("failed to set niceness var: {} ({})", errno, strerror(errno)));
 	}
 
 	if (worker_threads && !worker_addrs.empty())

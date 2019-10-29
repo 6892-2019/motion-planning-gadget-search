@@ -82,6 +82,18 @@ struct less_input2 {
 		return a->input2 < b->input2;
 	}
 };
+
+
+void firsthalf_start() {
+	if (const char* v = std::getenv("TOGGLES_FIRSTHALF_NICE")) {
+		int niceval = to_int(std::string_view(v));
+		errno = 0;
+		int newnice = nice(niceval);
+		if (errno)
+			fmt::print(stderr, "warning: failed to set nice({}): {} ({}), returned {}\n",
+					niceval, errno, strerror(errno), newnice);
+	}
+}
 }
 
 
@@ -1071,6 +1083,7 @@ DatabaseOperationStatistics do_combine_db_full(vector<pair<uint64_t, uint64_t>> 
 
 FirsthalfStatistics do_combine_db_firsthalf(vector<pair<uint64_t, uint64_t>> left_intervals,
 		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
+	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
@@ -1252,6 +1265,7 @@ DatabaseOperationStatistics do_connect_db_full(vector<pair<uint64_t, uint64_t>> 
 }
 
 FirsthalfStatistics do_connect_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals, unsigned int max_states) {
+	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
@@ -1366,6 +1380,7 @@ DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_i
 }
 
 FirsthalfStatistics do_close_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals) {
+	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
@@ -1423,6 +1438,7 @@ DatabaseOperationStatistics do_mirror_db(vector<pair<uint64_t, uint64_t>> input_
 }
 
 FirsthalfStatistics do_mirror_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals) {
+	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
