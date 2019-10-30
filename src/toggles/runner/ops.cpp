@@ -96,7 +96,7 @@ auto connect_alphamap(unsigned int locations, unsigned int connectPoint) {
 }
 
 template<unsigned int N, class Provenance>
-void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
+bitset<N> connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 		Provenance prov, Finisher<Provenance>& finisher) {
 	Automaton<N> connected = a;
 	enjoin(connected, prov.connectPoint, (prov.connectPoint+1) % activeAlphabetSize);
@@ -148,7 +148,7 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 			known_not_nop.set(i->second);
 	active &= known_not_nop;
 
-	if (active.count() <= 1) return; //there are no interesting 1-symbol automata
+	if (active.count() <= 1) return {}; //there are no interesting 1-symbol automata
 	if (active.count() != (activeAlphabetSize - 2)) {
 		//compress the alphabet
 		std::array<symbol_type, Automaton<N>::alphabet_size_v> compression;
@@ -165,6 +165,7 @@ void connect_at(const Automaton<N>& a, unsigned int activeAlphabetSize,
 	}
 
 	finisher(std::move(connected), prov);
+	return active;
 }
 
 template<unsigned int N>
@@ -214,14 +215,17 @@ void connect(const AutomatonBase& a, std::uint64_t input1, Finisher<ConnectProve
 }
 
 AutomatonBase::SymbolSet connect_deleted_symbols(const AutomatonBase& a, unsigned int connectPoint) {
-	//This is to avoid another instantiation of connect_at.
+	//This is to avoid another instantiation of connect_at.  We do waste some
+	//time minimizing and canonicalizing the automaton.
 	ConnectProvenance prov;
 	prov.connectPoint = numeric_cast<std::uint8_t>(connectPoint);
 	Finisher<ConnectProvenance> finisher;
 	auto active_alphabet_size = a.active_alphabet_size();
+	if (active_alphabet_size < 2) return {}; //can't happen?
+	AutomatonBase::SymbolSet active;
 
 	switch (a.alphabet_size()) {
-#define TOGGLESRUNNER_CONNECT_CASE(N) case N: connect_at(static_cast<const Automaton<N>&>(a), active_alphabet_size, prov, finisher); break;
+#define TOGGLESRUNNER_CONNECT_CASE(N) case N: active = detail::set_of_indices(connect_at(static_cast<const Automaton<N>&>(a), active_alphabet_size, prov, finisher)); break;
 		TOGGLESRUNNER_CONNECT_CASE(4)
 		TOGGLESRUNNER_CONNECT_CASE(5)
 		TOGGLESRUNNER_CONNECT_CASE(6)
@@ -242,9 +246,12 @@ AutomatonBase::SymbolSet connect_deleted_symbols(const AutomatonBase& a, unsigne
 			std::terminate();
 	}
 
-	AutomatonBase::SymbolSet active = a.activeAlphabet(), deleted;
-	if (active_alphabet_size < 2) return deleted; //can't happen?
-	//We should now be dense for 0..alpha-2.
+	if (active.size() > active_alphabet_size-2)
+		//This would have caught a wrong-reports bug, so it's not just an assert.
+		throw std::logic_error(fmt::format("can't happen: connect didn't change locations? {} {}",
+				active.size(), active_alphabet_size));
+	AutomatonBase::SymbolSet deleted;
+	//We expect to be be dense for 0..alpha-2; anything missing was deleted.
 	for (unsigned int i = 0; i < active_alphabet_size-2; ++i)
 		if (!active.count(i))
 			deleted.insert(i);
