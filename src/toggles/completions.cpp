@@ -391,7 +391,7 @@ bool compact_completion(lmdb::txn& txn, lmdb::dbi& completions, const std::strin
 	if (!cur.get(dummy_kind, MDB_SET))
 		return false;
 	LSM lsm = parse_lsm(cur, kind);
-	if (lsm.levels.size() < tolerated_levels) return false;
+	if (lsm.levels.size() <= tolerated_levels) return false;
 	compact_lsm_full(lsm, cur);
 	return true;
 }
