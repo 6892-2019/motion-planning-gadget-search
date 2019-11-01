@@ -88,19 +88,16 @@
       <in>hopcroft.hpp</in>
       <in>intervals.hpp</in>
       <in>ioutils.cpp</in>
-      <in>maybe_owning_ptr.hpp</in>
       <in>nfa-optimize.cpp</in>
       <in>pack-detail.hpp</in>
       <in>pack.cpp</in>
       <in>pack.hpp</in>
-      <in>pinning.cpp</in>
       <in>precompiled-instantiations.cpp</in>
       <in>stopwatch.cpp</in>
       <in>stopwatch.hpp</in>
       <in>stringutils.cpp</in>
       <in>task_parallel.cpp</in>
       <in>transform_reduce.hpp</in>
-      <in>worker.cpp</in>
     </df>
     <logicalFolder name="ExternalFiles"
                    displayName="Important Files"
@@ -237,8 +234,6 @@
             <pElem>.</pElem>
           </incDir>
         </ccTool>
-      </item>
-      <item path="src/maybe_owning_ptr.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/nfa-optimize.cpp" ex="false" tool="1" flavor2="0">
       </item>
@@ -436,8 +431,6 @@
       <item path="src/toggles/toggles-shared.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/transform_reduce.hpp" ex="false" tool="3" flavor2="0">
-      </item>
-      <item path="src/worker.cpp" ex="false" tool="1" flavor2="0">
       </item>
     </conf>
   </confs>
