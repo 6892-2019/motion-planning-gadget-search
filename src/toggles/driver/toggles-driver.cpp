@@ -533,6 +533,9 @@ private:
 			auto txn = lmdb::txn::begin(database_);
 			for (uint64_t r : combine_rights_)
 				compact_completion(txn, completions_, fmt::format("combine-{}", r));
+			if (!unary_needs_.empty())
+				update_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
+						unary_needs_.back().second, runtime_opts_.db_threads);
 			txn.commit();
 		}
 
