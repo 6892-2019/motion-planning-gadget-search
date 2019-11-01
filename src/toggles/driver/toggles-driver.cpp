@@ -100,69 +100,9 @@ void ping_all_workers(WorkerManager& manager) {
 
 
 
-template<typename T>
-vector<T>& unmarshal_reinterpret(vector<T>& dest, lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
-	std::string_view value;
-	if (!db.get(txn, key, value))
-		throw std::runtime_error(fmt::format("key \"{}\" not found", key));
-	if ((value.size() == 0 && !allow_empty) || value.size() % sizeof(T) != 0)
-		throw std::logic_error(fmt::format("key {} has value length {} (not a multiple of {}) {}",
-				key, value.size(), sizeof(T), typeid(T).name()));
-	const T* first = reinterpret_cast<const T*>(value.data());
-	const T* last = first + value.size() / sizeof(T);
-	dest.assign(first, last);
-	return dest;
-}
-template<typename T>
-vector<T> unmarshal_reinterpret(lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
-	vector<T> dest;
-	unmarshal_reinterpret(dest, db, txn, key, allow_empty);
-	return dest;
-}
-
-template<typename T>
-T unmarshal_from_string(lmdb::dbi& db, lmdb::txn& txn, std::string_view key) {
-	std::string_view value;
-	if (!db.get(txn, key, value))
-		throw std::runtime_error(fmt::format("key \"{}\" not found", key));
-	//TODO: from_string will throw on a parse problem, but we'll lose which key had the problem
-	return from_string<T>(value);
-}
-
-void marshal_nullseparated(lmdb::dbi& db, lmdb::txn& txn, std::string_view key, const vector<std::string>& data) {
-	//We could use MDB_RESERVE here, but I am assuming this is uncommon code...
-#ifndef NDEBUG
-	for (const std::string& x : data)
-		assert(x.find('\0') == std::string::npos);
-#endif //NDEBUG
-	std::string value = join(data, "\0");
-	if (!db.put(txn, key, value))
-		//put only returns false if we passed MDB_NOOVERWRITE and the key existed
-		throw std::logic_error(fmt::format("can't happen: put threw for key {}", key));
-}
-
-void unmarshal_nullseparated(vector<std::string>& data, lmdb::dbi& db, lmdb::txn& txn, std::string_view key, bool allow_empty) {
-	std::string_view value;
-	if (!db.get(txn, key, value))
-		throw std::runtime_error(fmt::format("key \"{}\" not found", key));
-	if (value.empty() && !allow_empty)
-		throw std::runtime_error(fmt::format("key \"{}\" was empty", key));
-	split(data, value, '\0');
-}
-
-
-
 class SearchState {
 public:
 	SearchState() {}
-	static SearchState resume(lmdb::env& checkpoint_env, lmdb::txn& txn, lmdb::dbi& main_db) {
-		SearchState s;
-		unmarshal_reinterpret(s.closed_, main_db, txn, "state.closed", true);
-		unmarshal_reinterpret(s.curgen_, main_db, txn, "state.curgen", true);
-		unmarshal_reinterpret(s.subgen_, main_db, txn, "state.subgen", true);
-		unmarshal_reinterpret(s.prev_subgen_, main_db, txn, "state.prev_subgen", true);
-		return s;
-	}
 	void operator()(uint64_t id) {
 		std::array<pair<uint64_t, uint64_t>, 1> singleton = {{{id, id+1}}};
 		subgen_ = interval_union(subgen_.begin(), subgen_.end(), singleton.cbegin(), singleton.cend());
@@ -396,36 +336,13 @@ private:
 public:
 	Search(vector<std::string>&& cmdline_specs, GadgetSet&& source_specs,
 			CompletenessOptions completeness_opts, RuntimeOptions runtime_opts,
-			lmdb::env&& database, std::optional<lmdb::env>&& checkpoint) :
+			lmdb::env&& database) :
 			generation_(0), subgeneration_(0), phase_(Phase::collect_initial),
 			cmdline_specs_(std::move(cmdline_specs)),
 			source_specs_(std::move(source_specs)), complete_opts_(completeness_opts),
-			database_(std::move(database)), checkpoint_(std::move(checkpoint)), workers_(nullptr),
+			database_(std::move(database)), workers_(nullptr),
 			runtime_opts_(runtime_opts), generation_stopwatch_(Stopwatch::process()),
 			subgeneration_stopwatch_(Stopwatch::process()) {}
-	static Search resume(lmdb::env&& checkpoint, lmdb::env&& database, RuntimeOptions runtime_opts) {
-		Search s(std::move(database), runtime_opts);
-		{
-			auto txn = lmdb::txn::begin(checkpoint, nullptr, MDB_RDONLY);
-			lmdb::dbi root = lmdb::dbi::open(txn, nullptr);
-			s.state_ = SearchState::resume(checkpoint, txn, root);
-			unmarshal_reinterpret(s.combine_rights_, root, txn, "combine_rights", true);
-			unmarshal_reinterpret(s.unary_needs_, root, txn, "unary_needs", true);
-			throw std::logic_error("TODO: unmarshal combine_needs_"); //we're going to change combine_needs_ soon anyway, implement this later
-			s.generation_ = unmarshal_from_string<unsigned int>(root, txn, "generation");
-			s.subgeneration_ = unmarshal_from_string<unsigned int>(root, txn, "subgeneration");
-			//using the string name of the enum would be more flexible...
-			s.phase_ = Phase{unmarshal_from_string<unsigned int>(root, txn, "phase")};
-			unmarshal_nullseparated(s.cmdline_specs_, root, txn, "cmdline_specs", true);
-			unmarshal_reinterpret(s.source_specs_.ids, root, txn, "source_specs.ids", true);
-			unmarshal_reinterpret(s.source_specs_.ranges, root, txn, "source_specs.ranges", true);
-			unmarshal_nullseparated(s.source_specs_.names, root, txn, "source_specs.names", true);
-			//TODO: completeness options
-			txn.commit();
-		}
-		*s.checkpoint_ = std::move(checkpoint);
-		return s;
-	}
 
 	/**
 	 * @return true if the search completed; false if we should write a checkpoint
@@ -1115,7 +1032,6 @@ private:
 	lmdb::env database_;
 	lmdb::dbi gadget_hashtable_, gadget_index_, edges_connect_, edges_close_, edges_mirror_, completions_, predicates_;
 	vector<pair<uint64_t, lmdb::dbi>> edges_combine_; //sorted
-	std::optional<lmdb::env> checkpoint_;
 	WorkerManager* workers_; //may be nullptr if no worker args given (must write tasks)
 
 	RuntimeOptions runtime_opts_;
@@ -1128,7 +1044,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
 	jemalloc_tuning();
 
-	std::string_view db_path, checkpoint_db_path;
+	std::string_view db_path;
 	unsigned int worker_threads = 0;
 	std::vector<std::string> worker_addrs; //or @foo for response files
 	std::vector<std::string_view> gid_specs;
@@ -1137,8 +1053,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	for (int i = 1; i < argc; ++i) {
 		if (argv[i] == "--db-path"sv)
 			db_path = argv[++i];
-		else if (argv[i] == "--checkpoint-db-path"sv)
-			checkpoint_db_path = argv[++i];
 		else if (argv[i] == "--threads"sv)
 			worker_threads = runtime_opts.db_threads = to_uint(argv[++i]);
 		else if (argv[i] == "--worker-threads"sv || argv[i] == "--runner-threads"sv)
@@ -1292,52 +1206,9 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	DatabaseMetadata metadata = read_meta(data_env);
 	fmt::print("Database ID {:x}, created on {} at {}\n", metadata.id, metadata.creator_hostname, metadata.creation_timestamp);
 
-	std::optional<Search> search; //just for lazy init
-	if (!checkpoint_db_path.empty()) {
-		lmdb::env checkpoint_env = lmdb::env::create(MDB_NOSUBDIR);
-		checkpoint_env.set_mapsize(5UL * 1024 * 1024 * 1024);
-		checkpoint_env.set_max_dbs(1);
-		checkpoint_env.open(std::string(checkpoint_db_path).c_str()); //TODO: flags?
-		lmdb::txn txn = lmdb::txn::begin(checkpoint_env);
-		lmdb::dbi checkpoint_root = lmdb::dbi::open(txn, nullptr);
-		std::string_view id_target;
-		if (checkpoint_root.get(txn, "parent_id_bytes", id_target)) {
-			uint64_t parent_id = lmdb::from_sv<uint64_t>(id_target);
-			if (parent_id != metadata.id) {
-				fmt::print("ERROR: checkpoint database {} is from id {}, but parent {} has id {}\n",
-						checkpoint_db_path, parent_id, db_path, metadata.id);
-				return 1;
-			}
-			txn.commit();
-			search = Search::resume(std::move(checkpoint_env), std::move(data_env), runtime_opts);
-		} else {
-			if (checkpoint_root.size(txn) != 0) {
-				fmt::print("ERROR: checkpoint database {} doesn't have parent id, but also isn't empty\n", checkpoint_db_path);
-				return 1;
-			}
-			checkpoint_root.put(txn, "parent_id_bytes", lmdb::to_sv(metadata.id));
-			checkpoint_root.put(txn, "parent_id", fmt::to_string(metadata.id));
-			txn.commit();
-			//run the normal ctor, but also give it the environment
-			search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
-					completeness_opts, runtime_opts, std::move(data_env), std::move(checkpoint_env));
-		}
-	} else
-		//no checkpoint environment available
-		search.emplace(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
-			completeness_opts, runtime_opts, std::move(data_env), std::nullopt);
-
-	if (!search->execute(&manager)) {
-		//TODO: if we have a checkpoint database, we're going to take checkpoints
-		//continuously, not just when suspending, so this logic is unnecessary
-//		if (suspend_checkpoint.empty())
-//			fmt::print(stderr, "ERROR: would suspend, but --suspend-checkpoint not passed\n");
-//		else {
-//			simple_buffer buf;
-//			msgpack::pack(buf, std::move(*search).serialize());
-//			write_buffer(buf, std::string(suspend_checkpoint));
-//		}
-	}
+	Search search(vector<std::string>(gid_specs.begin(), gid_specs.end()), std::move(spec),
+		completeness_opts, runtime_opts, std::move(data_env));
+	search.execute(&manager);
 
 	//It'll get killed when we exit anyway, but may as well clean up properly.
 	if (socat)
