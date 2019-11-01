@@ -468,7 +468,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_predicate(lmdb::e
 std::vector<std::pair<std::uint64_t, std::uint64_t>> intersect_predicate(lmdb::txn& txn, lmdb::dbi& predicates,
 		PredicateKind kind,	unsigned int less_than_or_equal_to,
 		const std::vector<std::pair<std::uint64_t, std::uint64_t>>& intervals) {
-		std::string key = fmt::format("{}<={}", kind, less_than_or_equal_to);
+	std::string key = fmt::format("{}<={}", kind, less_than_or_equal_to);
 	auto view = view_interval_list(txn, predicates, key);
 	if (!view.first)
 		throw std::logic_error(fmt::format("can't intersect_predicate {} {} if key missing", kind, less_than_or_equal_to));
