@@ -98,38 +98,6 @@ void ping_all_workers(WorkerManager& manager) {
 	manager.run(&generator);
 }
 
-//void write_unary_batch_tasks(pqxx::connection& conn, std::string_view operation, UnaryBatcher batcher, const std::string& directory) {
-//	vector<uint64_t> fetches;
-//	simple_buffer buffer;
-//	for (std::uint32_t seqno = 0; batcher; ++seqno) {
-//		auto batch = batcher();
-//		fetches.assign(batch.first, batch.second);
-//		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
-//		pack_call(buffer, seqno, operation, gadget_data);
-//		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
-//		buffer.clear();
-//	}
-//}
-
-//void write_combine_batch_tasks(pqxx::connection& conn, CombineBatcher batcher, unsigned int precision, const std::string& directory) {
-//	vector<uint64_t> fetches;
-//	simple_buffer buffer;
-//	for (std::uint32_t seqno = 0; batcher; ++seqno) {
-//		pair<pair<vector<uint64_t>::const_iterator, vector<uint64_t>::const_iterator>, const vector<uint64_t>*> batch = batcher();
-//		fetches.clear();
-//		fetches.insert(fetches.end(), batch.first.first, batch.first.second);
-//		fetches.insert(fetches.end(), batch.second->begin(), batch.second->end());
-//		//sort-unique is optional here because the database will effectively do it for us.
-//		std::sort(fetches.begin(), fetches.end());
-//		fetches.erase(std::unique(fetches.begin(), fetches.end()), fetches.end());
-//		vector<pair<std::uint64_t, vector<std::byte>>> gadget_data = select_gadget_id_to_data(conn, fetches);
-//
-//		fetches.assign(batch.first.first, batch.first.second); //packing iterator-range would save this copy
-//		pack_call(buffer, seqno, "batch-combine", gadget_data, fetches, *batch.second, precision);
-//		write_buffer(buffer, fmt::format("{}/{}.msg", directory, seqno));
-//		buffer.clear();
-//	}
-//}
 
 
 template<typename T>
@@ -574,18 +542,8 @@ private:
 				DatabaseOperationStatistics stats = do_combine_operation(workers_->size() > 1 && needy_pairs > runtime_opts_.combine_pairs_per_task);
 				fmt::print("Combine operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 						stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
-			} else {
+			} else
 				throw std::logic_error("TODO: reimplement writing combine tasks");
-//				std::size_t task_count = batcher.size();
-//				ConnectionLease conn = conn_pool_->checkout();
-//				write_combine_batch_tasks(*conn, std::move(batcher), precision_,
-//						runtime_opts_.batch_task_directory);
-//				//We could try a special resume state that only rechecks combine_needs_.
-//				combine_needs_.clear();
-//				fmt::print("wrote {} combine tasks in {}\n", task_count, stopwatch.elapsed().hms());
-//				phase_ = Phase::discover_needs_combine;
-//				return Control::suspend;
-			}
 		}
 		phase_ = Phase::follow_combine;
 		return Control::proceed;
@@ -808,15 +766,8 @@ private:
 			fmt::print("{} operation completed in {}: {} skipped, {} locally pruned, {} globally pruned, {} novel gadgets, {} edges\n",
 					log_name, stopwatch.elapsed().hms(), stats.skipped, stats.pruned_locally, stats.pruned_database, stats.novel_gadgets, stats.edges);
 			return Control::proceed;
-		} else {
+		} else
 			throw std::logic_error("TODO reimplement writing unary tasks");
-//			std::size_t task_count = batcher.size();
-//			std::string operation_cmd = fmt::format("batch-{}", operation_name);
-//			ConnectionLease conn = conn_pool_->checkout();
-//			write_unary_batch_tasks(*conn, operation_cmd, batcher, runtime_opts_.batch_task_directory);
-//			fmt::print("wrote {} {} tasks in {}\n", task_count, log_name, stopwatch.elapsed().hms());
-//			return Control::suspend;
-		}
 	}
 
 	//We call this with either follow_edges<ConnectEdge> or follow_edges<SimpleEdge>.
