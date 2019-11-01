@@ -7,6 +7,7 @@
 #include "../gadget-set.hpp"
 #include "../gadget-encoding-stats.hpp"
 #include "../completions.hpp"
+#include "../anyprov.hpp" //for EdgeKind
 #include "intervals.hpp"
 #include "proj_compare.hpp"
 #include "stringutils.hpp"
@@ -56,6 +57,13 @@ pair<boost::process::child, unsigned short> launch_own_socat_process(std::string
 				proc.exit_code(), stderr_log, fmt::join(lines, "\n")));
 	}
 	throw std::runtime_error("couldn't find a free port?");
+}
+
+unsigned int extract_max_states(const vector<pair<unsigned int, PredicateKind>>& maxs) {
+	for (pair<unsigned int, PredicateKind> p : maxs)
+		if (p.second == PredicateKind::states)
+			return p.first;
+	return std::numeric_limits<unsigned int>::max();
 }
 } //anonymous namespace
 
@@ -202,17 +210,11 @@ private:
  * are saved in checkpoints.
  */
 struct CompletenessOptions {
+	//Precision is grandfathered.  We will compute a combine location max if not specified.
 	unsigned int precision = 8;
-	//computed from precision if not specified
-	unsigned int combine_max_left_locations = std::numeric_limits<unsigned int>::max();
-	unsigned int combine_max_left_states = std::numeric_limits<unsigned int>::max();
-	unsigned int combine_max_left_components = std::numeric_limits<unsigned int>::max();
-	unsigned int connect_max_states = std::numeric_limits<unsigned int>::max();
-	unsigned int connect_max_components = std::numeric_limits<unsigned int>::max();
-	unsigned int close_max_states = std::numeric_limits<unsigned int>::max();
-	unsigned int close_max_components = std::numeric_limits<unsigned int>::max();
-	unsigned int mirror_max_states = std::numeric_limits<unsigned int>::max();
-	unsigned int mirror_max_components = std::numeric_limits<unsigned int>::max();
+	//Mins have already had 1 subtracted for them.
+	vector<pair<unsigned int, PredicateKind>> combine_maxs, combine_mins,
+			connect_maxs, connect_mins, close_maxs, close_mins, mirror_maxs, mirror_mins;
 	bool multiplayer = false;
 	bool follow_mirror = true;
 	bool compute_close = true; //ignored if multiplayer
@@ -315,19 +317,6 @@ private:
 		stop,
 	};
 
-	struct ActivePredicates {
-		unsigned int min_locations = 0;
-		unsigned int max_locations = std::numeric_limits<unsigned int>::max();
-		unsigned int min_states = 0;
-		unsigned int max_states = std::numeric_limits<unsigned int>::max();
-		unsigned int max_components = std::numeric_limits<unsigned int>::max();
-		operator bool() const {
-			return min_locations || max_locations != std::numeric_limits<unsigned int>::max() ||
-					min_states || max_states != std::numeric_limits<unsigned int>::max() ||
-					max_components != std::numeric_limits<unsigned int>::max();
-		}
-	};
-
 	//for the convenience of resume()
 	Search(lmdb::env&& database, RuntimeOptions runtime_opts) :
 			database_(std::move(database)), runtime_opts_(runtime_opts),
@@ -408,29 +397,24 @@ private:
 		open_combine_subdatabases();
 		Stopwatch stopwatch = Stopwatch::process();
 		std::size_t total_candidates = interval_size(unary_needs_);
-		ActivePredicates preds = {
-			.max_locations = complete_opts_.combine_max_left_locations,
-			.max_states = complete_opts_.combine_max_left_states,
-			.max_components = complete_opts_.combine_max_left_components
-		};
 
 		{
 			auto txn = lmdb::txn::begin(database_);
 			for (uint64_t r : combine_rights_)
 				compact_completion(txn, completions_, fmt::format("combine-{}", r));
-			if (!unary_needs_.empty())
-				update_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
-						unary_needs_.back().second, runtime_opts_.db_threads);
+			assert(!unary_needs_.empty());
+			update_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
+					unary_needs_.back().second, runtime_opts_.db_threads);
 			txn.commit();
 		}
 
 		vector<pair<uint64_t, vector<pair<uint64_t, uint64_t>>>> intervals;
 		{
 			auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
-			if (preds)
+			if (!complete_opts_.combine_mins.empty() || !complete_opts_.combine_maxs.empty())
 				//Modifying unary_needs_ here is fine because predicates are
 				//completeness options also saved in the checkpoint.
-				apply_predicates(txn, unary_needs_, preds);
+				apply_predicates(txn, unary_needs_, complete_opts_.combine_mins, complete_opts_.combine_maxs);
 
 			for (std::size_t i = 0; i < combine_rights_.size(); ++i) {
 				uint64_t r = combine_rights_[i];
@@ -508,7 +492,7 @@ private:
 			phase_ = Phase::follow_close;
 			return Control::proceed;
 		}
-		filter_unary("close", state_.subgeneration(), {.max_states = complete_opts_.close_max_states, .max_components = complete_opts_.close_max_components});
+		filter_unary("close", state_.subgeneration(), complete_opts_.close_mins, complete_opts_.close_maxs);
 		phase_ = Phase::compute_close;
 		return Control::proceed;
 	}
@@ -552,7 +536,7 @@ private:
 			phase_ = Phase::follow_mirror;
 			return Control::proceed;
 		}
-		filter_unary("mirror", state_.subgeneration(), {.max_states = complete_opts_.mirror_max_states, .max_components = complete_opts_.mirror_max_components});
+		filter_unary("mirror", state_.subgeneration(), complete_opts_.mirror_mins, complete_opts_.mirror_maxs);
 		phase_ = Phase::compute_mirror;
 		return Control::proceed;
 	}
@@ -609,8 +593,7 @@ private:
 	}
 
 	Control discover_needs_connect() {
-		filter_unary("connect", state_.prev_subgeneration(),
-				{.min_locations = 4, .max_states = complete_opts_.connect_max_states, .max_components = complete_opts_.connect_max_components});
+		filter_unary("connect", state_.prev_subgeneration(), complete_opts_.connect_mins, complete_opts_.connect_maxs);
 		phase_ = Phase::compute_connect;
 		return Control::proceed;
 	}
@@ -619,7 +602,7 @@ private:
 		Control control = Control::proceed;
 		if (unary_needs_.size())
 			control = operate_unary("connect", "Connect", runtime_opts_.connect_gadgets_per_task,
-					runtime_opts_.connect_task_batch_threshold, complete_opts_.connect_max_states);
+					runtime_opts_.connect_task_batch_threshold, extract_max_states(complete_opts_.connect_maxs));
 		//If we decide to use a separate resume phase to check fewer possible
 		//needs, we'd preserve unary_needs_ here.
 		unary_needs_.clear();
@@ -635,7 +618,7 @@ private:
 	}
 
 	void filter_unary(std::string_view completions_key, const vector<pair<uint64_t, uint64_t>>& candidates,
-			ActivePredicates preds) {
+			const vector<pair<unsigned int, PredicateKind>>& mins, const vector<pair<unsigned int, PredicateKind>>& maxs) {
 		if (!unary_needs_.empty())
 			throw std::logic_error(fmt::format("called filter_unary for {} but unary_needs_ not empty\n", completions_key));
 		if (candidates.empty())
@@ -644,7 +627,7 @@ private:
 		Stopwatch stopwatch = Stopwatch::process();
 		compact_completion(database_, completions_, completions_key, 1);
 
-		if (!preds) {
+		if (mins.empty() && maxs.empty()) {
 			unary_needs_ = subtract_completion(database_, completions_, completions_key, candidates);
 			fmt::print("Found {} of {} gadgets needing {} in {}\n",
 				interval_size(unary_needs_), interval_size(candidates), completions_key, stopwatch.elapsed().hms());
@@ -657,19 +640,12 @@ private:
 		//We filter with predicates first to get more informative stats, but if
 		//performance is bad due to low selectivity, we could filter by
 		//completions first.
-		apply_predicates(txn, candidates, preds);
+		apply_predicates(txn, candidates, mins, maxs);
 		std::size_t eligible = interval_size(unary_needs_);
 		unary_needs_ = subtract_completion(txn, completions_, completions_key, unary_needs_);
 		txn.commit();
 		fmt::print("Found {} of {} eligible gadgets ({} total candidates) needing {} in {}\n",
 				interval_size(unary_needs_), eligible, interval_size(candidates), completions_key, stopwatch.elapsed().hms());
-	}
-	void filter_unary(std::string_view completions_key, const vector<pair<uint64_t, uint64_t>>& candidates) {
-		//I'd like "ActivePredicates preds = {}" in the above overload, but that
-		//is currently rejected.  See https://stackoverflow.com/q/53408962/3614835
-		//and https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88165 .
-		ActivePredicates preds;
-		return filter_unary(completions_key, candidates, preds);
 	}
 
 	Control operate_unary(std::string_view operation_name, std::string_view log_name,
@@ -723,7 +699,7 @@ private:
 			for (std::size_t inner_index = 0; inner_index < chunks.size(); ++inner_index)
 				tasks.push_back(pack_call(seqno++, use_halves ? "combine-db-firsthalf" : "combine-db",
 						chunks[inner_index], combine_needs_[outer_index].first,
-						complete_opts_.precision, complete_opts_.combine_max_left_states));
+						complete_opts_.precision, extract_max_states(complete_opts_.combine_maxs)));
 		}
 		return do_generic_operation(std::move(tasks), use_halves ? std::optional("combine-db-secondhalf"sv) : std::nullopt);
 	}
@@ -854,8 +830,12 @@ private:
 		std::sort(stats.begin(), stats.end(), proj_less<0>());
 		for (const pair<uint64_t, encoding::Stats>& p : stats)
 			combine_left_locations_.emplace_back(complete_opts_.precision - p.second.locations);
-		complete_opts_.combine_max_left_locations = std::min(complete_opts_.combine_max_left_locations,
-				*std::max_element(combine_left_locations_.begin(), combine_left_locations_.end()));
+		auto x = std::find_if(complete_opts_.combine_maxs.begin(), complete_opts_.combine_maxs.end(),
+				[](auto p) {return p.second == PredicateKind::locations;});
+		if (x != complete_opts_.combine_maxs.end())
+			x->first = std::min(x->first, *std::max_element(combine_left_locations_.begin(), combine_left_locations_.end()));
+		else
+			complete_opts_.combine_maxs.emplace_back(*std::max_element(combine_left_locations_.begin(), combine_left_locations_.end()), PredicateKind::locations);
 	}
 
 	/**
@@ -877,26 +857,14 @@ private:
 	void ensure_predicates() {
 		Stopwatch stopwatch = Stopwatch::process();
 		vector<pair<unsigned int, PredicateKind>> required;
-		//Location predicates always exist, so don't need to be created.
-
-		if (complete_opts_.combine_max_left_states != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.combine_max_left_states, PredicateKind::states);
-		if (complete_opts_.connect_max_states != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.connect_max_states, PredicateKind::states);
-		if (complete_opts_.mirror_max_states != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.mirror_max_states, PredicateKind::states);
-		if (complete_opts_.close_max_states != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.close_max_states, PredicateKind::states);
-
-		if (complete_opts_.combine_max_left_components != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.combine_max_left_components, PredicateKind::components);
-		if (complete_opts_.connect_max_components != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.connect_max_components, PredicateKind::components);
-		if (complete_opts_.mirror_max_components != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.mirror_max_components, PredicateKind::components);
-		if (complete_opts_.close_max_components != std::numeric_limits<unsigned int>::max())
-			required.emplace_back(complete_opts_.close_max_components, PredicateKind::components);
-
+		required.insert(required.end(), complete_opts_.combine_mins.begin(), complete_opts_.combine_mins.end());
+		required.insert(required.end(), complete_opts_.combine_maxs.begin(), complete_opts_.combine_maxs.end());
+		required.insert(required.end(), complete_opts_.connect_mins.begin(), complete_opts_.connect_mins.end());
+		required.insert(required.end(), complete_opts_.connect_maxs.begin(), complete_opts_.connect_maxs.end());
+		required.insert(required.end(), complete_opts_.close_mins.begin(), complete_opts_.close_mins.end());
+		required.insert(required.end(), complete_opts_.close_maxs.begin(), complete_opts_.close_maxs.end());
+		required.insert(required.end(), complete_opts_.mirror_mins.begin(), complete_opts_.mirror_mins.end());
+		required.insert(required.end(), complete_opts_.mirror_maxs.begin(), complete_opts_.mirror_maxs.end());
 		std::sort(required.begin(), required.end());
 		required.erase(std::unique(required.begin(), required.end()), required.end());
 		if (create_predicates(database_, predicates_, gadget_hashtable_, gadget_index_,
@@ -908,35 +876,27 @@ private:
 	}
 
 	//always leaves the result in unary_needs_; candidates may be unary_needs_ too
-	void apply_predicates(lmdb::txn& txn, const vector<pair<uint64_t, uint64_t>>& candidates, ActivePredicates preds) {
-		assert(preds);
+	void apply_predicates(lmdb::txn& txn, const vector<pair<uint64_t, uint64_t>>& candidates,
+			const vector<pair<unsigned int, PredicateKind>>& mins, const vector<pair<unsigned int, PredicateKind>>& maxs) {
 		//We could just copy candidates to unary_needs_ and then always read
 		//from unary_needs_, but that might be an expensive copy.
 		const vector<pair<uint64_t, uint64_t>>* source = &candidates;
-		if (preds.min_locations) {
-			unary_needs_ = subtract_predicate(txn, predicates_, PredicateKind::locations, preds.min_locations-1, *source);
+		for (pair<unsigned int, PredicateKind> p : mins) {
+			//We already subtracted 1 from the value.
+			unary_needs_ = subtract_predicate(txn, predicates_, p.second, p.first, *source);
 			source = &unary_needs_;
 		}
-		if (preds.max_locations != std::numeric_limits<unsigned int>::max()) {
-			unary_needs_ = intersect_predicate(txn, predicates_, PredicateKind::locations, preds.max_locations, *source);
+		for (pair<unsigned int, PredicateKind> p : maxs) {
+			unary_needs_ = intersect_predicate(txn, predicates_, p.second, p.first, *source);
 			source = &unary_needs_;
 		}
-		if (preds.min_states) {
-			unary_needs_ = subtract_predicate(txn, predicates_, PredicateKind::states, preds.min_states-1, *source);
-			source = &unary_needs_;
-		}
-		if (preds.max_states != std::numeric_limits<unsigned int>::max()) {
-			unary_needs_ = intersect_predicate(txn, predicates_, PredicateKind::states, preds.max_states, *source);
-			source = &unary_needs_;
-		}
-		if (preds.max_components != std::numeric_limits<unsigned int>::max()) {
-			unary_needs_ = intersect_predicate(txn, predicates_, PredicateKind::components, preds.max_components, *source);
-			source = &unary_needs_;
-		}
+		if (source != &unary_needs_)
+			unary_needs_ = *source;
 	}
-	void apply_predicates(const vector<pair<uint64_t, uint64_t>>& candidates, ActivePredicates preds) {
+	void apply_predicates(const vector<pair<uint64_t, uint64_t>>& candidates,
+			const vector<pair<unsigned int, PredicateKind>>& mins, const vector<pair<unsigned int, PredicateKind>>& maxs) {
 		auto txn = lmdb::txn::begin(database_, nullptr, MDB_RDONLY);
-		apply_predicates(txn, candidates, preds);
+		apply_predicates(txn, candidates, mins, maxs);
 		txn.commit();
 	}
 
@@ -1070,38 +1030,15 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 
 		else if (argv[i] == "--multiplayer"sv)
 			completeness_opts.multiplayer = true;
-		else if (argv[i] == "--precision"sv)
-			completeness_opts.precision = to_uint(argv[++i]);
-		else if (argv[i] == "--combine-max-left-locations"sv || argv[i] == "--combine-left-max-locations"sv)
-			completeness_opts.combine_max_left_locations = to_uint(argv[++i]);
-		else if (argv[i] == "--max-states"sv)
-			completeness_opts.combine_max_left_states = completeness_opts.connect_max_states
-					= completeness_opts.close_max_states = completeness_opts.mirror_max_states = to_uint(argv[++i]);
-		else if (argv[i] == "--combine-max-left-states"sv || argv[i] == "--combine-left-max-states"sv)
-			completeness_opts.combine_max_left_states = to_uint(argv[++i]);
-		else if (argv[i] == "--connect-max-states"sv)
-			completeness_opts.connect_max_states = to_uint(argv[++i]);
-		else if (argv[i] == "--close-max-states"sv)
-			completeness_opts.close_max_states = to_uint(argv[++i]);
-		else if (argv[i] == "--mirror-max-states"sv)
-			completeness_opts.mirror_max_states = to_uint(argv[++i]);
-		else if (argv[i] == "--max-components"sv)
-			completeness_opts.combine_max_left_components = completeness_opts.connect_max_components
-					= completeness_opts.close_max_components = completeness_opts.mirror_max_components = to_uint(argv[++i]);
-		else if (argv[i] == "--combine-max-left-components"sv || argv[i] == "--combine-left-max-components"sv)
-			completeness_opts.combine_max_left_components = to_uint(argv[++i]);
-		else if (argv[i] == "--connect-max-components"sv)
-			completeness_opts.connect_max_components = to_uint(argv[++i]);
-		else if (argv[i] == "--close-max-components"sv)
-			completeness_opts.close_max_components = to_uint(argv[++i]);
-		else if (argv[i] == "--mirror-max-components"sv)
-			completeness_opts.mirror_max_components = to_uint(argv[++i]);
 		else if (argv[i] == "--no-follow-mirror"sv)
 			completeness_opts.follow_mirror = false;
 		else if (argv[i] == "--skip-close"sv)
 			completeness_opts.compute_close = false;
 		else if (argv[i] == "--skip-mirror"sv)
 			completeness_opts.compute_mirror = false;
+		else if (argv[i] == "--precision"sv)
+			completeness_opts.precision = to_uint(argv[++i]);
+		//predicate-related completeness options parsed later
 
 		else if (argv[i] == "--gadgets-per-task"sv)
 			runtime_opts.combine_pairs_per_task = runtime_opts.connect_gadgets_per_task
@@ -1137,6 +1074,73 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			runtime_opts.secondhalf_min_pending_tasks = to_uint(argv[++i]);
 		else if (argv[i] == "--secondhalf-nagle-gadget-bytes"sv)
 			runtime_opts.secondhalf_min_pending_gadget_bytes = to_uint(argv[++i]);
+
+		else if (strlen(argv[i]) >= 2 && argv[i][0] == '-' && argv[i][1] == '-') {
+			std::string_view arg = argv[i];
+			arg.remove_prefix(2);
+			vector<std::string_view> pieces = split_view(arg, '-');
+			PredicateKind pkind = predicate_kind_from_string(pieces.back());
+			unsigned int value = to_uint(argv[++i]);
+			pair<unsigned int, PredicateKind> spec(value, pkind);
+
+			if (pieces.size() == 2) {
+				if (pieces[0] == "min"sv) {
+					//Technically we could ignore min 0 as a no-op, but it's probably a typo.
+					if (value == 0) {
+						fmt::print(stderr, "ERROR: can't have min 0: {}\n", arg);
+						std::exit(1);
+					}
+					--value;
+					completeness_opts.combine_mins.push_back(spec);
+					completeness_opts.connect_mins.push_back(spec);
+					completeness_opts.close_mins.push_back(spec);
+					completeness_opts.mirror_mins.push_back(spec);
+				} else if (pieces[0] == "max"sv) {
+					completeness_opts.combine_maxs.push_back(spec);
+					completeness_opts.connect_maxs.push_back(spec);
+					completeness_opts.close_maxs.push_back(spec);
+					completeness_opts.mirror_maxs.push_back(spec);
+				} else {
+					fmt::print(stderr, "ERROR: couldn't parse argument: {}\n", arg);
+					std::exit(1);
+				}
+			} else if (pieces.size() == 3) {
+				EdgeKind ekind = edge_kind_from_string(pieces.front());
+				if (pieces[1] == "min"sv) {
+					//Technically we could ignore min 0 as a no-op, but it's probably a typo.
+					if (value == 0) {
+						fmt::print(stderr, "ERROR: can't have min 0: {}\n", arg);
+						std::exit(1);
+					}
+					--value;
+					switch (ekind) {
+						case EdgeKind::combine: completeness_opts.combine_mins.push_back(spec); break;
+						case EdgeKind::connect: completeness_opts.connect_mins.push_back(spec); break;
+						case EdgeKind::close: completeness_opts.close_mins.push_back(spec); break;
+						case EdgeKind::mirror: completeness_opts.mirror_mins.push_back(spec); break;
+						default:
+							fmt::print(stderr, "ERROR: bad edge kind: {}\n", arg);
+							std::exit(1);
+					}
+				} else if (pieces[1] == "max"sv) {
+					switch (ekind) {
+						case EdgeKind::combine: completeness_opts.combine_maxs.push_back(spec); break;
+						case EdgeKind::connect: completeness_opts.connect_maxs.push_back(spec); break;
+						case EdgeKind::close: completeness_opts.close_maxs.push_back(spec); break;
+						case EdgeKind::mirror: completeness_opts.mirror_maxs.push_back(spec); break;
+						default:
+							fmt::print(stderr, "ERROR: bad edge kind: {}\n", arg);
+							std::exit(1);
+					}
+				} else {
+					fmt::print(stderr, "ERROR: couldn't parse argument: {}\n", arg);
+					std::exit(1);
+				}
+			} else {
+				fmt::print(stderr, "ERROR: couldn't parse argument: {}\n", arg);
+				std::exit(1);
+			}
+		}
 
 		else
 			gid_specs.emplace_back(argv[i]);

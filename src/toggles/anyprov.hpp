@@ -31,6 +31,21 @@ struct fmt::formatter<EdgeKind> : formatter<string_view> {
 		return fmt::formatter<string_view>::format(name_for_kind(kind), ctx);
 	}
 };
+inline EdgeKind edge_kind_from_string(std::string_view name) {
+	using namespace std::literals::string_view_literals;
+	if (name == "combine"sv)
+		return EdgeKind::combine;
+	else if (name == "connect"sv)
+		return EdgeKind::connect;
+	else if (name == "close"sv)
+		return EdgeKind::close;
+	else if (name == "mirror"sv)
+		return EdgeKind::mirror;
+	else if (name == "source"sv)
+		return EdgeKind::source;
+	else
+		throw std::logic_error(fmt::format("edge_kind_from_string: {}\n", name));
+}
 MSGPACK_ADD_ENUM(EdgeKind)
 
 class AnyProv {
