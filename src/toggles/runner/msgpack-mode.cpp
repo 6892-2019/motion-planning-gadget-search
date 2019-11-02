@@ -463,6 +463,7 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 				}
 				last = ++result;
 			}
+			stats.pruned_locally += std::distance(last, gadgets.end());
 			gadgets.erase(last, gadgets.end());
 		}
 		assert(std::is_sorted(gadgets.begin(), gadgets.end()));
