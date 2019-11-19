@@ -21,6 +21,19 @@ using std::uint8_t;
 using std::uint64_t;
 using namespace std::literals::string_view_literals;
 
+struct HighBytePair {
+	HighBytePair() = default;
+	HighBytePair(unsigned char c, std::uint64_t v) : bytes(v | (static_cast<uint64_t>(c) << 56)) {}
+	std::uint64_t value() const {
+		return bytes & 0x00FFFFFFFFFFFFFF;
+	}
+	unsigned char kind() const {
+		return numeric_cast<unsigned char>((bytes & 0xFF00000000000000) >> 56);
+	}
+	std::uint64_t bytes;
+};
+static_assert(std::is_trivial<HighBytePair>::value);
+
 /**
  * SkinnyProv stores just enough information to get the actual edge later.  For
  * connect, close and mirror edges, that's the other end of the edge; for
@@ -32,7 +45,7 @@ using namespace std::literals::string_view_literals;
 class SkinnyProv {
 public:
 	SkinnyProv(uint64_t output, uint64_t input, EdgeKind kind) : output_(output),
-			input_(input | (static_cast<uint64_t>(kind) << 56)) {
+			input_(static_cast<unsigned char>(kind), input) {
 		//We should never get this high, but just in case, don't silently get
 		//the wrong result.  (We could use just the highest 3 bits.)
 		if (input > 0x00FFFFFFFFFFFFFF) [[unlikely]]
@@ -46,15 +59,14 @@ public:
 		return output_;
 	}
 	uint64_t input() const {
-		return input_ & 0x00FFFFFFFFFFFFFF;
+		return input_.value();
 	}
 	EdgeKind kind() const {
-		return EdgeKind{numeric_cast<unsigned char>((input_ & 0xFF00000000000000) >> 56)};
+		return EdgeKind{input_.kind()};
 	}
 private:
-	//The EdgeKind is stored in the high byte of input_, because we only check
-	//the input when we've found something.
-	std::uint64_t output_, input_;
+	std::uint64_t output_;
+	HighBytePair input_;
 };
 bool operator<(const SkinnyProv& a, const SkinnyProv& b) {
 	return a.output() < b.output();
@@ -110,6 +122,138 @@ vector<AnyProv> toposort_provs(const EdgeCache& prov, uint64_t root) {
 	return ret;
 }
 
+class ProvStorage {
+private:
+	enum class BlockType : unsigned char {
+		literal, //holds a vector of SkinnyProv
+	};
+	struct BlockHeader {
+		//The first and one-past-last output of the SkinnyProvs represented by
+		//this block.  first stores the BlockType and second the EnumKind.
+		HighBytePair first_, second_; //first and one-past-last output in block
+		BlockHeader(BlockType type, uint64_t first, uint64_t second, EdgeKind kind) :
+				first_(static_cast<unsigned char>(type), first),
+				second_(static_cast<unsigned char>(kind), second) {}
+		uint64_t first() const {return first_.value();}
+		uint64_t second() const {return second_.value();}
+		BlockType type() const {return BlockType{first_.kind()};}
+		EdgeKind kind() const {return EdgeKind{second_.kind()};}
+	};
+
+	struct LiteralBlock : BlockHeader {
+		LiteralBlock(vector<SkinnyProv>&& provs) :
+				BlockHeader(BlockType::literal, provs.front().output(), provs.back().output()+1, provs.front().kind()),
+				provs_(std::move(provs)) {}
+		LiteralBlock(vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last) :
+				LiteralBlock(vector(first, last)) {}
+		vector<SkinnyProv> provs_;
+		static vector<SkinnyProv> decode(const BlockHeader* header) {
+			assert(header->type() == BlockType::literal);
+			const LiteralBlock* block = static_cast<const LiteralBlock*>(header);
+			return block->provs_;
+		}
+		static void free(const BlockHeader* header) {
+			assert(header->type() == BlockType::literal);
+			const LiteralBlock* block = static_cast<const LiteralBlock*>(header);
+			delete block;
+		}
+	};
+
+	static vector<SkinnyProv> decode(const BlockHeader* header) {
+		switch (header->type()) {
+			case BlockType::literal: return LiteralBlock::decode(header);
+			default:
+				throw std::runtime_error(fmt::format("unhandled block type {} in ProvStorage::decode",
+						static_cast<unsigned char>(header->type())));
+		}
+	}
+
+	static void free(const BlockHeader* header) {
+		switch (header->type()) {
+			case BlockType::literal: return LiteralBlock::free(header);
+			default:
+				throw std::runtime_error(fmt::format("unhandled block type {} in ProvStorage::free",
+						static_cast<unsigned char>(header->type())));
+		}
+	}
+
+	vector<BlockHeader*> start_, end_;
+public:
+	/**
+	 * ProvSearcher looks up provs from its parent ProvStorage.  It caches the
+	 * decoded blocks for its lifetime.
+	 */
+	class ProvSearcher {
+	public:
+		SkinnyProv operator()(uint64_t output) {
+			//TODO: not sure if I can actually do anything smart here without buckets.
+			//but if blocks are sufficiently large, we can just check all of them, so...
+			for (const BlockHeader* h : parent_->start_)
+				if (h->first() <= output && output < h->second()) {
+					auto i = cache_.find(h);
+					if (i == cache_.end()) {
+						cache_[h] = ProvStorage::decode(h);
+						i = cache_.find(h);
+					}
+
+					auto lb = std::lower_bound(i->second.begin(), i->second.end(), output);
+					if (lb != i->second.end() && lb->output() == output)
+						return *lb;
+				}
+			throw std::logic_error(fmt::format("could not find SkinnyProv for {}", output));
+		}
+	private:
+		friend class ProvStorage;
+		ProvSearcher(const ProvStorage* parent) : parent_(parent) {}
+		const ProvStorage* parent_;
+		//TODO: use the prime growth policy or a non-identity pointer hash
+		tsl::hopscotch_map<const BlockHeader*, vector<SkinnyProv>> cache_;
+	};
+
+	ProvStorage() = default;
+	ProvStorage(ProvStorage&& other) = default;
+	ProvStorage& operator=(ProvStorage&& other) = default;
+	~ProvStorage() {
+		for (BlockHeader* h : start_)
+			free(h);
+		start_.clear();
+		end_.clear();
+	}
+
+	void ingest(vector<SkinnyProv>&& provs) {
+		const std::size_t block_size = 8 * 1024 * 1024 / sizeof(SkinnyProv);
+		for (vector<SkinnyProv>::iterator first = provs.begin(); first != provs.end();) {
+			std::size_t this_block_size = std::min<std::size_t>(block_size, std::distance(first, provs.end()));
+			vector<SkinnyProv>::iterator last = first + this_block_size;
+			//TODO: actually compress blocks
+			std::unique_ptr<LiteralBlock> block = std::make_unique<LiteralBlock>(first, last);
+//			const BlockHeader* block = new LiteralBlock(first, last);
+			start_.push_back(block.get());
+			end_.push_back(block.get());
+			block.release(); //now owned by start_, will be deleted in dtor
+			first = last;
+		}
+
+		std::sort(start_.begin(), start_.end(), [](const BlockHeader* left, const BlockHeader* right) {
+			return left->first() < right->first();
+		});
+		std::sort(end_.begin(), end_.end(), [](const BlockHeader* left, const BlockHeader* right) {
+			return left->second() < right->second();
+		});
+	}
+
+	ProvSearcher searcher() const {
+		return ProvSearcher(this);
+	}
+
+	std::size_t total_size() const {
+		return 12;
+	}
+	std::size_t total_capacity() const {
+		return 24;
+	}
+};
+
 SkinnyProv find_sp(const vector<vector<SkinnyProv>>& provs, uint64_t output) {
 	for (const vector<SkinnyProv>& prov : provs) {
 		auto lb = std::lower_bound(prov.begin(), prov.end(), output);
@@ -156,8 +300,9 @@ void fill_cache(lmdb::env& env,
 		vector<pair<uint64_t, lmdb::dbi>>& combine_edges, vector<pair<uint64_t, lmdb::dbi>>& combine_skinny_edges,
 		lmdb::dbi& connect_edges, lmdb::dbi& connect_skinny_edges,
 		lmdb::dbi& close_edges, lmdb::dbi& mirror_edges,
-		const vector<pair<uint64_t, uint64_t>>& roots, const vector<vector<SkinnyProv>>& prov,
+		const vector<pair<uint64_t, uint64_t>>& roots, const ProvStorage& prov,
 		EdgeCache& edge_cache, DeletedLocationsCache& delloc, std::string_view db_path, unsigned int threads) {
+	ProvStorage::ProvSearcher searcher = prov.searcher();
 	vector<uint64_t> trace_lhs = interval_inflate(roots.begin(), roots.end());
 	vector<pair<uint64_t, SkinnyProv>> combine_batch;
 	vector<SkinnyProv> connect_batch, close_batch, mirror_batch;
@@ -169,7 +314,8 @@ void fill_cache(lmdb::env& env,
 				//but traces shouldn't get large enough for that to matter.
 				std::find(trace_lhs.begin(), trace_lhs.end(), trace_lhs[i]) != trace_lhs.begin()+i)
 			continue;
-		SkinnyProv p = find_sp(prov, trace_lhs[i]);
+		SkinnyProv p = searcher(trace_lhs[i]);
+//		SkinnyProv p = find_sp(prov, trace_lhs[i]);
 		switch (p.kind()) {
 			case EdgeKind::source:
 				continue; //nothing to do; end of this branch of the trace
@@ -636,11 +782,12 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	TargetStuff target = target_stuff(env);
 	const vector<pair<uint64_t, uint64_t>> possible_combine_rights = find_all_combine_rights(env);
 
-	//Minimal provenance information.  All vectors are sorted.  There's no
-	//correspondence between the various vectors and generations; we're mostly
-	//just avoiding sorting all the data over and over, on the assumption that
-	//we're printing tracebacks infrequently.
-	vector<vector<SkinnyProv>> prov;
+////	Minimal provenance information.  All vectors are sorted.  There's no
+////	correspondence between the various vectors and generations; we're mostly
+////	just avoiding sorting all the data over and over, on the assumption that
+////	we're printing tracebacks infrequently.
+//	vector<vector<SkinnyProv>> prov;
+	ProvStorage prov;
 	//We store most edges as SkinnyProv, only getting the full edge data when
 	//we're going to print a derivation.
 	EdgeCache edge_cache;
@@ -754,7 +901,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("close", awaiting_closemirror);
 				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_close, EdgeKind::close, possible, closed, num_threads);
 				if (!provs.empty())
-					prov.push_back(std::move(provs));
+					prov.ingest(std::move(provs));
 				if (!discovered.empty()) //avoid copying if nothing found (especially for close)
 					task_parallel(num_threads,
 							std::bind_front(record_closed, std::cref(discovered)),
@@ -770,7 +917,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("mirror", awaiting_closemirror);
 				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_mirror, EdgeKind::mirror, possible, closed, num_threads);
 				if (!provs.empty())
-					prov.push_back(std::move(provs));
+					prov.ingest(std::move(provs));
 				if (!discovered.empty()) //avoid copying if nothing found (should be uncommon for mirror...)
 					task_parallel(num_threads,
 							std::bind_front(record_closed, std::cref(discovered)),
@@ -805,7 +952,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("connect", awaiting_connect);
 			auto [provs, discovered] = discover_through_skinny_edges(env, edges_skinny_connect, EdgeKind::connect, possible, closed, num_threads);
 			if (!provs.empty())
-				prov.push_back(std::move(provs));
+				prov.ingest(std::move(provs));
 			if (!discovered.empty())
 				task_parallel(num_threads,
 						std::bind_front(record_closed, std::cref(discovered)),
@@ -820,7 +967,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 						fmt::format("combine-{}", right.first), awaiting_combine);
 				auto [provs, discovered] = discover_through_skinny_edges(env, right.second, EdgeKind::combine, possible, closed, num_threads);
 				if (!provs.empty())
-					prov.push_back(std::move(provs));
+					prov.ingest(std::move(provs));
 				if (!discovered.empty())
 					task_parallel(num_threads,
 							std::bind_front(record_closed, std::cref(discovered)),
@@ -850,11 +997,11 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		print_stats_line(awaiting_connect, "connect");
 		print_stats_line(awaiting_combine, "combine");
 
-		std::size_t prov_total_bytes = 0, prov_total_capacity = 0;
-		for (const auto& p : prov) {
-			prov_total_bytes += p.size() * sizeof(p.front());
-			prov_total_capacity += p.capacity() * sizeof(p.front());
-		}
+		std::size_t prov_total_bytes = prov.total_size(), prov_total_capacity = prov.total_capacity();
+//		for (const auto& p : prov) {
+//			prov_total_bytes += p.size() * sizeof(p.front());
+//			prov_total_capacity += p.capacity() * sizeof(p.front());
+//		}
 		fmt::print("--> provenance: {:6.2f} GiB {:6.2f} GiB {:.2f}\n",
 				((double)prov_total_bytes) / (1024*1024*1024),
 				((double)prov_total_capacity) / (1024*1024*1024),
