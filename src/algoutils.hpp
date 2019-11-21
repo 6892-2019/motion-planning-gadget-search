@@ -181,6 +181,10 @@ struct free_deleter {
 	void operator()(T* ptr) const noexcept {
 		std::free(ptr);
 	}
+	template<typename T>
+	void operator()(const T* ptr) const noexcept {
+		std::free(const_cast<T*>(ptr));
+	}
 };
 
 

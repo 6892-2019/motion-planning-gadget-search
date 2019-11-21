@@ -21,6 +21,15 @@ using std::uint8_t;
 using std::uint64_t;
 using namespace std::literals::string_view_literals;
 
+namespace {
+//TODO: copied from invert-mode.cpp; see also minimum_size in gadget-encoding.cpp
+unsigned int necessary_bytes(std::size_t x) {
+	unsigned int i = 1;
+	while (x /= 256) ++i;
+	return i;
+}
+}
+
 struct HighBytePair {
 	HighBytePair() = default;
 	HighBytePair(unsigned char c, std::uint64_t v) : bytes(v | (static_cast<uint64_t>(c) << 56)) {}
@@ -126,6 +135,10 @@ class ProvStorage {
 private:
 	enum class BlockType : unsigned char {
 		literal, //holds a vector of SkinnyProv
+		//varint-delta coded outputs, followed by fixed-width inputs
+		point_two, point_three, point_four, point_five,
+		//varint-delta interval lists of outputs, followed by fixed-width inputs
+		interval_two, interval_three, interval_four, interval_five,
 	};
 	struct BlockHeader {
 		//The first and one-past-last output of the SkinnyProvs represented by
@@ -147,33 +160,189 @@ private:
 		LiteralBlock(vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last) :
 				LiteralBlock(vector(first, last)) {}
 		vector<SkinnyProv> provs_;
-		static vector<SkinnyProv> decode(const BlockHeader* header) {
-			assert(header->type() == BlockType::literal);
-			const LiteralBlock* block = static_cast<const LiteralBlock*>(header);
-			return block->provs_;
+		vector<SkinnyProv> decode() const {
+			//This makes an unnecessary copy, but I don't know how to do better,
+			//and we shouldn't have large enough LiteralBlocks for it to matter.
+			return provs_;
 		}
-		static void free(const BlockHeader* header) {
-			assert(header->type() == BlockType::literal);
-			const LiteralBlock* block = static_cast<const LiteralBlock*>(header);
-			delete block;
+	};
+
+	struct CompressedBlock : BlockHeader {
+		std::unique_ptr<const std::byte, free_deleter> bytes;
+		unsigned int output_bytes, input_bytes;
+		CompressedBlock(BlockType type, EdgeKind kind, uint64_t firstOutput, uint64_t secondOutput,
+				const dynarray<std::byte>& workspace, unsigned int outputBytes, unsigned int inputBytes) :
+				BlockHeader(type, firstOutput, secondOutput, kind), bytes(),
+				output_bytes(outputBytes), input_bytes(inputBytes) {
+			void* data = std::malloc(outputBytes+inputBytes);
+			if (!data) throw std::bad_alloc();
+			std::memcpy(data, workspace.cbegin(), output_bytes + input_bytes);
+			bytes.reset(reinterpret_cast<std::byte*>(data));
+		}
+		vector<SkinnyProv> decode() const {
+			switch (type()) {
+				case BlockType::point_two:      return decode_point<2>();
+				case BlockType::point_three:    return decode_point<3>();
+				case BlockType::point_four:     return decode_point<4>();
+				case BlockType::point_five:     return decode_point<5>();
+				case BlockType::interval_two:   return decode_interval<2>();
+				case BlockType::interval_three: return decode_interval<3>();
+				case BlockType::interval_four:  return decode_interval<4>();
+				case BlockType::interval_five:  return decode_interval<5>();
+				default:
+					throw std::logic_error(fmt::format("unhandled type {} in CompressedBlock::decode",
+							static_cast<unsigned int>(type())));
+			}
+		}
+	private:
+		template<unsigned int W>
+		vector<SkinnyProv> decode_point() const {
+			if (unsigned int remainder = input_bytes % W)
+				throw std::logic_error(fmt::format("decode_point<{}> called for type {} but input_bytes {} leaves remainder {}",
+						W, static_cast<unsigned int>(type()), input_bytes, remainder));
+			const EdgeKind kind = this->kind();
+			const std::byte* output_first = bytes.get();
+			const std::byte* output_last = bytes.get() + output_bytes;
+			const std::array<std::byte, W>* input_first = reinterpret_cast<const std::array<std::byte, W>*>(output_last);
+			const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
+			vector<SkinnyProv> result;
+			result.reserve(input_bytes / W);
+			uint64_t prev_output = 0;
+			while (output_first != output_last) {
+				assert(input_first != input_last);
+				uint64_t output = upv::read(output_first) + prev_output;
+				assert(first() <= output && output < second());
+				uint64_t input = 0;
+				std::memcpy(&input, input_first->data(), input_first->size());
+				++input_first;
+				result.emplace_back(output, input, kind);
+				prev_output = output;
+			}
+			return result;
+		}
+		template<unsigned int W>
+		vector<SkinnyProv> decode_interval() const {
+			if (unsigned int remainder = input_bytes % W)
+				throw std::logic_error(fmt::format("decode_point<{}> called for type {} but input_bytes {} leaves remainder {}",
+						W, static_cast<unsigned int>(type()), input_bytes, remainder));
+			const EdgeKind kind = this->kind();
+			const std::byte* output_first = bytes.get();
+			const std::byte* output_last = bytes.get() + output_bytes;
+			const std::array<std::byte, W>* input_first = reinterpret_cast<const std::array<std::byte, W>*>(output_last);
+			const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
+			vector<SkinnyProv> result;
+			result.reserve(input_bytes / W);
+			uint64_t prev_output = 0;
+			while (output_first != output_last) {
+				uint64_t output_interval_begin = upv::read(output_first) + prev_output;
+				prev_output = output_interval_begin;
+				uint64_t output_interval_end = upv::read(output_first) + prev_output;
+				prev_output = output_interval_end;
+				assert(output_interval_begin < output_interval_end);
+				assert(first() <= output_interval_begin && output_interval_begin < second());
+				assert(first() < output_interval_end && output_interval_end <= second());
+
+				for (uint64_t output = output_interval_begin; output < output_interval_end; ++output, ++input_first) {
+					assert(input_first != input_last);
+					uint64_t input = 0;
+					std::memcpy(&input, input_first->data(), input_first->size());
+					result.emplace_back(output, input, kind);
+				}
+			}
+			return result;
 		}
 	};
 
 	static vector<SkinnyProv> decode(const BlockHeader* header) {
-		switch (header->type()) {
-			case BlockType::literal: return LiteralBlock::decode(header);
-			default:
-				throw std::runtime_error(fmt::format("unhandled block type {} in ProvStorage::decode",
-						static_cast<unsigned char>(header->type())));
-		}
+		if (header->type() == BlockType::literal)
+			return static_cast<const LiteralBlock*>(header)->decode();
+		else
+			return static_cast<const CompressedBlock*>(header)->decode();
 	}
 
 	static void free(const BlockHeader* header) {
-		switch (header->type()) {
-			case BlockType::literal: return LiteralBlock::free(header);
+		if (header->type() == BlockType::literal)
+			delete static_cast<const LiteralBlock*>(header);
+		else
+			delete static_cast<const CompressedBlock*>(header);
+	}
+
+	static BlockHeader* compress(vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last,
+			dynarray<std::byte>& workspace) {
+		if (std::distance(first, last) < 100)
+			//Some blocks are just too small to be worth compressing.
+			return new LiteralBlock(first, last);
+
+		//Could be improved with a pointer_to_member_function_iterator and maximal_intervals.
+		interval_accumulator<uint64_t> accum(512);
+		//We don't actually need to know the largest input; we just want to find
+		//the highest bit set in any of the inputs.  Use branchless bitwise or.
+		uint64_t input_bits = 0;
+		uint64_t last_output = 0;
+		for (vector<SkinnyProv>::iterator i = first; i != last; ++i) {
+			last_output = i->output();
+			accum(last_output);
+			input_bits |= i->input();
+		}
+		vector<pair<uint64_t, uint64_t>> intervals = std::move(accum).finish();
+		//Strictly speaking, this condition doesn't imply the varint-delta
+		//interval list is smaller than the point list, but it's close enough.
+		bool write_intervals = intervals.size() * sizeof(intervals.front()) < std::distance(first, last) * sizeof(*first);
+
+		std::byte* end = workspace.begin();
+		if (write_intervals) {
+			uint64_t prev = 0;
+			for (pair<uint64_t, uint64_t> p : intervals) {
+				upv::write(end, p.first - prev);
+				prev = p.first;
+				upv::write(end, p.second - prev);
+				prev = p.second;
+			}
+		} else {
+			uint64_t prev = 0;
+			for (vector<SkinnyProv>::iterator i = first; i != last; ++i) {
+				uint64_t output = i->output();
+				upv::write(end, output - prev);
+				prev = output;
+			}
+		}
+		unsigned int output_bytes = static_cast<unsigned int>(std::distance(workspace.begin(), end));
+
+		unsigned int width = necessary_bytes(input_bits);
+		BlockType type;
+		switch (width) {
+			case 2:
+				write_inputs<2>(end, first, last);
+				type = write_intervals ? BlockType::interval_two : BlockType::point_two;
+				break;
+			case 3:
+				write_inputs<3>(end, first, last);
+				type = write_intervals ? BlockType::interval_three : BlockType::point_three;
+				break;
+			case 4:
+				write_inputs<4>(end, first, last);
+				type = write_intervals ? BlockType::interval_four : BlockType::point_four;
+				break;
+			case 5:
+				write_inputs<5>(end, first, last);
+				type = write_intervals ? BlockType::interval_five : BlockType::point_five;
+				break;
 			default:
-				throw std::runtime_error(fmt::format("unhandled block type {} in ProvStorage::free",
-						static_cast<unsigned char>(header->type())));
+				throw std::logic_error(fmt::format("unhandled width {} in ProvStorage::compress", width));
+		}
+		unsigned int input_bytes = static_cast<unsigned int>(width * std::distance(first, last));
+		assert(workspace.begin() + (input_bytes + output_bytes) == end);
+
+		return new CompressedBlock(type, first->kind(), first->output(), last_output+1,
+				workspace, output_bytes, input_bytes);
+	}
+
+	template<unsigned int W>
+	static void write_inputs(std::byte*& dest, vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last) {
+		for (vector<SkinnyProv>::iterator i = first; i != last; ++i) {
+			uint64_t input = i->input();
+			std::memcpy(dest, &input, W);
+			dest += W;
 		}
 	}
 
@@ -222,15 +391,17 @@ public:
 
 	void ingest(vector<SkinnyProv>&& provs) {
 		const std::size_t block_size = 8 * 1024 * 1024 / sizeof(SkinnyProv);
+		dynarray<std::byte> workspace(block_size * sizeof(SkinnyProv));
 		for (vector<SkinnyProv>::iterator first = provs.begin(); first != provs.end();) {
 			std::size_t this_block_size = std::min<std::size_t>(block_size, std::distance(first, provs.end()));
 			vector<SkinnyProv>::iterator last = first + this_block_size;
-			//TODO: actually compress blocks
-			std::unique_ptr<LiteralBlock> block = std::make_unique<LiteralBlock>(first, last);
-//			const BlockHeader* block = new LiteralBlock(first, last);
-			start_.push_back(block.get());
-			end_.push_back(block.get());
-			block.release(); //now owned by start_, will be deleted in dtor
+			//This use of a raw pointer is exception-unsafe in the case where
+			//reallocating the block list fails.  We're probably screwed in that
+			//case anyway, but we could fix this with std::unique_ptr and a
+			//custom deleter that calls ProvStorage::free to properly free the block.
+			BlockHeader* block = compress(first, last, workspace);
+			start_.push_back(block);
+			end_.push_back(block);
 			first = last;
 		}
 
