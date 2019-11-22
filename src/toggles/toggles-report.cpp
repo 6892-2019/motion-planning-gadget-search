@@ -8,6 +8,7 @@
 #include "stopwatch.hpp"
 #include "intervals.hpp"
 #include "proj_compare.hpp"
+#include "pop_iterator.hpp"
 #include "transform_reduce.hpp"
 #include "tsl/ordered_set.h"
 #include "task_parallel.hpp"
@@ -28,6 +29,18 @@ unsigned int necessary_bytes(std::size_t x) {
 	while (x /= 256) ++i;
 	return i;
 }
+
+struct merge_unique_pop_front {
+template<typename Container, class = typename std::enable_if<!std::is_lvalue_reference<Container>::value>::type>
+Container operator()(Container&& left_rref, Container&& right_rref) const {
+	//Ensure memory is freed on return.  Less important because we're popping, but still.
+	Container left(std::move(left_rref)), right(std::move(right_rref));
+	Container result;
+	//TODO: pop_front_iterator would allow just calling the normal merge_unique
+	merge_unique(pop_front_begin(left), pop_front_end(left), pop_front_begin(right), pop_front_end(right), std::back_inserter(result));
+	return result;
+}
+};
 }
 
 struct HighBytePair {
@@ -86,6 +99,11 @@ bool operator==(const SkinnyProv& a, const SkinnyProv& b) {
 bool operator<(const SkinnyProv& a, uint64_t b) {
 	return a.output() < b;
 }
+
+//use 1MiB blocks to amortize allocator overhead
+using LargeBlockDequeOpts = boost::container::deque_options<boost::container::block_bytes<1024 * 1024>>::type;
+template<typename T>
+using LargeBlockDeque = boost::container::deque<T, void, LargeBlockDequeOpts>;
 
 using EdgeCache = tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>;
 using DeletedLocationsCache = tsl::hopscotch_map<uint64_t, vector<unsigned int>, farmhash_hash>;
@@ -407,19 +425,23 @@ public:
 		blocks_.clear();
 	}
 
-	void ingest(vector<SkinnyProv>&& provs) {
+	void ingest(LargeBlockDeque<SkinnyProv>&& provs) {
 		const std::size_t block_size = 8 * 1024 * 1024 / sizeof(SkinnyProv);
 		dynarray<std::byte> workspace(block_size * sizeof(SkinnyProv));
-		for (vector<SkinnyProv>::iterator first = provs.begin(); first != provs.end();) {
-			std::size_t this_block_size = std::min<std::size_t>(block_size, std::distance(first, provs.end()));
-			vector<SkinnyProv>::iterator last = first + this_block_size;
+		vector<SkinnyProv> batch;
+		batch.reserve(block_size);
+
+		while (!provs.empty()) {
+			std::size_t this_block_size = std::min<std::size_t>(block_size, provs.size());
+			auto batch_end = provs.begin() + this_block_size;
+			batch.assign(provs.begin(), batch_end);
+			provs.erase(provs.begin(), batch_end);
 			//This use of a raw pointer is exception-unsafe in the case where
 			//reallocating the block list fails.  We're probably screwed in that
 			//case anyway, but we could fix this with std::unique_ptr and a
 			//custom deleter that calls ProvStorage::free to properly free the block.
-			BlockHeader* block = compress(first, last, workspace);
+			BlockHeader* block = compress(batch.begin(), batch.end(), workspace);
 			blocks_.push_back(block);
-			first = last;
 			pair<uint64_t, uint64_t> sizecap = size_capacity(block);
 			size_ += sizecap.first;
 			capacity_ += sizecap.second;
@@ -838,29 +860,15 @@ struct EdgeVisitor {
 	}
 };
 
-struct merge_unique_vectors {
-template<typename T>
-vector<T> operator()(vector<T>&& left_rref, vector<T>&& right_rref) const {
-	vector<T> left(std::move(left_rref)), right(std::move(right_rref)); //ensure memory is freed on return
-	vector<T> result;
-	//This is an overestimate, but at most by max(left.size(), right.size()),
-	//because we know each vector is already uniqued.  Empirically, this
-	//improved utilization from ~.75 to ~.95 without requiring a big vector copy
-	//(as in shrink_to_fit()).
-	result.reserve(left.size() + right.size());
-	merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(result));
-	return result;
-}
-};
-
-vector<pair<uint64_t, uint64_t>> build_output_intervals(const vector<SkinnyProv>& provs, unsigned int num_threads) {
+vector<pair<uint64_t, uint64_t>> build_output_intervals(const LargeBlockDeque<SkinnyProv>& provs, unsigned int num_threads) {
 	vector<pair<std::size_t, std::size_t>> intervalize_tasks;
 	for (std::size_t i = 0; i < provs.size(); i += 30000)
 		intervalize_tasks.emplace_back(i, std::min(i + 30000, provs.size()));
 	return transform_reduce(std::move(intervalize_tasks), num_threads, [&provs](pair<std::size_t, std::size_t> p) {
+		//TODO: could be improved with pointer-to-member-function iterator and maximal_intervals
 		interval_accumulator<uint64_t> accum(512);
-		for (std::size_t i = p.first; i < p.second; ++i)
-			accum(provs[i].output());
+		for (auto i = provs.begin() + p.first, end = provs.begin() + p.second; i != end; ++i)
+			accum(i->output());
 		return std::move(accum).finish();
 	}, [](vector<pair<uint64_t, uint64_t>> left, vector<pair<uint64_t, uint64_t>> right) {
 		return interval_union(left.begin(), left.end(), right.begin(), right.end());
@@ -868,34 +876,34 @@ vector<pair<uint64_t, uint64_t>> build_output_intervals(const vector<SkinnyProv>
 }
 
 template<class Edge>
-pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_edges(
+pair<LargeBlockDeque<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_edges(
 		lmdb::env& env, lmdb::dbi& edge_db, EdgeKind kind, const vector<pair<uint64_t, uint64_t>>& possible,
 		const vector<pair<uint64_t, uint64_t>>& closed, unsigned int num_threads) {
 	auto chunks = interval_chunk(possible.begin(), possible.end(), 10000);
-	vector<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
+	LargeBlockDeque<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		EdgeVisitor visitor = {.kind = kind, .closed = &closed, .followed = {}, .already_added = {}};
 		visit_edges<Edge>(txn, edge_db, chunk, visitor);
 		txn.commit();
 		std::sort(visitor.followed.begin(), visitor.followed.end());
-		return std::move(visitor.followed);
-	}, merge_unique_vectors());
+		return LargeBlockDeque<SkinnyProv>(visitor.followed.begin(), visitor.followed.end());
+	}, merge_unique_pop_front());
 	auto discovered = build_output_intervals(provs, num_threads);
 	return {std::move(provs), std::move(discovered)};
 }
 
-pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_skinny_edges(
+pair<LargeBlockDeque<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_skinny_edges(
 		lmdb::env& env, lmdb::dbi& edge_db, EdgeKind kind, const vector<pair<uint64_t, uint64_t>>& possible,
 		const vector<pair<uint64_t, uint64_t>>& closed, unsigned int num_threads) {
 	auto chunks = interval_chunk(possible.begin(), possible.end(), 25000);
-	vector<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
+	LargeBlockDeque<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		EdgeVisitor visitor = {.kind = kind, .closed = &closed, .followed = {}, .already_added = {}};
 		visit_skinny_edges(txn, edge_db, chunk, visitor);
 		txn.commit();
 		std::sort(visitor.followed.begin(), visitor.followed.end());
-		return std::move(visitor.followed);
-	}, merge_unique_vectors());
+		return LargeBlockDeque<SkinnyProv>(visitor.followed.begin(), visitor.followed.end());
+	}, merge_unique_pop_front());
 	auto discovered = build_output_intervals(provs, num_threads);
 	return {std::move(provs), std::move(discovered)};
 }

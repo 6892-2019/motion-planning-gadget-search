@@ -1,6 +1,7 @@
 //The #include part of the precompiled header.
 #include <array>
 #include <vector>
+#include <boost/container/deque.hpp>
 #include <boost/circular_buffer.hpp>
 #include <hopscotch/hopscotch_set.h>
 #include <hopscotch/hopscotch_map.h>
