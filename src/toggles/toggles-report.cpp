@@ -233,7 +233,7 @@ private:
 			const std::byte* output_first = bytes.get();
 			const std::byte* output_last = bytes.get() + output_bytes;
 			const std::array<std::byte, W>* input_first = reinterpret_cast<const std::array<std::byte, W>*>(output_last);
-			const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
+			MAYBE_UNUSED const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
 			vector<SkinnyProv> result;
 			result.reserve(input_bytes / W);
 			uint64_t prev_output = 0;
@@ -258,7 +258,7 @@ private:
 			const std::byte* output_first = bytes.get();
 			const std::byte* output_last = bytes.get() + output_bytes;
 			const std::array<std::byte, W>* input_first = reinterpret_cast<const std::array<std::byte, W>*>(output_last);
-			const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
+			MAYBE_UNUSED const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
 			vector<SkinnyProv> result;
 			result.reserve(input_bytes / W);
 			uint64_t prev_output = 0;
