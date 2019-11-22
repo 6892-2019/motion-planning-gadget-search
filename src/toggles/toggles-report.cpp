@@ -444,15 +444,6 @@ public:
 	}
 };
 
-SkinnyProv find_sp(const vector<vector<SkinnyProv>>& provs, uint64_t output) {
-	for (const vector<SkinnyProv>& prov : provs) {
-		auto lb = std::lower_bound(prov.begin(), prov.end(), output);
-		if (lb != prov.end() && lb->output() == output)
-			return *lb;
-	}
-	throw std::logic_error(fmt::format("could not find SkinnyProv for {}", output));
-}
-
 template<class Edge>
 std::optional<Edge> search_for_edge(lmdb::txn& txn, lmdb::dbi& edges, uint64_t input, uint64_t output) {
 	std::optional<Edge> ret;
@@ -505,7 +496,6 @@ void fill_cache(lmdb::env& env,
 				std::find(trace_lhs.begin(), trace_lhs.end(), trace_lhs[i]) != trace_lhs.begin()+i)
 			continue;
 		SkinnyProv p = searcher(trace_lhs[i]);
-//		SkinnyProv p = find_sp(prov, trace_lhs[i]);
 		switch (p.kind()) {
 			case EdgeKind::source:
 				continue; //nothing to do; end of this branch of the trace
@@ -972,11 +962,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	TargetStuff target = target_stuff(env);
 	const vector<pair<uint64_t, uint64_t>> possible_combine_rights = find_all_combine_rights(env);
 
-////	Minimal provenance information.  All vectors are sorted.  There's no
-////	correspondence between the various vectors and generations; we're mostly
-////	just avoiding sorting all the data over and over, on the assumption that
-////	we're printing tracebacks infrequently.
-//	vector<vector<SkinnyProv>> prov;
 	ProvStorage prov;
 	//We store most edges as SkinnyProv, only getting the full edge data when
 	//we're going to print a derivation.
@@ -1188,10 +1173,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		print_stats_line(awaiting_combine, "combine");
 
 		std::size_t prov_total_bytes = prov.total_size(), prov_total_capacity = prov.total_capacity();
-//		for (const auto& p : prov) {
-//			prov_total_bytes += p.size() * sizeof(p.front());
-//			prov_total_capacity += p.capacity() * sizeof(p.front());
-//		}
 		fmt::print("--> provenance: {:6.2f} GiB {:6.2f} GiB {:.2f}\n",
 				((double)prov_total_bytes) / (1024*1024*1024),
 				((double)prov_total_capacity) / (1024*1024*1024),
