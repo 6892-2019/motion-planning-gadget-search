@@ -366,7 +366,7 @@ private:
 		}
 	}
 
-	vector<BlockHeader*> start_, end_;
+	vector<const BlockHeader*> blocks_;
 	std::size_t size_, capacity_;
 public:
 	/**
@@ -376,9 +376,7 @@ public:
 	class ProvSearcher {
 	public:
 		SkinnyProv operator()(uint64_t output) {
-			//TODO: not sure if I can actually do anything smart here without buckets.
-			//but if blocks are sufficiently large, we can just check all of them, so...
-			for (const BlockHeader* h : parent_->start_)
+			for (const BlockHeader* h : parent_->blocks_)
 				if (h->first() <= output && output < h->second()) {
 					auto i = cache_.find(h);
 					if (i == cache_.end()) {
@@ -404,10 +402,9 @@ public:
 	ProvStorage(ProvStorage&& other) = default;
 	ProvStorage& operator=(ProvStorage&& other) = default;
 	~ProvStorage() {
-		for (BlockHeader* h : start_)
+		for (const BlockHeader* h : blocks_)
 			free(h);
-		start_.clear();
-		end_.clear();
+		blocks_.clear();
 	}
 
 	void ingest(vector<SkinnyProv>&& provs) {
@@ -421,20 +418,12 @@ public:
 			//case anyway, but we could fix this with std::unique_ptr and a
 			//custom deleter that calls ProvStorage::free to properly free the block.
 			BlockHeader* block = compress(first, last, workspace);
-			start_.push_back(block);
-			end_.push_back(block);
+			blocks_.push_back(block);
 			first = last;
 			pair<uint64_t, uint64_t> sizecap = size_capacity(block);
 			size_ += sizecap.first;
 			capacity_ += sizecap.second;
 		}
-
-		std::sort(start_.begin(), start_.end(), [](const BlockHeader* left, const BlockHeader* right) {
-			return left->first() < right->first();
-		});
-		std::sort(end_.begin(), end_.end(), [](const BlockHeader* left, const BlockHeader* right) {
-			return left->second() < right->second();
-		});
 	}
 
 	ProvSearcher searcher() const {
@@ -451,7 +440,7 @@ public:
 	 * Total storage used, including unused space, pointers, etc.
 	 */
 	std::size_t total_capacity() const {
-		return capacity_ + sizeof(*this) + (start_.capacity() + end_.capacity()) * sizeof(start_.front()) + sizeof(size_) + sizeof(capacity_);
+		return capacity_ + sizeof(*this) + blocks_.capacity() * sizeof(blocks_.front()) + sizeof(size_) + sizeof(capacity_);
 	}
 };
 
