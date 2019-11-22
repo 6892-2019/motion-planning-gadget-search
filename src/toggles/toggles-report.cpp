@@ -165,6 +165,9 @@ private:
 			//and we shouldn't have large enough LiteralBlocks for it to matter.
 			return provs_;
 		}
+		pair<std::size_t, std::size_t> size_capacity() const {
+			return {provs_.size() * sizeof(SkinnyProv), provs_.capacity() * sizeof(SkinnyProv) + sizeof(*this)};
+		}
 	};
 
 	struct CompressedBlock : BlockHeader {
@@ -193,6 +196,14 @@ private:
 					throw std::logic_error(fmt::format("unhandled type {} in CompressedBlock::decode",
 							static_cast<unsigned int>(type())));
 			}
+		}
+		pair<std::size_t, std::size_t> size_capacity() const {
+#ifndef __SANITIZE_ADDRESS__
+			std::size_t capacity_estimate = nallocx(output_bytes + input_bytes, 0);
+#else
+			std::size_t capacity_estimate = output_bytes + input_bytes; //Could try malloc_usable_size?
+#endif
+			return {output_bytes + input_bytes, capacity_estimate + sizeof(*this)};
 		}
 	private:
 		template<unsigned int W>
@@ -265,6 +276,15 @@ private:
 			delete static_cast<const LiteralBlock*>(header);
 		else
 			delete static_cast<const CompressedBlock*>(header);
+	}
+
+	//This should really be an extra return value from compress, but compress is
+	//pretty complicated already.
+	static pair<std::size_t, std::size_t> size_capacity(const BlockHeader* header) {
+		if (header->type() == BlockType::literal)
+			return static_cast<const LiteralBlock*>(header)->size_capacity();
+		else
+			return static_cast<const CompressedBlock*>(header)->size_capacity();
 	}
 
 	static BlockHeader* compress(vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last,
@@ -347,6 +367,7 @@ private:
 	}
 
 	vector<BlockHeader*> start_, end_;
+	std::size_t size_, capacity_;
 public:
 	/**
 	 * ProvSearcher looks up provs from its parent ProvStorage.  It caches the
@@ -379,7 +400,7 @@ public:
 		tsl::hopscotch_map<const BlockHeader*, vector<SkinnyProv>> cache_;
 	};
 
-	ProvStorage() = default;
+	ProvStorage() : size_(0), capacity_(0) {}
 	ProvStorage(ProvStorage&& other) = default;
 	ProvStorage& operator=(ProvStorage&& other) = default;
 	~ProvStorage() {
@@ -403,6 +424,9 @@ public:
 			start_.push_back(block);
 			end_.push_back(block);
 			first = last;
+			pair<uint64_t, uint64_t> sizecap = size_capacity(block);
+			size_ += sizecap.first;
+			capacity_ += sizecap.second;
 		}
 
 		std::sort(start_.begin(), start_.end(), [](const BlockHeader* left, const BlockHeader* right) {
@@ -417,11 +441,17 @@ public:
 		return ProvSearcher(this);
 	}
 
+	/**
+	 * Storage occupied by prov data, not including overheads.
+	 */
 	std::size_t total_size() const {
-		return 12;
+		return size_;
 	}
+	/**
+	 * Total storage used, including unused space, pointers, etc.
+	 */
 	std::size_t total_capacity() const {
-		return 24;
+		return capacity_ + sizeof(*this) + (start_.capacity() + end_.capacity()) * sizeof(start_.front()) + sizeof(size_) + sizeof(capacity_);
 	}
 };
 
