@@ -685,6 +685,7 @@ AutomatonBase::state_type Automaton<AlphabetSize>::append(Automaton&& b) {
 
 template<unsigned int AlphabetSize>
 bool Automaton<AlphabetSize>::addTrans(state_type from, symbol_mask_type symbols, state_type to) {
+	if (!symbols) return false;
 	for (Transition& t : transitions_[from])
 		if (t.next_ == to) {
 			auto before = t.symbols_;

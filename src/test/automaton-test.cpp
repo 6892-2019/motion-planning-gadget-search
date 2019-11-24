@@ -74,6 +74,15 @@ Automaton<N> optimizePreservesLanguage(const Automaton<N>& p, OptimizeKind reque
 	return rv;
 }
 
+TEST_CASE("AutomatonTest_AddTransEmptySymbolMask") {
+	Automaton<2> a;
+	a.addState();
+	a.addState();
+	Automaton<2>::symbol_mask_type empty;
+	CHECK_UNARY_FALSE(a.addTrans(0, empty, 1));
+	CHECK_UNARY(a.destinations(0).empty());
+}
+
 TEST_CASE("AutomatonTest_Clone") {
 	auto a = range<2>(lit<2>(0), 2, 6);
 	auto b = a; //clone

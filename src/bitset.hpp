@@ -68,6 +68,7 @@ public:
 	bool any() const;
 	bool none() const;
 	bool all() const;
+	explicit operator bool() const;
 
 	bool operator==(const bitset& other) const;
 
@@ -184,6 +185,10 @@ template<typename storage_type, unsigned int N>
 bool bitset<storage_type, N>::all() const {
 	//(~bits & (N 1s)) == 0 may be faster
 	return count() == capacity();
+}
+template<typename storage_type, unsigned int N>
+bitset<storage_type, N>::operator bool() const {
+	return static_cast<bool>(bits_);
 }
 
 template<typename storage_type, unsigned int N>
