@@ -18,6 +18,8 @@ void migrate_gadget_index(lmdb::env& env, std::string_view temp_dir) {
 	std::FILE* hash_file = nullptr;
 	long file_size = 0;
 	{
+		DatabaseMetadata meta = read_meta(env);
+
 		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		main_db = lmdb::dbi::open(txn, nullptr);
 		gadget_index = lmdb::dbi::open(txn, "gadget_index");
@@ -28,7 +30,6 @@ void migrate_gadget_index(lmdb::env& env, std::string_view temp_dir) {
 			return;
 		}
 
-		DatabaseMetadata meta = read_meta(env);
 		std::string filename = fmt::format("{}/gadget_index-{:x}.dat", temp_dir, meta.id);
 		hash_file = std::fopen(filename.c_str(), "r+b");
 
