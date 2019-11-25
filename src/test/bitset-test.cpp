@@ -158,3 +158,39 @@ TEST_CASE("BitsetTest_FindNext64_01") {
 		CHECK_EQ(a.find_next(i), i+1);
 	}
 }
+
+TEST_CASE("BitsetTest_SubtractByAndComplement") {
+	bitset<12> a;
+	a.set();
+	bitset<12> b;
+	b.set(2);
+	b.set(9);
+
+	bitset<12> c = a & ~b;
+	CHECK_UNARY(c[0]);
+	CHECK_UNARY(c[1]);
+	CHECK_UNARY_FALSE(c[2]);
+	CHECK_UNARY(c[3]);
+	CHECK_UNARY(c[4]);
+	CHECK_UNARY(c[5]);
+	CHECK_UNARY(c[6]);
+	CHECK_UNARY(c[7]);
+	CHECK_UNARY(c[8]);
+	CHECK_UNARY_FALSE(c[9]);
+	CHECK_UNARY(c[10]);
+	CHECK_UNARY(c[11]);
+
+	a &= ~b;
+	CHECK_UNARY(a[0]);
+	CHECK_UNARY(a[1]);
+	CHECK_UNARY_FALSE(a[2]);
+	CHECK_UNARY(a[3]);
+	CHECK_UNARY(a[4]);
+	CHECK_UNARY(a[5]);
+	CHECK_UNARY(a[6]);
+	CHECK_UNARY(a[7]);
+	CHECK_UNARY(a[8]);
+	CHECK_UNARY_FALSE(a[9]);
+	CHECK_UNARY(a[10]);
+	CHECK_UNARY(a[11]);
+}
