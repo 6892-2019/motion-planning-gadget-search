@@ -120,6 +120,7 @@ private:
 	static constexpr storage_type midmask(size_type startInclusive, size_type endExclusive) noexcept;
 
 	friend class std::hash<bitset<storage_type, N>>;
+	friend class fmt::formatter<bitset<storage_type, N>>;
 };
 
 template<typename storage_type, unsigned int N>
@@ -412,6 +413,87 @@ template<unsigned int N>
 struct hash<automaton::bitset<N>> {
 	size_t operator()(const automaton::bitset<N>& b) const {
 		return farmhash::Fingerprint(b.bits_);
+	}
+};
+}
+
+namespace fmt {
+template<unsigned int N>
+struct formatter<automaton::bitset<N>> {
+	enum FormatKind {zero_bit_first, zero_bit_last, decimal, indices_brace, indices_bracket, indices};
+	FormatKind kind = zero_bit_last;
+	template<typename ParseContext>
+	constexpr auto parse(ParseContext& ctx) {
+		auto it = ctx.begin(), end = ctx.end();
+		if (it == end || *it == '}') return it;
+		//The repeated it++ is really ugh, but we don't want to (?) consume the
+		//character if we don't recognize it.
+		if (*it == 'd') {
+			it++;
+			kind = decimal;
+		} else if (*it == 'b') {
+			it++;
+			kind = zero_bit_last;
+		} else if (*it == 'i') {
+			it++;
+			kind = indices;
+		} else if (*it == 's') {
+			it++;
+			kind = indices_brace;
+		} else if (*it == '#') {
+			it++;
+			if (it == end)
+				ctx.on_error("bitset # modifier without format specifier");
+			if (*it == 'b') {
+				it++;
+				kind = zero_bit_first;
+			} else if (*it == 's') {
+				it++;
+				kind = indices_bracket;
+			} else
+				ctx.on_error("bitset # modifier followed by bad character");
+		} else
+			ctx.on_error("bad bitset format string"); //there were characters, but we don't recognize them
+		return it;
+	}
+
+	template<typename OutputIterator>
+	auto format_indices(const automaton::bitset<N> b, OutputIterator out) {
+		const char* format_str = "{}";
+		for (decltype(b.capacity()) i = 0; i < b.capacity(); ++i)
+			if (b[i]) {
+				out = format_to(out, format_str, i);
+				format_str = ", {}";
+			}
+		return out;
+	}
+
+	template<typename FormatContext>
+	auto format(const automaton::bitset<N> b, FormatContext& ctx) {
+		auto out = ctx.out();
+		switch (kind) {
+			case zero_bit_first:
+				for (decltype(b.capacity()) i = 0; i < b.capacity(); ++i)
+					out = format_to(out, "{:d}", static_cast<bool>(b[i]));
+				return out;
+			case zero_bit_last:
+				for (auto i = b.capacity(); i-- > 0;)
+					out = format_to(out, "{:d}", static_cast<bool>(b[i]));
+				return out;
+			case decimal:
+				return format_to(out, "{:d}", b.bits_);
+			case indices_brace:
+				out = format_to(out, "{}", "{");
+				out = format_indices(b, out);
+				return format_to(out, "{}", "}");
+			case indices_bracket:
+				out = format_to(out, "{}", "[");
+				out = format_indices(b, out);
+				return format_to(out, "{}", "]");
+			case indices:
+				return format_indices(b, out);
+		}
+		__builtin_unreachable();
 	}
 };
 }

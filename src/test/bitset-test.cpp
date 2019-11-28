@@ -194,3 +194,17 @@ TEST_CASE("BitsetTest_SubtractByAndComplement") {
 	CHECK_UNARY(a[10]);
 	CHECK_UNARY(a[11]);
 }
+
+TEST_CASE("BitsetTest_Formatting") {
+	bitset<6> a; //101011
+	a.set(0);
+	a.set(1);
+	a.set(3);
+	a.set(5);
+	CHECK_EQ(fmt::format("{}", a), "101011");
+	CHECK_EQ(fmt::format("{:b}", a), "101011");
+	CHECK_EQ(fmt::format("{:#b}", a), "110101");
+	CHECK_EQ(fmt::format("{:s}", a), "{0, 1, 3, 5}");
+	CHECK_EQ(fmt::format("{:#s}", a), "[0, 1, 3, 5]");
+	CHECK_EQ(fmt::format("{:i}", a), "0, 1, 3, 5");
+}
