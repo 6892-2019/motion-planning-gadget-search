@@ -53,6 +53,15 @@ public:
 
 	bitset();
 	bitset(const bitset&) = default;
+	//maybe these conversion operators should only have one template parameter,
+	//the other bitset itself?
+	/**
+	 * Widening converting constructor.  New bits are initialized to 0 (not in
+	 * the set).
+	 */
+	template<typename other_storage_type, unsigned int M, class = std::enable_if_t<(N > M)>>
+	bitset(const bitset<other_storage_type, M> b) : bits_(b.bits_) {}
+	//no converting assignment operator; not sure if we should have one
 
 	//We deliberately do not define size() because it is ambiguous between
 	//capacity() (when thinking of the bitset as a group of bits) and count()
@@ -119,6 +128,9 @@ private:
 	static constexpr storage_type lowmask(size_type n) noexcept;
 	static constexpr storage_type midmask(size_type startInclusive, size_type endExclusive) noexcept;
 
+	//all bitsets are friends for the converting constructor's benefit
+	template<typename other_storage_type, unsigned int M>
+	friend class bitset;
 	friend class std::hash<bitset<storage_type, N>>;
 	friend class fmt::formatter<bitset<storage_type, N>>;
 };

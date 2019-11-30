@@ -208,3 +208,14 @@ TEST_CASE("BitsetTest_Formatting") {
 	CHECK_EQ(fmt::format("{:#s}", a), "[0, 1, 3, 5]");
 	CHECK_EQ(fmt::format("{:i}", a), "0, 1, 3, 5");
 }
+
+TEST_CASE("BitsetTest_Extension") {
+	bitset<12> a;
+	a.set(11);
+	bitset<32> b(a);
+	for (unsigned int i = 0; i < b.capacity(); ++i)
+		if (i < a.capacity())
+			CHECK_EQ(b[i], a[i]);
+		else
+			CHECK_UNARY_FALSE(b[i]);
+}
