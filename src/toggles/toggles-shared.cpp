@@ -111,6 +111,8 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> follow_skinny_edges0(lmdb::
 		lmdb::dbi& edge_db, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& sources) {
 	interval_accumulator<uint64_t> accum(512);
 	visit_skinny_edges(env, edge_db, sources, [&](uint64_t, uint64_t output) {
+		assert(output > 0);
+		assert(output < std::numeric_limits<uint64_t>::max());
 		accum(output);
 		return VisitEdgeResult::proceed;
 	});

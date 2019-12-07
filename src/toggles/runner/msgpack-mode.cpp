@@ -146,6 +146,9 @@ std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last,
 		Iterator block_it = first;
 		uint64_t input = block_it->input1;
 		while (block_it != last && block_it->input1 == input) {
+			auto mapped = map[block_it->output1];
+			if (mapped == std::numeric_limits<uint64_t>::max())
+				throw std::logic_error(fmt::format("can't happen: local output1 {} mapped to {}?", block_it->output1, mapped));
 			block.push_back(map[block_it->output1]);
 			++block_it;
 		}
@@ -158,8 +161,11 @@ std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last,
 			chunk.resize(block.size() * 9);
 		std::byte* chunk_end = chunk.data();
 		upv::write(chunk_end, block.front());
-		for (std::size_t i = 1; i < block.size(); ++i) //delta coding loop
+		for (std::size_t i = 1; i < block.size(); ++i) {//delta coding loop
+			if (block[i] == std::numeric_limits<uint64_t>::max())
+				throw std::logic_error("can't happen: max() in paginate_for_skinny_edges");
 			upv::write(chunk_end, block[i] - block[i-1]);
+		}
 		std::byte* length_end = length.data();
 		upv::write(length_end, chunk_end - chunk.data());
 
@@ -603,8 +609,15 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 
 		//TODO: if there are a lot of these, we could dispatch them as
 		//another worker thread task
-		for (auto p : pending_stores)
+		for (auto p : pending_stores) {
+			if (*p.first != std::numeric_limits<uint64_t>::max())
+				throw std::logic_error(fmt::format("can't happen: overwriting global id {} (at {}) with global id {} (at {}) in slice {}",
+						*p.first, (void*)p.first, *p.second, (void*)p.second, slice));
+			if (*p.second == std::numeric_limits<uint64_t>::max())
+				throw std::logic_error(fmt::format("can't happen: clobbering global id {} (at {}) with unassigned id {} (at {}) in slice {}",
+						*p.first, (void*)p.first, *p.second, (void*)p.second, slice));
 			*p.first = *p.second;
+		}
 	};
 
 	{
@@ -661,7 +674,12 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 						if (edge_db_iter == edges_combine.end())
 							throw std::logic_error(fmt::format("can't happen: didn't open edge db for {}?", first->input2));
 						vector<SkinnyPage>& subpages = pages[&edge_db_iter->second];
-						vector<SkinnyPage> more_pages = paginate_for_skinny_edges(first, last, local_to_global->second.begin());
+						const vector<uint64_t>& local_to_global_vec = local_to_global->second;
+						auto unmapped_id = std::find(local_to_global_vec.begin(), local_to_global_vec.end(), std::numeric_limits<uint64_t>::max());
+						if (unmapped_id != local_to_global_vec.end())
+							throw std::logic_error(fmt::format("can't happen: didn't find global id for local id {} in firsthalf {:016x}?",
+									std::distance(local_to_global_vec.begin(), unmapped_id), header->firsthalf_id));
+						vector<SkinnyPage> more_pages = paginate_for_skinny_edges(first, last, local_to_global_vec.begin());
 						for (const SkinnyPage& p : more_pages)
 							pages_size += std::min<std::size_t>(p.header.size() + p.page.size(), 4096);
 						subpages.insert(subpages.end(), std::move_iterator(more_pages.begin()), std::move_iterator(more_pages.end()));
@@ -721,7 +739,12 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 					auto begin = reinterpret_cast<const ConnectProvenance*>(base + header->provs_offset),
 							end = reinterpret_cast<const ConnectProvenance*>(base + header->input_intervals_offset);
 					stats.edges += end - begin;
-					vector<SkinnyPage> more_pages = paginate_for_skinny_edges(begin, end, local_to_global->second.begin());
+					const vector<uint64_t>& local_to_global_vec = local_to_global->second;
+						auto unmapped_id = std::find(local_to_global_vec.begin(), local_to_global_vec.end(), std::numeric_limits<uint64_t>::max());
+						if (unmapped_id != local_to_global_vec.end())
+							throw std::logic_error(fmt::format("can't happen: didn't find global id for local id {} in firsthalf {:016x}?",
+									std::distance(local_to_global_vec.begin(), unmapped_id), header->firsthalf_id));
+						vector<SkinnyPage> more_pages = paginate_for_skinny_edges(begin, end, local_to_global_vec.begin());
 					for (const SkinnyPage& p : more_pages)
 						pages_size += std::min<std::size_t>(p.header.size() + p.page.size(), 4096);
 					pages.insert(pages.end(), std::move_iterator(more_pages.begin()), std::move_iterator(more_pages.end()));
