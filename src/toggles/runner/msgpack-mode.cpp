@@ -556,56 +556,56 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 
 	auto commit_secondhalf = [&](vector<ProposedInsert> gadgets, vector<SortStats> sorted_stats,
 			vector<pair<uint64_t*, uint64_t*>> pending_stores, unsigned int slice) {
-		if (gadgets.empty()) return;
-		std::vector<std::size_t> hashes;
-		hashes.reserve(sorted_stats.size());
+		if (!gadgets.empty()) {
+			std::vector<std::size_t> hashes;
+			hashes.reserve(sorted_stats.size());
+			auto txn = lmdb::txn::begin(env);
+			{ //extra scope for write cursors
+				lmdb::cursor hashtable_cur = lmdb::cursor::open(txn, gadget_hashtable);
+				//The only way a previous slice's commit could interfere with us is
+				//if a linear probing chain extends into our slice.  We can just
+				//check that the last hash in the previous slice is not used.  If
+				//hashes are uniformly distributed, we have seven-nines probability
+				//that these slots will be unused after 2^32 gadgets are committed.
+				if (slice != 0) {
+					std::size_t probe = slice * firsthalf_slice_divisor - 1;
+					std::string_view probe_key = lmdb::to_sv(probe);
+					if (hashtable_cur.get(probe_key, MDB_SET))
+						throw std::runtime_error(fmt::format("supreme unluckiness: hash {:x} at end of slice {} is used",
+								probe, slice - 1));
+				}
 
-		auto txn = lmdb::txn::begin(env);
-		{ //extra scope for write cursors
-			lmdb::cursor hashtable_cur = lmdb::cursor::open(txn, gadget_hashtable);
-			//The only way a previous slice's commit could interfere with us is
-			//if a linear probing chain extends into our slice.  We can just
-			//check that the last hash in the previous slice is not used.  If
-			//hashes are uniformly distributed, we have seven-nines probability
-			//that these slots will be unused after 2^32 gadgets are committed.
-			if (slice != 0) {
-				std::size_t probe = slice * firsthalf_slice_divisor - 1;
-				std::string_view probe_key = lmdb::to_sv(probe);
-				if (hashtable_cur.get(probe_key, MDB_SET))
-					throw std::runtime_error(fmt::format("supreme unluckiness: hash {:x} at end of slice {} is used",
-							probe, slice - 1));
+				//There's a slight inefficiency here: we're opening and closing a
+				//cursor here and then opening another index cursor later when
+				//appending to the index.  This costs one malloc and some stores.
+				uint64_t last_id = get_current_max_gadget_id(txn, gadget_index);
+				const uint64_t first_novel_id = last_id + 1;
+
+				for (const SortStats& ss : sorted_stats) {
+					assert(*ss.global_id == std::numeric_limits<uint64_t>::max());
+					*ss.global_id = ++last_id; //last_id is inclusive, so pre-increment
+					hashes.push_back(ss.hash);
+				}
+
+				for (ProposedInsert& pi : gadgets) {
+					//Constructing a string_view to nullptr is technically undefined
+					//behavior.  We have to const_cast it later again anyway, so
+					//string_view is just the wrong abstraction for MDB_RESERVE.
+					//TODO: rewrite lmdbxx using std::span (hah)
+					std::string_view target(nullptr, pi.data.size()+8);
+					if (!hashtable_cur.put(lmdb::to_sv(pi.hash), target, MDB_RESERVE | MDB_NOOVERWRITE))
+						//If there ever is a self-collision we can fix up the
+						//hash in the hashes vector by taking the difference
+						//between *pi.global_id and last_id's initial value.
+						throw std::runtime_error(fmt::format("collision for hash {} in slice {}; possible self-collision?", pi.hash, slice));
+					std::memcpy(const_cast<char*>(target.begin()), pi.data.data(), pi.data.size());
+					std::memcpy(const_cast<char*>(target.begin()) + pi.data.size(), pi.global_id, sizeof(*pi.global_id));
+				}
+
+				append_gadget_index(txn, gadget_index, hashes, first_novel_id);
 			}
-
-			//There's a slight inefficiency here: we're opening and closing a
-			//cursor here and then opening another index cursor later when
-			//appending to the index.  This costs one malloc and some stores.
-			uint64_t last_id = get_current_max_gadget_id(txn, gadget_index);
-			const uint64_t first_novel_id = last_id + 1;
-
-			for (const SortStats& ss : sorted_stats) {
-				assert(*ss.global_id == std::numeric_limits<uint64_t>::max());
-				*ss.global_id = ++last_id; //last_id is inclusive, so pre-increment
-				hashes.push_back(ss.hash);
-			}
-
-			for (ProposedInsert& pi : gadgets) {
-				//Constructing a string_view to nullptr is technically undefined
-				//behavior.  We have to const_cast it later again anyway, so
-				//string_view is just the wrong abstraction for MDB_RESERVE.
-				//TODO: rewrite lmdbxx using std::span (hah)
-				std::string_view target(nullptr, pi.data.size()+8);
-				if (!hashtable_cur.put(lmdb::to_sv(pi.hash), target, MDB_RESERVE | MDB_NOOVERWRITE))
-					//If there ever is a self-collision we can fix up the
-					//hash in the hashes vector by taking the difference
-					//between *pi.global_id and last_id's initial value.
-					throw std::runtime_error(fmt::format("collision for hash {} in slice {}; possible self-collision?", pi.hash, slice));
-				std::memcpy(const_cast<char*>(target.begin()), pi.data.data(), pi.data.size());
-				std::memcpy(const_cast<char*>(target.begin()) + pi.data.size(), pi.global_id, sizeof(*pi.global_id));
-			}
-
-			append_gadget_index(txn, gadget_index, hashes, first_novel_id);
+			txn.commit();
 		}
-		txn.commit();
 
 		//TODO: if there are a lot of these, we could dispatch them as
 		//another worker thread task
