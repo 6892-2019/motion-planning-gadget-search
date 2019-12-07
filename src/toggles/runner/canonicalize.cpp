@@ -78,3 +78,34 @@ std::pair<std::unique_ptr<WorkingAutomaton>, unsigned int> mirror(const WorkingA
 			std::terminate();
 	}
 }
+
+namespace {
+bool has_nop_edge(WorkingAutomaton& a, WorkingAutomaton::state_type state, WorkingAutomaton::symbol_type symbol) {
+	for (WorkingAutomaton::state_type p : a.step(state, symbol))
+		for (WorkingAutomaton::state_type q : a.step(p, symbol))
+			if (q == state)
+				return true;
+	return false;
+}
+} //anonymous namespace
+
+namespace automaton {
+namespace detail {
+bool addMaximalNops(automaton::WorkingAutomaton& a, unsigned int locations) {
+	//For each accept state and symbol, check if there is already a loop back to
+	//that state; otherwise, add one.
+	bool changed = false;
+	for (state_type s = 0, send = a.state_size(); s < send; ++s) {
+		if (!a.accept(s)) continue; //or for_each_accept?
+		for (symbol_type p = 0; p < locations; ++p)
+			if (!has_nop_edge(a, s, p)) {
+				state_type bounce = a.addState();
+				a.addTrans(s, p, bounce);
+				a.addTrans(bounce, p, s);
+				changed = true;
+			}
+	}
+	return changed;
+}
+} //namespace detail
+} //namespace automaton

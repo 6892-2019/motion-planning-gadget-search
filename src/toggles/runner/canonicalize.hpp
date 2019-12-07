@@ -14,8 +14,15 @@
 std::pair<const unsigned int* const*, const unsigned int* const*>
 getPerms(unsigned int alphabetSize, unsigned int locations, bool normal, bool mirrored);
 
+namespace automaton {
+namespace detail {
+bool addMaximalNops(automaton::WorkingAutomaton& a, unsigned int locations);
+}
+}
+
 template<unsigned int N>
 unsigned int canonicalize(automaton::Automaton<N>& a, const unsigned int locations, bool allowMirroring = true) {
+	automaton::detail::addMaximalNops(a, locations);
 	if (locations == 1) {
 		//We can't renumber the symbols/locations because there's only one, but
 		//we still have to renumber the states.
@@ -33,6 +40,7 @@ unsigned int canonicalize(automaton::WorkingAutomaton& a, const unsigned int loc
 template<unsigned int N>
 [[nodiscard]] std::pair<automaton::Automaton<N>, unsigned int> mirror(const automaton::Automaton<N>& a, unsigned int locations) {
 	automaton::Automaton<N> b = a;
+	automaton::detail::addMaximalNops(b, locations);
 	if (locations == 1) {
 		//We can't renumber the symbols/locations because there's only one, but
 		//we still have to renumber the states.

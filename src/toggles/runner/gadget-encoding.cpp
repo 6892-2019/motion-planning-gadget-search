@@ -203,17 +203,19 @@ std::pair<std::vector<GadgetEdge>, std::vector<GadgetEdge>> deflate_slls(const A
 
 	MAYBE_UNUSED std::size_t nop_edges = 0;
 	std::vector<GadgetEdge> uedges, dedges;
+#ifndef NDEBUG
+	//gdb can't render hopscotch_set well in core dumps, so make a vector copy
+	MAYBE_UNUSED std::vector<GadgetEdge> all_edges_vector(edges.begin(), edges.end());
+#endif
 	for (const GadgetEdge& e : edges) {
 		if (!edges.count(e.reverse()))
 			dedges.push_back(e);
-		else if (e < e.reverse() || e == e.reverse()) {//only the lesser of the pair; also equal for nop edges
+		else if (e < e.reverse())
 			uedges.push_back(e);
-			if (e == e.reverse())
-				++nop_edges;
-		}
+		else if (e == e.reverse()) //nop edges are not stored, just counted
+			++nop_edges;
 	}
-	//nop edges are undirected, but only appear once in the set
-	assert(2*uedges.size() - nop_edges + dedges.size() == edges.size());
+	assert(2*uedges.size() + nop_edges + dedges.size() == edges.size());
 	return {std::move(uedges), std::move(dedges)};
 }
 
