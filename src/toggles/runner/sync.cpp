@@ -11,6 +11,7 @@
 #include "tsl/ordered_map.h"
 #include "lmdb++.h"
 #include "randutils.hpp"
+#include "stringutils.hpp"
 #include <fmt/chrono.h>
 #include <yaml-cpp/yaml.h>
 #include <ctime>
@@ -109,29 +110,6 @@ vector<CanonicalizeRecord> canonicalize_from_slls(
 	return ret;
 }
 
-namespace YAML {
-template<>
-struct convert<GadgetEdge> {
-	static Node encode(const GadgetEdge& e) {
-		Node node;
-		node.push_back(e.start);
-		node.push_back(e.from);
-		node.push_back(e.to);
-		node.push_back(e.end);
-		return node;
-	}
-	static bool decode(const Node& node, GadgetEdge& e) {
-		if (!node.IsSequence() || node.size() != 4)
-			return false;
-		e.start = node[0].as<unsigned int>();
-		e.from = node[1].as<unsigned int>();
-		e.to = node[2].as<unsigned int>();
-		e.end = node[3].as<unsigned int>();
-		return true;
-	}
-};
-}
-
 //also called by the predicates mode
 void initialize_predicates_database(lmdb::txn& txn, lmdb::dbi& predicates) {
 	predicates.drop(txn, 0);
@@ -155,17 +133,7 @@ struct GadgetPragma {
 	//can't just omit names.
 	bool allow_pruning_named_states = false;
 };
-GadgetPragma parse_gadget_pragma(YAML::Node pragma_node, std::string_view gadget_name, std::string_view filename) {
-	if (!pragma_node) return {}; //if not present, defaults
-
-	vector<std::string> pragmas;
-	if (pragma_node.IsSequence())
-		pragmas = pragma_node.as<vector<std::string>>();
-	else if (pragma_node.IsScalar())
-		pragmas = {pragma_node.as<std::string>()};
-	else
-		throw std::runtime_error(fmt::format("unexpected pragma type for {} in {}", gadget_name, filename));
-
+GadgetPragma parse_gadget_pragma(std::vector<std::string> pragmas, std::string_view gadget_name, std::string_view filename) {
 	GadgetPragma ret;
 	for (const std::string& p : pragmas)
 		if (p == "allow-pruning-named-states"sv)
@@ -174,6 +142,147 @@ GadgetPragma parse_gadget_pragma(YAML::Node pragma_node, std::string_view gadget
 			throw std::runtime_error(fmt::format("unrecognized pragma \"{}\" for {} in {}", p, gadget_name, filename));
 	return ret;
 }
+
+
+
+/**
+ * Represents the raw data of a gadget, separate from how it was parsed.
+ */
+struct RawGadget {
+	std::string name;
+	vector<GadgetEdge> uedges, dedges;
+	GadgetPragma pragma;
+	//monostate: not present in data
+	//std::string: scalar string ("all" is the only defined value as of this comment)
+	//unsigned int: give this state number the gadget's name (encoded as {n: null} in the input)
+	//ordered_map: a map of numbers to names
+	std::variant<std::monostate, std::string, unsigned int, tsl::ordered_map<unsigned int, std::string>> state_names;
+};
+
+struct RawGadgetSource {
+	virtual bool hasGadget() = 0;
+	virtual RawGadget nextGadget() = 0;
+	virtual bool hasAlias() = 0;
+	virtual pair<std::string, std::string> nextAlias() = 0;
+	virtual ~RawGadgetSource() = default;
+};
+
+
+namespace YAML {
+template<>
+struct convert<GadgetEdge> {
+	static Node encode(const GadgetEdge& e) {
+		Node node;
+		node.push_back(e.start);
+		node.push_back(e.from);
+		node.push_back(e.to);
+		node.push_back(e.end);
+		return node;
+	}
+	static bool decode(const Node& node, GadgetEdge& e) {
+		if (!node.IsSequence() || node.size() != 4)
+			return false;
+		e.start = node[0].as<unsigned int>();
+		e.from = node[1].as<unsigned int>();
+		e.to = node[2].as<unsigned int>();
+		e.end = node[3].as<unsigned int>();
+		return true;
+	}
+};
+}
+
+/**
+ * A raw gadget source that uses yaml-cpp to parse YAML.
+ */
+class YAMLRawGadgetSource : public RawGadgetSource {
+private:
+	std::string filename_;
+	YAML::Node toplevel_;
+	YAML::const_iterator gadgets_first_, gadgets_end_, alias_first_, alias_end_;
+public:
+	YAMLRawGadgetSource(std::string_view filename) : filename_(filename), toplevel_(YAML::LoadFile(filename_)) {
+		YAML::Node gadgets = toplevel_["gadgets"];
+		gadgets_first_ = gadgets.begin();
+		gadgets_end_ = gadgets.end();
+		YAML::Node aliases = toplevel_["aliases"];
+		alias_first_ = aliases.begin();
+		alias_end_ = aliases.end();
+	}
+	~YAMLRawGadgetSource() override {};
+
+	bool hasGadget() override {
+		return gadgets_first_ != gadgets_end_;
+	}
+	RawGadget nextGadget() override {
+		RawGadget ret;
+		ret.name = gadgets_first_->first.as<std::string>();
+		YAML::Node data = gadgets_first_->second;
+		++gadgets_first_;
+
+		if (data["uedges"])
+			ret.uedges = data["uedges"].as<vector<GadgetEdge>>();
+		if (data["dedges"])
+			ret.dedges = data["dedges"].as<vector<GadgetEdge>>();
+
+		if (YAML::Node pragma_node = data["pragma"]) {
+			vector<std::string> pragmas;
+			if (pragma_node.IsSequence())
+				pragmas = pragma_node.as<vector<std::string>>();
+			else if (pragma_node.IsScalar())
+				pragmas = {pragma_node.as<std::string>()};
+			else
+				throw std::runtime_error(fmt::format("unexpected pragma type for {} in {}", ret.name, filename_));
+			ret.pragma = parse_gadget_pragma(std::move(pragmas), ret.name, filename_);
+		}
+
+		if (YAML::Node state_names_node = data["state-names"]) {
+			if (state_names_node.IsMap()) {
+				if (state_names_node.size() == 1 && state_names_node.begin()->second.IsNull())
+					ret.state_names = state_names_node.begin()->first.as<unsigned int>();
+				else {
+					tsl::ordered_map<unsigned int, std::string> m;
+					for (auto nit = data["state-names"].begin(); nit != data["state-names"].end(); ++nit) {
+						auto emplace_pair = m.try_emplace(nit->first.as<unsigned int>(), nit->second.as<std::string>());
+						if (!emplace_pair.second)
+							throw std::runtime_error(fmt::format("duplicate state name {} for {} in {}",
+									nit->first.as<unsigned int>(), ret.name, filename_));
+					}
+					ret.state_names = std::move(m);
+				}
+			} else if (state_names_node.IsScalar())
+				ret.state_names = state_names_node.as<std::string>();
+			else
+				throw std::runtime_error(fmt::format("state-names present for {} in {}, but has unexpected type", ret.name, filename_));
+		} //otherwise variant is std::monostate, no action needed
+
+		return ret;
+	}
+
+	bool hasAlias() override {
+		return alias_first_ != alias_end_;
+	}
+	pair<std::string, std::string> nextAlias() override {
+		pair<std::string, std::string> p(alias_first_->first.as<std::string>(), alias_first_->second.as<std::string>());
+		alias_first_++;
+		return p;
+	}
+};
+
+
+std::unique_ptr<RawGadgetSource> source_for_filename(std::string_view filename) {
+	Parts filename_parts = rpartition(filename, '.');
+	if (std::get<1>(filename_parts).empty())
+		throw std::runtime_error(fmt::format("filename {} has no extension; unable to determine type", filename));
+	std::string_view ext = std::get<2>(filename_parts);
+
+	if (ext == "yaml"sv)
+		return std::make_unique<YAMLRawGadgetSource>(filename);
+//	if (std::get<2>(filename_parts) == "json"sv)
+//		return std::make_unique<JSONRawGadgetSource>(filename);
+	throw std::runtime_error(fmt::format("filename {} has unknown extension {}", filename, ext));
+}
+
+
 
 struct SynclogRecord {
 	//work around emplace_back being broken with aggregates
@@ -205,27 +314,18 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 	vector<pair<std::string, std::string>> deferred_aliases;
 	vector<SynclogRecord> synclog; //data we need for automatic graph drawing
 	for (std::string_view filename : files) {
-		YAML::Node toplevel = YAML::LoadFile(std::string(filename));
-		YAML::Node gadgets = toplevel["gadgets"];
-		for (auto it = gadgets.begin(); it != gadgets.end(); ++it) {
-			std::string gadget_name = it->first.as<std::string>();
-			YAML::Node data = it->second;
-			vector<GadgetEdge> uedges, dedges;
-			if (data["uedges"])
-				uedges = data["uedges"].as<vector<GadgetEdge>>();
-			if (data["dedges"])
-				dedges = data["dedges"].as<vector<GadgetEdge>>();
-			if (uedges.empty() && dedges.empty()) {
-				fmt::print(stderr, "no edges for gadget {} in {}\n", gadget_name, filename);
+		std::unique_ptr<RawGadgetSource> source = source_for_filename(filename);
+		while (source->hasGadget()) {
+			RawGadget raw = source->nextGadget();
+			if (raw.uedges.empty() && raw.dedges.empty()) {
+				fmt::print(stderr, "no edges for gadget {} in {}\n", raw.name, filename);
 				return 1;
 			}
 
-			GadgetPragma pragma = parse_gadget_pragma(data["pragma"], gadget_name, filename);
-
-			vector<CanonicalizeRecord> morphs = canonicalize_from_slls(std::move(uedges), std::move(dedges));
+			vector<CanonicalizeRecord> morphs = canonicalize_from_slls(std::move(raw.uedges), std::move(raw.dedges));
 			if (morphs.empty()) {
 				//e.g., all states have no edges?
-				fmt::print(stderr, "warning: no morphs for {} from {}\n", gadget_name, filename);
+				fmt::print(stderr, "warning: no morphs for {} from {}\n", raw.name, filename);
 				continue;
 			}
 
@@ -261,34 +361,27 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 			//can explicitly ask for all states to be generated, or specify
 			//custom names.
 			bool custom_names = false;
-			if (data["state-names"] && data["state-names"].IsMap()) {
+			if (auto* raw_names = std::get_if<tsl::ordered_map<unsigned int, std::string>>(&raw.state_names)) {
+				custom_names = true;
+				state_names = std::move(*raw_names);
+				for (auto i = state_names.begin(); i != state_names.end(); ++i)
+					if (!raw.pragma.allow_pruning_named_states && std::find_if(morphs.begin(), morphs.end(),
+							[number=i->first](const CanonicalizeRecord& r){return r.gadget_state == number;}) == morphs.end())
+						throw std::runtime_error(fmt::format("named state was pruned {} {} {} {}",
+								raw.name, i->first, i->second, morphs.size()));
+			} else if (unsigned int* single_name = std::get_if<unsigned int>(&raw.state_names)) {
 				//As a special exception, if there is a single key and its value
 				//is null, that state is registered using the normal name of the
-				//gadget and the other states are not named.
-				if (data["state-names"].size() == 1 && data["state-names"].begin()->second.IsNull()) {
-					//Still need to put something in the map to know which state it is.
-					unsigned int number = data["state-names"].begin()->first.as<unsigned int>();
-					state_names[number] = "BUGBUGBUG";
-				} else {
-					custom_names = true;
-					for (auto nit = data["state-names"].begin(); nit != data["state-names"].end(); ++nit) {
-						unsigned int number = nit->first.as<unsigned int>();
-						state_names[number] = nit->second.as<std::string>();
-						if (!pragma.allow_pruning_named_states && std::find_if(morphs.begin(), morphs.end(),
-								[number](const CanonicalizeRecord& r){return r.gadget_state == number;}) == morphs.end())
-							throw std::runtime_error(fmt::format("named state was pruned {} {} {} {}",
-										gadget_name, number, state_names[number], morphs.size()));
-					}
-				}
-			}
-			//could allow a sequence of integers specifying states to give the default integer names to
-			else if (data["state-names"] && data["state-names"].IsScalar()) {
-				std::string maybe = data.as<std::string>();
-				if (maybe == "all")
+				//gadget and the other states are not named.  We still put
+				//something in the map to know which state it is.  (Coming back
+				//to this, I am not sure how this happens, so I cannot improve it.)
+				state_names[*single_name] = "BUGBUGBUG";
+			} else if (std::string* scalar = std::get_if<std::string>(&raw.state_names)) {
+				if (*scalar== "all")
 					for (unsigned int i = 0; i < morphs.size(); ++i)
 						state_names[i] = std::to_string(morphs[i].gadget_state);
 				else
-					throw std::runtime_error(fmt::format("unrecognized state-names scalar {} {}", gadget_name, maybe));
+					throw std::runtime_error(fmt::format("unrecognized state-names scalar {} for {} in {}", *scalar, raw.name, filename));
 			} else
 				for (const CanonicalizeRecord& r : morphs)
 					if (r.initial_component)
@@ -303,15 +396,15 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 				auto record_it = std::find_if(morphs.begin(), morphs.end(),
 						[number=state_names.front().first](const CanonicalizeRecord& r){return r.gadget_state == number;});
 				if (record_it->mirror) {
-					std::string normal_name = fmt::format("{}-r", gadget_name), mirror_name = fmt::format("{}-s", gadget_name);
+					std::string normal_name = fmt::format("{}-r", raw.name), mirror_name = fmt::format("{}-s", raw.name);
 					naming[normal_name] = {std::get<0>(record_it->normal)};
 					naming[mirror_name] = {std::get<0>(*record_it->mirror)};
-					naming[gadget_name] = {std::get<0>(record_it->normal), std::get<0>(*record_it->mirror)};
-					synclog.emplace_back(normal_name, gadget_name, record_it->gadget_state, record_it->normal_rotation, std::nullopt);
-					synclog.emplace_back(mirror_name, gadget_name, record_it->gadget_state, record_it->normal_rotation, record_it->mirror_rotation);
+					naming[raw.name] = {std::get<0>(record_it->normal), std::get<0>(*record_it->mirror)};
+					synclog.emplace_back(normal_name, raw.name, record_it->gadget_state, record_it->normal_rotation, std::nullopt);
+					synclog.emplace_back(mirror_name, raw.name, record_it->gadget_state, record_it->normal_rotation, record_it->mirror_rotation);
 				} else {
-					naming[gadget_name] = {std::get<0>(record_it->normal)};
-					synclog.emplace_back(gadget_name, gadget_name, record_it->gadget_state, record_it->normal_rotation, std::nullopt);
+					naming[raw.name] = {std::get<0>(record_it->normal)};
+					synclog.emplace_back(raw.name, raw.name, record_it->gadget_state, record_it->normal_rotation, std::nullopt);
 				}
 			} else {
 				vector<std::size_t> whole_group_indices;
@@ -336,37 +429,36 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 						//names for it, but that gadget still goes in the -r and
 						//-s groups (so they represent all states of the gadget).
 						if (mirror) {
-							std::string normal_name = fmt::format("{}-{}-r", gadget_name, state_name),
-									mirror_name = fmt::format("{}-{}-s", gadget_name, state_name);
+							std::string normal_name = fmt::format("{}-{}-r", raw.name, state_name),
+									mirror_name = fmt::format("{}-{}-s", raw.name, state_name);
 							naming[normal_name] = {normal};
 							naming[mirror_name] = {*mirror};
-							naming[fmt::format("{}-{}", gadget_name, state_name)]  = {normal, *mirror};
-							synclog.emplace_back(normal_name, gadget_name, r.gadget_state, r.normal_rotation, std::nullopt);
-							synclog.emplace_back(mirror_name, gadget_name, r.gadget_state, r.normal_rotation, r.mirror_rotation);
+							naming[fmt::format("{}-{}", raw.name, state_name)]  = {normal, *mirror};
+							synclog.emplace_back(normal_name, raw.name, r.gadget_state, r.normal_rotation, std::nullopt);
+							synclog.emplace_back(mirror_name, raw.name, r.gadget_state, r.normal_rotation, r.mirror_rotation);
 						} else {
-							std::string normal_name = fmt::format("{}-{}", gadget_name, state_name);
+							std::string normal_name = fmt::format("{}-{}", raw.name, state_name);
 							naming[normal_name] = {normal};
-							synclog.emplace_back(normal_name, gadget_name, r.gadget_state, r.normal_rotation, std::nullopt);
+							synclog.emplace_back(normal_name, raw.name, r.gadget_state, r.normal_rotation, std::nullopt);
 						}
 						chiral_r.push_back(normal);
 						chiral_s.push_back(mirror ? *mirror : normal);
 					} else {
-						std::string normal_name = fmt::format("{}-{}", gadget_name, state_name);
+						std::string normal_name = fmt::format("{}-{}", raw.name, state_name);
 						naming[normal_name] = {normal};
-						synclog.emplace_back(normal_name, gadget_name, r.gadget_state, r.normal_rotation, std::nullopt);
+						synclog.emplace_back(normal_name, raw.name, r.gadget_state, r.normal_rotation, std::nullopt);
 					}
 				}
 				if (chiral) {
-					naming[fmt::format("{}-r", gadget_name)] = std::move(chiral_r);
-					naming[fmt::format("{}-s", gadget_name)] = std::move(chiral_s);
+					naming[fmt::format("{}-r", raw.name)] = std::move(chiral_r);
+					naming[fmt::format("{}-s", raw.name)] = std::move(chiral_s);
 				}
-				naming[gadget_name] = std::move(whole_group_indices);
+				naming[raw.name] = std::move(whole_group_indices);
 			}
 		}
 
-		YAML::Node aliases = toplevel["aliases"];
-		for (auto it = aliases.begin(); it != aliases.end(); ++it)
-			deferred_aliases.emplace_back(it->first.as<std::string>(), it->second.as<std::string>());
+		while (source->hasAlias())
+			deferred_aliases.push_back(source->nextAlias());
 	}
 
 	for (const auto& p : deferred_aliases) {
