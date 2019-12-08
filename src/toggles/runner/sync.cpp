@@ -17,6 +17,9 @@
 #include <simdjson/simdjson.h>
 #include <ctime>
 #include <variant>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 using namespace automaton;
 using encoding::GadgetEdge;
@@ -279,11 +282,31 @@ public:
 class JSONRawGadgetSource : public RawGadgetSource {
 private:
 	std::string filename_;
-	//TODO: replace this with a mmap with an extra readable page (first an
-	//anonymous mapping, then MAP_FIXED on top of it
-	simdjson::padded_string data_;
+	std::pair<void*, std::size_t> data_;
 	simdjson::ParsedJson tape_;
 	std::optional<simdjson::ParsedJson::Iterator> gadget_iter_, alias_iter_;
+
+	static std::pair<void*, std::size_t> mmap_with_padding(std::string filename) {
+		int fd = open(filename.c_str(), O_RDONLY);
+		if (fd < 0)
+			throw std::runtime_error("failed to open "+filename);
+		//To ensure simdjson always has a readable padding page, we map one page
+		//more than necessary as an anonymous mapping, then map the file with
+		//MAP_FIXED over the front of it.
+		struct stat s;
+		if (fstat(fd, &s) < 0)
+			throw std::runtime_error("failed to stat "+filename);
+		void* map_base = mmap(nullptr, s.st_size+getpagesize(), PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (map_base == MAP_FAILED)
+			throw std::runtime_error("anonymous mapping failed");
+		void* map2_base = mmap(map_base, s.st_size, PROT_READ, MAP_PRIVATE | MAP_FIXED, fd, 0);
+		if (map2_base == MAP_FAILED)
+			throw std::runtime_error("failed to map "+filename);
+		if (map_base != map2_base)
+			throw std::runtime_error("something funny happened");
+		close(fd);
+		return {map_base, s.st_size};
+	}
 
 	void parse_edgelist(vector<GadgetEdge>& edges, const std::string& gadget_name) {
 		if (!edges.empty())
@@ -318,8 +341,8 @@ private:
 		gadget_iter_->up();
 	}
 public:
-	JSONRawGadgetSource(std::string_view filename) : filename_(filename), data_(simdjson::get_corpus(filename_)),
-			tape_(simdjson::build_parsed_json(data_)) {
+	JSONRawGadgetSource(std::string_view filename) : filename_(filename), data_(mmap_with_padding(filename_)),
+			tape_(simdjson::build_parsed_json(static_cast<char*>(data_.first), data_.second, false)) {
 		if (!tape_.is_valid())
 			throw std::runtime_error(fmt::format("JSON parsing error in {}: {}", filename_, tape_.get_error_message()));
 		gadget_iter_.emplace(tape_);
@@ -333,7 +356,9 @@ public:
 		else
 			alias_iter_.reset();
 	}
-	~JSONRawGadgetSource() override {};
+	~JSONRawGadgetSource() override {
+		munmap(data_.first, data_.second);
+	};
 
 	bool hasGadget() override {
 		return gadget_iter_.has_value();
