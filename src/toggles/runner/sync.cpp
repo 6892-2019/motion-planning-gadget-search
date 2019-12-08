@@ -349,14 +349,12 @@ public:
 
 		do {
 			const char* key = gadget_iter_->get_string(); //valid only until the cursor moves?
+			gadget_iter_->move_to_value();
 			if ("uedges"sv.compare(key) == 0) {
-				gadget_iter_->move_to_value();
 				parse_edgelist(ret.uedges, ret.name);
 			} else if ("dedges"sv.compare(key) == 0) {
-				gadget_iter_->move_to_value();
-				parse_edgelist(ret.uedges, ret.name);
+				parse_edgelist(ret.dedges, ret.name);
 			} else if ("pragma"sv.compare(key) == 0) {
-				gadget_iter_->move_to_value();
 				vector<std::string> pragmas;
 				if (gadget_iter_->is_array()) {
 					gadget_iter_->down();
@@ -374,7 +372,6 @@ public:
 							filename_, ret.name, gadget_iter_->get_type()));
 				ret.pragma = parse_gadget_pragma(pragmas, ret.name, filename_);
 			} else if ("state-names"sv.compare(key) == 0) {
-				gadget_iter_->move_to_value();
 				if (gadget_iter_->is_object()) {
 					gadget_iter_->down();
 					//Check for a singleton map to null first.  This is simpler
