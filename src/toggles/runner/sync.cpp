@@ -275,9 +275,6 @@ public:
 
 /**
  * A raw gadget source that uses simdjson to parse JSON.
- *
- * TODO: there are some checks that object keys are strings, but JSON keys are
- * always strings, so the checks will never fire
  */
 class JSONRawGadgetSource : public RawGadgetSource {
 private:
@@ -411,17 +408,11 @@ public:
 
 					//JSON keys are always strings, but here they represent
 					//unsigned integers, so we have to string-parse.
-					if (singleton) {
-						if (!gadget_iter_->is_string())
-							throw std::runtime_error(fmt::format("in {} gadget {}, state-names null singleton key is type {} (not string)",
-								filename_, ret.name, gadget_iter_->get_type()));
+					if (singleton)
 						ret.state_names = to_uint(gadget_iter_->get_string());
-					} else {
+					else {
 						tsl::ordered_map<unsigned int, std::string> map;
 						do {
-							if (!gadget_iter_->is_string())
-								throw std::runtime_error(fmt::format("in {} gadget {}, state-names key is type {} (not string)",
-										filename_, ret.name, gadget_iter_->get_type()));
 							unsigned int number = to_uint(gadget_iter_->get_string());
 							gadget_iter_->move_to_value();
 							if (!gadget_iter_->is_string())
