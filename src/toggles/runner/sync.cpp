@@ -14,6 +14,7 @@
 #include "stringutils.hpp"
 #include <fmt/chrono.h>
 #include <yaml-cpp/yaml.h>
+#include <simdjson/simdjson.h>
 #include <ctime>
 #include <variant>
 
@@ -269,6 +270,183 @@ public:
 };
 
 
+/**
+ * A raw gadget source that uses simdjson to parse JSON.
+ *
+ * TODO: there are some checks that object keys are strings, but JSON keys are
+ * always strings, so the checks will never fire
+ */
+class JSONRawGadgetSource : public RawGadgetSource {
+private:
+	std::string filename_;
+	//TODO: replace this with a mmap with an extra readable page (first an
+	//anonymous mapping, then MAP_FIXED on top of it
+	simdjson::padded_string data_;
+	simdjson::ParsedJson tape_;
+	std::optional<simdjson::ParsedJson::Iterator> gadget_iter_, alias_iter_;
+
+	void parse_edgelist(vector<GadgetEdge>& edges, const std::string& gadget_name) {
+		if (!edges.empty())
+			throw std::runtime_error(fmt::format("in {} gadget {}, duplicate edgelist key?", filename_, gadget_name));
+		if (!gadget_iter_->is_array())
+			throw std::runtime_error(fmt::format("in {} gadget {}, expected edgelist but got type {} (not array)",
+					filename_, gadget_name, gadget_iter_->get_type()));
+		gadget_iter_->down();
+		do {
+			if (!gadget_iter_->is_array())
+				throw std::runtime_error(fmt::format("in {} gadget {}, expected edge at index {} but got type {} (not array)",
+					filename_, gadget_name, edges.size(), gadget_iter_->get_type()));
+			gadget_iter_->down();
+			std::array<unsigned int, 4> edge_buf;
+			auto p = edge_buf.begin();
+			do {
+				if (!gadget_iter_->is_integer())
+					throw std::runtime_error(fmt::format("in {} gadget {}, expected integer in edge at index {} but got type {}",
+							filename_, gadget_name, edges.size(), gadget_iter_->get_type()));
+				std::int64_t i = gadget_iter_->get_integer();
+				if (p == edge_buf.end())
+					throw std::runtime_error(fmt::format("in {} gadget {}, edge at index {} too big; parsed {} {} {} {} {}",
+							filename_, gadget_name, edges.size(), edge_buf[0], edge_buf[1], edge_buf[2], edge_buf[3], i));
+				if (i < 0 || i > std::numeric_limits<unsigned int>::max())
+					throw std::runtime_error(fmt::format("in {} gadget {}, bad integer {} in edge at index {}",
+							filename_, gadget_name, i, edges.size()));
+				*p++ = static_cast<unsigned int>(i);
+			} while (gadget_iter_->next());
+			gadget_iter_->up();
+			edges.push_back(GadgetEdge{edge_buf[0], edge_buf[1], edge_buf[2], edge_buf[3]});
+		} while (gadget_iter_->next());
+		gadget_iter_->up();
+	}
+public:
+	JSONRawGadgetSource(std::string_view filename) : filename_(filename), data_(simdjson::get_corpus(filename_)),
+			tape_(simdjson::build_parsed_json(data_)) {
+		if (!tape_.is_valid())
+			throw std::runtime_error(fmt::format("JSON parsing error in {}: {}", filename_, tape_.get_error_message()));
+		gadget_iter_.emplace(tape_);
+		if (gadget_iter_->move_to_key("gadgets"))
+			gadget_iter_->move_to_value();
+		else
+			gadget_iter_.reset();
+		alias_iter_.emplace(tape_);
+		if (alias_iter_->move_to_key("aliases"))
+			alias_iter_->move_to_value();
+		else
+			alias_iter_.reset();
+	}
+	~JSONRawGadgetSource() override {};
+
+	bool hasGadget() override {
+		return gadget_iter_.has_value();
+	}
+	RawGadget nextGadget() override {
+		RawGadget ret;
+		ret.name.assign(gadget_iter_->get_string(), gadget_iter_->get_string_length());
+		gadget_iter_->move_to_value();
+		if (!gadget_iter_->is_object())
+			throw std::runtime_error(fmt::format("in {}, gadget {} is type {} (not object)",
+					filename_, ret.name, gadget_iter_->get_type()));
+		gadget_iter_->down();
+
+		do {
+			const char* key = gadget_iter_->get_string(); //valid only until the cursor moves?
+			if ("uedges"sv.compare(key) == 0) {
+				gadget_iter_->move_to_value();
+				parse_edgelist(ret.uedges, ret.name);
+			} else if ("dedges"sv.compare(key) == 0) {
+				gadget_iter_->move_to_value();
+				parse_edgelist(ret.uedges, ret.name);
+			} else if ("pragma"sv.compare(key) == 0) {
+				gadget_iter_->move_to_value();
+				vector<std::string> pragmas;
+				if (gadget_iter_->is_array()) {
+					gadget_iter_->down();
+					do {
+						if (!gadget_iter_->is_string())
+							throw std::runtime_error(fmt::format("in {} gadget {}, pragma index {} is type {} (not string)",
+									filename_, ret.name, pragmas.size(), gadget_iter_->get_type()));
+						pragmas.push_back(gadget_iter_->get_string());
+					} while (gadget_iter_->next());
+					gadget_iter_->up();
+				} else if (gadget_iter_->is_string())
+					pragmas.push_back(gadget_iter_->get_string());
+				else
+					throw std::runtime_error(fmt::format("in {} gadget {}, pragma value is type {} (not string or array of strings)",
+							filename_, ret.name, gadget_iter_->get_type()));
+				ret.pragma = parse_gadget_pragma(pragmas, ret.name, filename_);
+			} else if ("state-names"sv.compare(key) == 0) {
+				gadget_iter_->move_to_value();
+				if (gadget_iter_->is_object()) {
+					gadget_iter_->down();
+					//Check for a singleton map to null first.  This is simpler
+					//than buffering one item in the general loop.
+					gadget_iter_->move_to_value();
+					bool singleton = gadget_iter_->is_null();
+					bool not_singleton = gadget_iter_->next();
+					if (singleton && not_singleton)
+						throw std::runtime_error(fmt::format("in {} gadget {}, found apparent state-names null singleton but more keys present",
+								filename_, ret.name));
+					gadget_iter_->to_start_scope();
+
+					//JSON keys are always strings, but here they represent
+					//unsigned integers, so we have to string-parse.
+					if (singleton) {
+						if (!gadget_iter_->is_string())
+							throw std::runtime_error(fmt::format("in {} gadget {}, state-names null singleton key is type {} (not string)",
+								filename_, ret.name, gadget_iter_->get_type()));
+						ret.state_names = to_uint(gadget_iter_->get_string());
+					} else {
+						tsl::ordered_map<unsigned int, std::string> map;
+						do {
+							if (!gadget_iter_->is_string())
+								throw std::runtime_error(fmt::format("in {} gadget {}, state-names key is type {} (not string)",
+										filename_, ret.name, gadget_iter_->get_type()));
+							unsigned int number = to_uint(gadget_iter_->get_string());
+							gadget_iter_->move_to_value();
+							if (!gadget_iter_->is_string())
+								throw std::runtime_error(fmt::format("in {} gadget {}, state-names value for key {} is type {} (not string)",
+										filename_, ret.name, number, gadget_iter_->get_type()));
+							auto emplace_pair = map.try_emplace(number, gadget_iter_->get_string());
+							if (!emplace_pair.second)
+								throw std::runtime_error(fmt::format("in {} gadget {}, duplicate state names for key {} (old {}, new {})",
+									filename_, ret.name, number, emplace_pair.first->second, gadget_iter_->get_string()));
+						} while (gadget_iter_->next());
+						ret.state_names = map;
+					}
+
+					gadget_iter_->up();
+				} else if (gadget_iter_->is_string())
+					ret.state_names = gadget_iter_->get_string();
+				else
+					throw std::runtime_error(fmt::format("in {} gadget {}, state-names value is type {} (not string or object)",
+							filename_, ret.name, gadget_iter_->get_type()));
+			} else
+				throw std::runtime_error(fmt::format("in {} gadget {}, unrecognized key {}",
+						filename_, ret.name, key));
+		} while (gadget_iter_->next());
+
+		gadget_iter_->up();
+		if (!gadget_iter_->next())
+			gadget_iter_.reset();
+		return ret;
+	}
+
+	bool hasAlias() override {
+		return alias_iter_.has_value();
+	}
+	pair<std::string, std::string> nextAlias() override {
+		std::string key = alias_iter_->get_string();
+		alias_iter_->move_to_value();
+		if (!alias_iter_->is_string())
+			throw std::runtime_error(fmt::format("in {}, alias {} is type {} (not string)", filename_, key));
+		std::string value = alias_iter_->get_string();
+
+		if (!alias_iter_->next())
+			alias_iter_.reset();
+		return {std::move(key), std::move(value)};
+	}
+};
+
+
 std::unique_ptr<RawGadgetSource> source_for_filename(std::string_view filename) {
 	Parts filename_parts = rpartition(filename, '.');
 	if (std::get<1>(filename_parts).empty())
@@ -277,8 +455,8 @@ std::unique_ptr<RawGadgetSource> source_for_filename(std::string_view filename) 
 
 	if (ext == "yaml"sv)
 		return std::make_unique<YAMLRawGadgetSource>(filename);
-//	if (std::get<2>(filename_parts) == "json"sv)
-//		return std::make_unique<JSONRawGadgetSource>(filename);
+	if (std::get<2>(filename_parts) == "json"sv)
+		return std::make_unique<JSONRawGadgetSource>(filename);
 	throw std::runtime_error(fmt::format("filename {} has unknown extension {}", filename, ext));
 }
 
