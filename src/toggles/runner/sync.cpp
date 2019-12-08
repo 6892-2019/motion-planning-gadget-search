@@ -416,9 +416,7 @@ public:
 				else
 					throw std::runtime_error(fmt::format("in {} gadget {}, state-names value is type {} (not string or object)",
 							filename_, ret.name, gadget_iter_->get_type()));
-			} else
-				throw std::runtime_error(fmt::format("in {} gadget {}, unrecognized key {}",
-						filename_, ret.name, key));
+			}
 		} while (gadget_iter_->next());
 
 		gadget_iter_->up();
