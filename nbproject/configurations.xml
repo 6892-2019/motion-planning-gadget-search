@@ -400,6 +400,8 @@
             tool="1"
             flavor2="0">
       </item>
+      <item path="src/toggles/runner/scan-mode.cpp" ex="false" tool="1" flavor2="0">
+      </item>
       <item path="src/toggles/runner/selsert-gadget-by-data.cpp"
             ex="false"
             tool="1"
