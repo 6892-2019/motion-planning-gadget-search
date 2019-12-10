@@ -53,6 +53,7 @@
           <in>ops.cpp</in>
           <in>provenance.hpp</in>
           <in>repair-completions-mode.cpp</in>
+          <in>scan-mode.cpp</in>
           <in>selsert-gadget-by-data.cpp</in>
           <in>selsert-gadget-by-data.hpp</in>
           <in>sync.cpp</in>

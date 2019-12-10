@@ -29,6 +29,14 @@ struct farmhash_hash {
 	std::uint64_t operator()(std::string_view x) const noexcept {
 		return farmhash::Hash(x.data(), x.size());
 	}
+
+	//This should be a template for pair, but we want to use farmhash_hash if we
+	//have an overload and std::hash if not.  Maybe that means having
+	//operator()(T) as a most-general fallback, and then individual overrides?
+	std::uint64_t operator()(const std::pair<unsigned int, unsigned int>& x) const noexcept {
+		std::array<unsigned int, 2> data = {x.first, x.second};
+		return farmhash::Hash(reinterpret_cast<std::byte*>(data.begin()), data.size() * sizeof(data.front()));
+	}
 };
 
 #endif /* FARMHASH_UTIL_HPP */
