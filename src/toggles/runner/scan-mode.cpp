@@ -16,14 +16,14 @@ using automaton::bitset;
 using encoding::GadgetEdge;
 
 bool in_different_circular_partitions(unsigned int alphabet_size, unsigned int a, unsigned int b, unsigned int c, unsigned int d) {
-	//TODO: could precompute these bitsets: two bitsets per a/b/length, check that c and d are set in different bitsets
-	if (a > b)
-		std::swap(a, b);
+	//TODO: could precompute these bitsets: two bitsets per a/c/length, check that b and d are set in different bitsets
+	if (a > c)
+		std::swap(a, c);
 	bitset<16> set1, set2;
 	set1.set(0, alphabet_size+1);
-	set2.set(a, b+1);
+	set2.set(a, c+1);
 	set1 &= ~set2;
-	return (set1[c] && set2[d]) || (set1[d] && set2[c]);
+	return (set1[b] && set2[d]) || (set1[d] && set2[b]);
 }
 
 void name_alternating_leaky_directed_crossovers(uint64_t gadget_id, encoding::Stats stats,
