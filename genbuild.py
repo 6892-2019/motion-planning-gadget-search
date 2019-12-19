@@ -10,7 +10,7 @@ from operator import attrgetter
 
 # the vendor/ subdirectories we want
 # TODO: currently we make all headers available; this only controls objects
-import_vendored = ['vta', 'farmhash', 'fmt', 'simdjson']
+import_vendored = ['vta', 'farmhash', 'simdjson']
 
 default_targets = ['debug', 'release']
 
@@ -19,7 +19,7 @@ global_flags = OrderedDict()
 global_flags['builddir'] = 'build' # significant to Ninja
 global_flags['modeflags'] = '-std=c++2a'
 global_flags['warnflags'] = '-pedantic -Wall -Wextra -Wuninitialized -Winit-self -Wconversion -Wuseless-cast -Wlogical-op -Waggressive-loop-optimizations -Winvalid-pch -Wno-unused-parameter -Wduplicated-cond -Wnull-dereference -Wno-dangling-else -Wsuggest-override -fdiagnostics-color=always'
-global_flags['ldflags'] = '-fuse-ld=gold -Wl,--gc-sections -Wl,--gdb-index -u malloc -ljemalloc_pic -lc -lpthread -ldl'
+global_flags['ldflags'] = '-fuse-ld=gold -Wl,--gc-sections -Wl,--gdb-index -u malloc -ljemalloc_pic -lc -lpthread -ldl -lfmt'
 
 # configuration-specific flag *templates*
 config_flags = OrderedDict()
