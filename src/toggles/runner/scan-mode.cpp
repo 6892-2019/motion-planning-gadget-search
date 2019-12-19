@@ -56,7 +56,16 @@ void name_alternating_leaky_directed_crossovers(uint64_t gadget_id, encoding::St
 				if (pp != p) continue; //not reusable
 				if (!graph[{p, d}].empty()) continue;
 				if (!in_different_circular_partitions(stats.locations, a, b, c, d)) continue;
-				fmt::print("{} {} {} {} {}\n", gadget_id, a, b, c, d);
+				fmt::print("{} is an alternating leaky directed crossover: {} {}->{}, {} {}->{}\n",
+						gadget_id, p, a, c, q, b, d);
+				//Including the id ensures the assigned name is unique.  Including
+				//the rest helps the human decode what is happening in the gadget.
+				//TODO: We probably want to build the gadget where p is state 0
+				//for the ease of graph drawing later (so we don't need to work
+				//out the pre-traversals that make it a crossover).
+				std::string name = fmt::format("z-alternating-leaky-directed-crossover-{}-{}-{}-{}-{}-{}-{}",
+						gadget_id, p, a, c, q, b, d);
+				results.emplace_back(std::move(name), gadget_id);
 			}
 		}
 }
@@ -78,11 +87,12 @@ int scan_mode(std::string_view db_path, vector<std::string_view>& args) {
 	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_NORDAHEAD);
-	lmdb::dbi gadget_hashtable, gadget_index;
+	lmdb::dbi gadget_hashtable, gadget_index, names_db;
 	{
 		lmdb::txn txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		gadget_hashtable = lmdb::dbi::open(txn, "gadget_hashtable");
 		gadget_index = lmdb::dbi::open(txn, "gadget_index");
+		names_db = lmdb::dbi::open(txn, "names");
 		txn.commit();
 	}
 
@@ -122,6 +132,18 @@ int scan_mode(std::string_view db_path, vector<std::string_view>& args) {
 		result.insert(result.end(), std::move_iterator(rest.begin()), std::move_iterator(rest.end()));
 		return result;
 	});
+
+	std::sort(names.begin(), names.end());
+	{
+		auto txn = lmdb::txn::begin(env);
+		for (const pair<std::string, uint64_t>& p : names) {
+			std::string_view data(reinterpret_cast<const char*>(&p.second), sizeof(p.second));
+			if (!names_db.put(txn, p.first, data, MDB_NOOVERWRITE))
+				if (lmdb::from_sv<uint64_t>(data) != p.second)
+					throw std::runtime_error(fmt::format("failed to insert names {} -> {}", p.first, p.second));
+		}
+		txn.commit();
+	}
 
 	return 0;
 }
