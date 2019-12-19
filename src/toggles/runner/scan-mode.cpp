@@ -5,6 +5,7 @@
 #include "intervals.hpp"
 #include "stringutils.hpp"
 #include "bitset.hpp"
+#include <lmdb++.h>
 
 using std::vector;
 using std::array;
@@ -85,20 +86,35 @@ int scan_mode(std::string_view db_path, vector<std::string_view>& args) {
 		txn.commit();
 	}
 
-	vector<pair<uint64_t, uint64_t>> every_gadget_ever = {{1, get_current_max_gadget_id(env, gadget_index)+1}};
-	vector<vector<pair<uint64_t, uint64_t>>> tasks = interval_chunk(
-			every_gadget_ever.begin(), every_gadget_ever.end(), 250000);
-	vector<pair<std::string, uint64_t>> names = transform_reduce(std::move(tasks), num_threads,
-	[&](vector<pair<uint64_t, uint64_t>> task) {
+	//TODO: this is copied from predicates.cpp; we may want a select_gadget_*
+	//method that returns a tuple<id, hash, data> but we don't want to be
+	//making a copy of a whole slice of the table; would have to do load
+	//balancing by making lots of chunks but then would have some empty chunks too
+	//Scan over gadget_hashtable because we don't care about the encounter order.
+	std::size_t chunk_size = std::numeric_limits<std::size_t>::max() / num_threads;
+	vector<pair<std::size_t, std::size_t>> hash_ranges; //inclusive!
+	for (unsigned int i = 0; i < num_threads; ++i)
+		hash_ranges.emplace_back(chunk_size*i, chunk_size*(i+1)-1);
+	//Ensure we cover the whole space even if it didn't divide evenly.
+	hash_ranges.back().second = std::numeric_limits<std::size_t>::max();
+
+	vector<pair<std::string, uint64_t>> names = transform_reduce(std::move(hash_ranges), num_threads,
+	[&](pair<std::size_t, std::size_t> range) {
 		vector<pair<std::string, uint64_t>> results;
-		vector<pair<uint64_t, vector<std::byte>>> data = select_gadget_id_to_data(env, gadget_hashtable, gadget_index, task);
-		while (!data.empty()) {
-			encoding::Stats stats = encoding::stats(data.back().second.data());
-			pair<vector<GadgetEdge>, vector<GadgetEdge>> edges = encoding::decode_to_slls(
-					data.back().second.data(), data.back().second.size());
-			name_alternating_leaky_directed_crossovers(data.back().first, stats, edges.first, edges.second, results);
-			data.pop_back();
+		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
+		lmdb::cursor cur = lmdb::cursor::open(txn, gadget_hashtable);
+		std::string_view hash = lmdb::to_sv(range.first), gadget;
+		if (cur.get(hash, gadget, MDB_SET_RANGE))
+		while (lmdb::from_sv<uint64_t>(hash) <= range.second) {//yes, inclusive
+			uint64_t id = lmdb::from_sv<uint64_t>(gadget.substr(gadget.size()-8, gadget.size()));
+			gadget.remove_suffix(8);
+			const std::byte* gadget_data = reinterpret_cast<const std::byte*>(gadget.data());
+			encoding::Stats stats = encoding::stats(gadget_data);
+			pair<vector<GadgetEdge>, vector<GadgetEdge>> edges = encoding::decode_to_slls(gadget_data, gadget.size());
+			name_alternating_leaky_directed_crossovers(id, stats, edges.first, edges.second, results);
+			if (!cur.get(hash, gadget, MDB_NEXT)) break;
 		}
+		txn.commit();
 		return results;
 	}, [](vector<pair<std::string, uint64_t>>&& left, vector<pair<std::string, uint64_t>>&& right) {
 		vector<pair<std::string, uint64_t>> result(std::move(left));
