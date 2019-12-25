@@ -1202,7 +1202,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	fmt::print("Gadget spec: {}\n", format_gadget_set(spec));
 
 	lmdb::env data_env = lmdb::env::create();
-	data_env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	data_env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	data_env.set_max_dbs(64);
 	data_env.open(std::string(db_path).c_str(), MDB_NORDAHEAD); //TODO: flags?
 	if (unsigned int dead_count = check_for_stale_readers(data_env))

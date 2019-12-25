@@ -607,7 +607,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	}
 
 	lmdb::env env = lmdb::env::create();
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_RDONLY | MDB_NORDAHEAD);
 	lmdb::dbi edges_connect, edges_skinny_connect, edges_close, edges_mirror, completions;

@@ -325,7 +325,7 @@ FirsthalfStatistics write_firsthalf(uint64_t database_id, EdgeKind kind,
 
 DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, EdgeKind kind, unsigned int num_reader_threads) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
 	DatabaseMetadata meta = read_meta(env);
@@ -1034,7 +1034,7 @@ DatabaseOperationStatistics commit_combine_result_skinny(lmdb::env& env, lmdb::d
 DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_intervals,
 		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index, completions;
@@ -1071,7 +1071,7 @@ DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_
 DatabaseOperationStatistics do_combine_db_full(vector<pair<uint64_t, uint64_t>> left_intervals,
 		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index, completions;
@@ -1109,7 +1109,7 @@ FirsthalfStatistics do_combine_db_firsthalf(vector<pair<uint64_t, uint64_t>> lef
 		vector<std::uint64_t> right_gids, unsigned int precision, unsigned int max_left_states) {
 	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index;
@@ -1248,7 +1248,7 @@ DatabaseOperationStatistics commit_connect_result_skinny(lmdb::env& env, lmdb::d
 
 DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input_intervals, unsigned int max_states) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
@@ -1269,7 +1269,7 @@ DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input
 
 DatabaseOperationStatistics do_connect_db_full(vector<pair<uint64_t, uint64_t>> input_intervals, unsigned int max_states) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index, completions, connect_edges;
@@ -1291,7 +1291,7 @@ DatabaseOperationStatistics do_connect_db_full(vector<pair<uint64_t, uint64_t>> 
 FirsthalfStatistics do_connect_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals, unsigned int max_states) {
 	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index;
@@ -1388,7 +1388,7 @@ DatabaseOperationStatistics do_close_db0(vector<pair<uint64_t, uint64_t>> input_
 
 DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index, completions, close_edges;
@@ -1406,7 +1406,7 @@ DatabaseOperationStatistics do_close_db(vector<pair<uint64_t, uint64_t>> input_i
 FirsthalfStatistics do_close_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals) {
 	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
 
@@ -1446,7 +1446,7 @@ DatabaseOperationStatistics do_mirror_db0(vector<pair<uint64_t, uint64_t>> input
 
 DatabaseOperationStatistics do_mirror_db(vector<pair<uint64_t, uint64_t>> input_intervals) {
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index, completions, mirror_edges;
@@ -1464,7 +1464,7 @@ DatabaseOperationStatistics do_mirror_db(vector<pair<uint64_t, uint64_t>> input_
 FirsthalfStatistics do_mirror_db_firsthalf(vector<pair<uint64_t, uint64_t>> input_intervals) {
 	firsthalf_start();
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(g_database_path.c_str(), MDB_NORDAHEAD | MDB_RDONLY); //TODO: flags?
 
@@ -1495,7 +1495,7 @@ vector<pair<uint64_t, vector<unsigned int>>> do_deleted_locations(vector<AnyProv
 	tsl::hopscotch_map<uint64_t, vector<std::byte>, farmhash_hash> gadget_data;
 	{
 		lmdb::env env = lmdb::env::create();
-		env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+		env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 		env.set_max_dbs(64);
 		env.open(g_database_path.c_str(), MDB_RDONLY | MDB_NORDAHEAD);
 		for (pair<uint64_t, vector<std::byte>>& p : select_gadget_id_to_data(env, gids))
