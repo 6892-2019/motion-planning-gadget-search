@@ -13,8 +13,10 @@
 #include "tsl/ordered_set.h"
 #include "task_parallel.hpp"
 #include "ioutils.hpp"
+#include "bounded_queue.hpp"
 #include <fmt/chrono.h>
 #include <functional>
+#include <future>
 
 using std::vector;
 using std::pair;
@@ -386,6 +388,7 @@ private:
 
 	vector<const BlockHeader*> blocks_;
 	std::size_t size_, capacity_;
+	unsigned int num_threads_;
 public:
 	/**
 	 * ProvSearcher looks up provs from its parent ProvStorage.  It caches the
@@ -416,7 +419,7 @@ public:
 		tsl::hopscotch_map<const BlockHeader*, vector<SkinnyProv>> cache_;
 	};
 
-	ProvStorage() : size_(0), capacity_(0) {}
+	ProvStorage(unsigned int num_threads = 1) : size_(0), capacity_(0), num_threads_(num_threads) {}
 	ProvStorage(ProvStorage&& other) = default;
 	ProvStorage& operator=(ProvStorage&& other) = default;
 	~ProvStorage() {
@@ -427,24 +430,59 @@ public:
 
 	void ingest(LargeBlockDeque<SkinnyProv>&& provs) {
 		const std::size_t block_size = 8 * 1024 * 1024 / sizeof(SkinnyProv);
-		dynarray<std::byte> workspace(block_size * sizeof(SkinnyProv));
-		vector<SkinnyProv> batch;
-		batch.reserve(block_size);
+		std::size_t possible_blocks = (provs.size() + (block_size-1)) / block_size;
+		unsigned int num_threads = std::min(num_threads_, numeric_cast<unsigned int>(possible_blocks));
+		assert(num_threads > 0);
+
+		//This use of a raw pointer is exception-unsafe in the case where
+		//reallocating the block list fails.  We're probably screwed in that
+		//case anyway, but we could fix this with std::unique_ptr and a
+		//custom deleter that calls ProvStorage::free to properly free the block.
+		vector<std::future<vector<BlockHeader*>>> futures;
+		bounded_queue<vector<SkinnyProv>> batches(num_threads+1), batch_pool(num_threads+1);
+		for (std::size_t i = 0; i < num_threads; ++i) {
+			vector<SkinnyProv> batch;
+			batch.reserve(block_size);
+			batch_pool.put(std::move(batch));
+		}
+
+		for (std::size_t i = 0; i < num_threads; ++i)
+			futures.push_back(std::async(std::launch::async, [&]() {
+				dynarray<std::byte> workspace(block_size * sizeof(SkinnyProv));
+				vector<BlockHeader*> finished;
+				while (true) {
+					vector<SkinnyProv> batch = batches.take();
+					if (batch.empty())
+						return finished;
+					finished.push_back(compress(batch.begin(), batch.end(), workspace));
+					batch.clear();
+					batch_pool.put(std::move(batch));
+				}
+			}));
 
 		while (!provs.empty()) {
 			std::size_t this_block_size = std::min<std::size_t>(block_size, provs.size());
 			auto batch_end = provs.begin() + this_block_size;
+			vector<SkinnyProv> batch = batch_pool.take();
 			batch.assign(provs.begin(), batch_end);
 			provs.erase(provs.begin(), batch_end);
-			//This use of a raw pointer is exception-unsafe in the case where
-			//reallocating the block list fails.  We're probably screwed in that
-			//case anyway, but we could fix this with std::unique_ptr and a
-			//custom deleter that calls ProvStorage::free to properly free the block.
-			BlockHeader* block = compress(batch.begin(), batch.end(), workspace);
-			blocks_.push_back(block);
-			pair<uint64_t, uint64_t> sizecap = size_capacity(block);
-			size_ += sizecap.first;
-			capacity_ += sizecap.second;
+			batches.put(std::move(batch));
+		}
+		for (std::size_t i = 0; i < num_threads; ++i) {
+			//Shut down threads by sending empty batches.  They don't go back in
+			//the pool, so this will only block transiently on batches being full.
+			vector<SkinnyProv> empty_batch;
+			batches.put(empty_batch);
+		}
+
+		for (std::size_t i = 0; i < num_threads; ++i) {
+			vector<BlockHeader*> blocks = futures[i].get();
+			for (BlockHeader* block : blocks) {
+				blocks_.push_back(block);
+				pair<uint64_t, uint64_t> sizecap = size_capacity(block);
+				size_ += sizecap.first;
+				capacity_ += sizecap.second;
+			}
 		}
 	}
 
@@ -970,7 +1008,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	TargetStuff target = target_stuff(env);
 	const vector<pair<uint64_t, uint64_t>> possible_combine_rights = find_all_combine_rights(env);
 
-	ProvStorage prov;
+	ProvStorage prov(num_threads);
 	//We store most edges as SkinnyProv, only getting the full edge data when
 	//we're going to print a derivation.
 	EdgeCache edge_cache;
