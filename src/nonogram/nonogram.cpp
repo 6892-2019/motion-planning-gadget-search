@@ -2,6 +2,7 @@
 #include "puzzle.hpp"
 #include "../regex.hpp"
 #include "../alphabet.hpp"
+#include "../automaton.hpp"
 
 //TODO: support of multi-color puzzles will require more flexible alphabet selection
 using R = automaton::Regex<BooleanAlphabet>;
@@ -53,11 +54,16 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 	R sizeConstraint = R::repeat(any, static_cast<int>(puzzle->rows().size() * puzzle->cols().size()));
 
 	struct Constraint {
+		Constraint(R r, std::size_t clue, std::size_t solution, std::size_t floatingZero, int rown, int coln)
+				: regex(r), automaton(r.compile()), clues(clue), solutions(solution), floatingZeroes(floatingZero), row(rown), col(coln) {
+			automaton.minimize();
+		}
 		R regex;
+		automaton::Automaton<2> automaton;
 		std::size_t clues;
 		std::size_t solutions;
 		std::size_t floatingZeroes;
-		bool isCol;
+		int row, col; //one of these is -1
 	};
 	std::vector<Constraint> puzzleConstraints;
 
@@ -94,7 +100,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 		clueConstraints.push_back(thisRow);
 		clueConstraints.push_back(suffix);
 		puzzleConstraints.push_back(Constraint{R::cat(clueConstraints),
-				row.size(), solutions, floatingZeroes, false});
+				row.size(), solutions, floatingZeroes, r, -1});
 	}
 
 	for (decltype(puzzle->cols().size()) c = 0; c < puzzle->cols().size(); ++c) {
@@ -124,25 +130,32 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 		}
 		clueConstraints.push_back(paddingZero);
 		puzzleConstraints.push_back(Constraint{R::conj({R::cat(clueConstraints), sizeConstraint}),
-				col.size(), solutions, floatingZeroes, true});
+				col.size(), solutions, floatingZeroes, -1, c});
 	}
 
-//	std::stable_sort(puzzleConstraints.begin(), puzzleConstraints.end(), [](const Constraint& l, const Constraint& r) {
+	std::stable_sort(puzzleConstraints.begin(), puzzleConstraints.end(), [](const Constraint& l, const Constraint& r) {
 ////		return std::tie(l.isCol, l.clues, l.solutions) < std::tie(r.isCol, r.clues, r.solutions);
 //		std::size_t ls = std::numeric_limits<std::size_t>::max() - l.clues;
 //		std::size_t rs = std::numeric_limits<std::size_t>::max() - r.clues;
 //		return std::tie(l.isCol, ls, l.solutions) < std::tie(r.isCol, rs, r.solutions);
-//	});
+		return l.automaton.state_size() < r.automaton.state_size();
+	});
+//	std::mt19937 rng(3);
+//	std::shuffle(puzzleConstraints.begin(), puzzleConstraints.end(), rng);
 
-	std::vector<R> regexes;
-	for (const Constraint& c : puzzleConstraints) {
+	for (const Constraint& c : puzzleConstraints)
 		std::cout << c.clues << " " << c.floatingZeroes << " " << c.solutions << " " << c.regex << std::endl;
-		regexes.push_back(c.regex);
+
+	automaton::Automaton<2> accumulator = std::move(puzzleConstraints.front().automaton);
+	for (std::size_t i = 1; i < puzzleConstraints.size(); ++i) {
+		accumulator = automaton::conj(accumulator, puzzleConstraints[i].automaton);
+		accumulator.minimize();
+		auto free_memory = std::move(puzzleConstraints[i].automaton);
 	}
-	R puzzleConstraint = R::conj(regexes);
+
 	std::vector<std::vector<bool>> solutions;
 	try {
-		puzzleConstraint.enumerate([&](auto& v) {solutions.push_back(v);});
+		accumulator.template enumerate<BooleanAlphabet>([&](auto& v) {solutions.push_back(v);});
 	} catch (std::bad_alloc& ex) {
 		std::cout << ex.what() << std::endl;
 		return 1;
