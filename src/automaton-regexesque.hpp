@@ -313,13 +313,13 @@ Automaton<N> conj(const Automaton<N>& left, const Automaton<N>& right) {
 	} catch (std::bad_alloc&) {
 		AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<DenseConjMap>" << std::endl);
 	}
-	if (!a.isEmpty())
+	if (a.state_size() == 0)
 		try {
 			a = detail::conj_impl<detail::UnorderedConjMap>(left, right);
 		} catch (std::bad_alloc&) {
 			AUTOMATON_DEBUG(std::cout << "caught bad_alloc: conj_impl<UnorderedConjMap>" << std::endl);
 		}
-	if (!a.isEmpty())
+	if (a.state_size() == 0)
 		//No try-catch here because there's no further recovery
 		a = detail::conj_impl<detail::SparseConjMap>(left, right);
 	AUTOMATON_DEBUG(std::cout << "intersection: " << left.state_size() << ", " << right.state_size() << " -> " << a.state_size() << std::endl);
