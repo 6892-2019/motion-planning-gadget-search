@@ -73,7 +73,6 @@ void cols_first(std::vector<Constraint>& constraints) {
 	});
 }
 void interleaved(std::vector<Constraint>& constraints) {
-	//TODO: this is bugged somehow: we do rows then cols instead of interleaving
 	std::vector<Constraint> rows, cols;
 	for (Constraint& c : constraints)
 		if (c.row != -1)
@@ -83,7 +82,7 @@ void interleaved(std::vector<Constraint>& constraints) {
 	std::reverse(rows.begin(), rows.end());
 	std::reverse(cols.begin(), cols.end());
 	constraints.clear();
-	while (!rows.empty() && cols.empty()) {
+	while (!rows.empty() && !cols.empty()) {
 		constraints.push_back(std::move(rows.back()));
 		constraints.push_back(std::move(cols.back()));
 		rows.pop_back();
