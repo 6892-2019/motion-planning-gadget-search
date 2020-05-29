@@ -183,17 +183,8 @@ public:
 		//silent narrowing conversion: http://stackoverflow.com/q/37928951/3614835
 		map_.set_empty_key({leftSize, rightSize});
 	}
-	void insert(state_pair oldstates, state_type newstate) {
-		map_.insert({oldstates, newstate});
-	}
-	template<class Callable>
-	std::pair<state_type, bool> compute_if_absent(state_pair oldstates, Callable newstateProvider) {
-		//dense_hashtable::find_or_insert is so close to what we want :(
-		auto it = map_.find(oldstates);
-		if (it != map_.end())
-			return {it->second, false};
-		auto r = map_.insert({oldstates, newstateProvider()});
-		return {r.first->second, true};
+	auto insert(state_pair oldstates, state_type newstate) {
+		return map_.insert({oldstates, newstate});
 	}
 private:
 	//std::hash isn't provided for pair :(
@@ -204,16 +195,8 @@ template<class BackingMap>
 class MapConjMap {
 public:
 	MapConjMap(std::size_t leftSize, std::size_t rightSize) : map_() {}
-	void insert(std::pair<state_type, state_type> oldstates, state_type newstate) {
-		map_.insert({oldstates, newstate});
-	}
-	template<class Callable>
-	std::pair<state_type, bool> compute_if_absent(std::pair<state_type, state_type> oldstates, Callable newstateProvider) {
-		auto it = map_.find(oldstates);
-		if (it != map_.end())
-			return {it->second, false};
-		auto r = map_.insert({oldstates, newstateProvider()});
-		return {r.first->second, true};
+	auto insert(std::pair<state_type, state_type> oldstates, state_type newstate) {
+		return map_.insert({oldstates, newstate});
 	}
 private:
 	BackingMap map_;
@@ -293,10 +276,12 @@ static Automaton<N> conj_impl(const Automaton<N>& left, const Automaton<N>& righ
 				symbol_mask_type common = lt.symbols_ & rt.symbols_;
 				if (common.any()) {
 					state_type leftnext = lt.next_, rightnext = rt.next_;
-					auto p = newstates.compute_if_absent({leftnext, rightnext}, [&]{return a.addState();});
-					if (p.second)
-						worklist.push_back({leftnext, rightnext, p.first});
-					a.addTrans(ns, common, p.first);
+					auto p = newstates.insert({leftnext, rightnext}, a.state_size());
+					if (p.second) {
+						a.addState();
+						worklist.push_back({leftnext, rightnext, p.first->second});
+					}
+					a.addTrans(ns, common, p.first->second);
 				}
 			}
 	}
