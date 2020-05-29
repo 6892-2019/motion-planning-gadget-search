@@ -3,6 +3,9 @@
 #include "../regex.hpp"
 #include "../alphabet.hpp"
 #include "../automaton.hpp"
+#include "stringutils.hpp"
+
+using namespace std::literals::string_view_literals;
 
 //TODO: support of multi-color puzzles will require more flexible alphabet selection
 using R = automaton::Regex<BooleanAlphabet>;
@@ -45,26 +48,121 @@ static std::pair<std::size_t, std::size_t> countSolutions(const std::vector<Puzz
 	return {ways, spaces};
 }
 
+struct Constraint {
+	Constraint(R r, std::size_t clue, std::size_t solution, std::size_t floatingZero, int rown, int coln)
+			: regex(r), automaton(r.compile()), clues(clue), solutions(solution), floatingZeroes(floatingZero), row(rown), col(coln) {
+		automaton.minimize();
+	}
+	R regex;
+	automaton::Automaton<2> automaton;
+	std::size_t clues;
+	std::size_t solutions;
+	std::size_t floatingZeroes;
+	int row, col; //one of these is -1
+};
+
+using Heuristic = void(*)(std::vector<Constraint>&);
+
+void rows_first(std::vector<Constraint>& constraints) {}
+void cols_first(std::vector<Constraint>& constraints) {
+	std::stable_sort(constraints.begin(), constraints.end(), [](const Constraint& l, const Constraint& r) {
+		//i.e., sort rows to the back, cols in their existing order
+		auto ls = l.col == -1 ? std::numeric_limits<int>::max() : l.col;
+		auto rs = r.col == -1 ? std::numeric_limits<int>::max() : r.col;
+		return ls < rs;
+	});
+}
+void interleaved(std::vector<Constraint>& constraints) {
+	//TODO: this is bugged somehow: we do rows then cols instead of interleaving
+	std::vector<Constraint> rows, cols;
+	for (Constraint& c : constraints)
+		if (c.row != -1)
+			rows.push_back(std::move(c));
+		else
+			cols.push_back(std::move(c));
+	std::reverse(rows.begin(), rows.end());
+	std::reverse(cols.begin(), cols.end());
+	constraints.clear();
+	while (!rows.empty() && cols.empty()) {
+		constraints.push_back(std::move(rows.back()));
+		constraints.push_back(std::move(cols.back()));
+		rows.pop_back();
+		cols.pop_back();
+	}
+	while (!rows.empty()) {
+		constraints.push_back(std::move(rows.back()));
+		rows.pop_back();
+	}
+	while (!cols.empty()) {
+		constraints.push_back(std::move(cols.back()));
+		cols.pop_back();
+	}
+}
+
+void fewest_solutions(std::vector<Constraint>& constraints) {
+	std::stable_sort(constraints.begin(), constraints.end(), [](const Constraint& l, const Constraint& r) {
+		return l.solutions < r.solutions;
+	});
+}
+void most_solutions(std::vector<Constraint>& constraints) {
+	std::stable_sort(constraints.begin(), constraints.end(), [](const Constraint& l, const Constraint& r) {
+		return l.solutions > r.solutions;
+	});
+}
+
+void fewest_states(std::vector<Constraint>& constraints) {
+	std::stable_sort(constraints.begin(), constraints.end(), [](const Constraint& l, const Constraint& r) {
+		return l.automaton.state_size() < r.automaton.state_size();
+	});
+}
+void most_states(std::vector<Constraint>& constraints) {
+	std::stable_sort(constraints.begin(), constraints.end(), [](const Constraint& l, const Constraint& r) {
+		return l.automaton.state_size() > r.automaton.state_size();
+	});
+}
+
+static std::size_t random_seed = 0;
+void random_heuristic(std::vector<Constraint>& constraints) {
+	std::mt19937 rng(random_seed);
+	std::shuffle(constraints.begin(), constraints.end(), rng);
+}
+
+static const std::pair<std::string_view, Heuristic> heuristics[] = {
+	{"rows"sv, &rows_first},
+	{"cols"sv, &cols_first},
+	{"interleave"sv, &interleaved},
+	{"fewest-solutions"sv, &fewest_solutions},
+	{"most-solutions"sv, &most_solutions},
+	{"fewest-states"sv, &fewest_states},
+	{"most-states"sv, &most_states},
+	{"random"sv, &random_heuristic},
+};
+
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
-	std::unique_ptr<Puzzle> puzzle = Puzzle::fromNONFile(argv[1]);
+	char* puzzle_file = nullptr;
+	Heuristic heuristic = &rows_first;
+	for (int i = 1; i < argc; ++i)
+		if (argv[i] == "--heuristic"sv) {
+			heuristic = nullptr;
+			std::string_view name = argv[++i];
+			for (const std::pair<std::string_view, Heuristic>& h : heuristics)
+				if (name == h.first)
+					heuristic = h.second;
+			if (!heuristic) {
+				fmt::print(stderr, "unrecognized heuristic name: {}\n", name);
+				std::exit(2);
+			}
+		} else if (argv[i] == "--seed"sv)
+			random_seed = to_uint64(argv[++i]);
+		else
+			puzzle_file = argv[i];
+
+	std::unique_ptr<Puzzle> puzzle = Puzzle::fromNONFile(puzzle_file);
 	std::cout << puzzle->name() << std::endl;
 
 	R zero = R::lit(false), one = R::lit(true), any = R::any();
 	R rowWidth = R::repeat(any, static_cast<int>(puzzle->cols().size()));
 	R sizeConstraint = R::repeat(any, static_cast<int>(puzzle->rows().size() * puzzle->cols().size()));
-
-	struct Constraint {
-		Constraint(R r, std::size_t clue, std::size_t solution, std::size_t floatingZero, int rown, int coln)
-				: regex(r), automaton(r.compile()), clues(clue), solutions(solution), floatingZeroes(floatingZero), row(rown), col(coln) {
-			automaton.minimize();
-		}
-		R regex;
-		automaton::Automaton<2> automaton;
-		std::size_t clues;
-		std::size_t solutions;
-		std::size_t floatingZeroes;
-		int row, col; //one of these is -1
-	};
 	std::vector<Constraint> puzzleConstraints;
 
 	//Logically, the row constraints could all be concatenated together, but
@@ -133,15 +231,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 				col.size(), solutions, floatingZeroes, -1, c});
 	}
 
-	std::stable_sort(puzzleConstraints.begin(), puzzleConstraints.end(), [](const Constraint& l, const Constraint& r) {
-////		return std::tie(l.isCol, l.clues, l.solutions) < std::tie(r.isCol, r.clues, r.solutions);
-//		std::size_t ls = std::numeric_limits<std::size_t>::max() - l.clues;
-//		std::size_t rs = std::numeric_limits<std::size_t>::max() - r.clues;
-//		return std::tie(l.isCol, ls, l.solutions) < std::tie(r.isCol, rs, r.solutions);
-		return l.automaton.state_size() < r.automaton.state_size();
-	});
-//	std::mt19937 rng(3);
-//	std::shuffle(puzzleConstraints.begin(), puzzleConstraints.end(), rng);
+	std::cout << reinterpret_cast<void*>(heuristic) << std::endl;
+	heuristic(puzzleConstraints);
 
 	for (const Constraint& c : puzzleConstraints)
 		std::cout << c.clues << " " << c.floatingZeroes << " " << c.solutions << " " << c.regex << std::endl;
