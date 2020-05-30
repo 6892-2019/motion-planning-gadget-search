@@ -1,10 +1,14 @@
 #include "precompiled.hpp"
+#include "regex.hpp"
+#include "alphabet.hpp"
 #include "ioutils.hpp"
 #include "stringutils.hpp"
 #include <boost/algorithm/string/trim.hpp>
 
 using std::vector;
 using namespace std::literals::string_view_literals;
+
+using R = automaton::Regex<BooleanAlphabet>;
 
 static std::size_t random_seed;
 
@@ -16,6 +20,7 @@ struct Problem {
 Problem parse_dimacs(const char* filename) {
 	vector<std::string> lines = readAllLines(filename);
 	Problem problem;
+	problem.variables = 0;
 	for (std::string& line : lines) {
 		if (line[0] == 'c' || line[0] == 'p') continue;
 		if (line[0] == '%') break; //some files end with this? it isn't an official part of the format
@@ -55,6 +60,8 @@ void renumber_popularity(vector<vector<int>>& clauses, bool least) {
 	std::sort(sort.begin(), sort.end());
 	if (!least)
 		std::reverse(sort.begin(), sort.end());
+	else
+		std::rotate(sort.begin(), sort.begin()+1, sort.end());
 	fmt::print("{}\n", sort);
 
 	vector<unsigned int> renumbering;
@@ -142,7 +149,36 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 	variable_heuristic(prob.clauses);
 	clause_heuristic(prob.clauses);
 
-	for (vector<int>& clause : prob.clauses)
-		fmt::print("{}\n", clause);
+	vector<automaton::Automaton<2>> automata;
+	for (vector<int>& clause : prob.clauses) {
+		vector<int> flat_clause = clause;
+		for (int& v : flat_clause)
+			v = std::abs(v) - 1;
+		vector<int> differences;
+		differences.resize(flat_clause.size());
+		std::adjacent_difference(flat_clause.begin(), flat_clause.end(), differences.begin());
+		//each difference beyond the first gets -1 to account for the position itself
+		std::transform(differences.begin()+1, differences.end(),
+				differences.begin()+1, [](int i){return i-1;});
+
+		vector<R> components;
+		for (unsigned int i = 0; i < differences.size(); ++i) {
+			components.push_back(R::repeat(R::any(), differences[i]));
+			//the value that doesn't satisfy the clause (we complement at the end)
+			components.push_back(clause[i] > 0 ? R::lit(0) : R::lit(1));
+		}
+		components.push_back(R::repeat(R::any(), prob.variables - std::abs(clause.back()))); //TODO may be too long?
+		R regex = R::comp(R::cat(components));
+		automata.push_back(regex.compile());
+		automata.back().minimize();
+		std::cout << fmt::format("{}", clause) << " " << regex << " " << automata.back().state_size() << "\n";
+	}
+
+	automaton::Automaton<2> accumulator = std::move(automata.front());
+	for (std::size_t i = 1; i < automata.size(); ++i) {
+		accumulator = automaton::conj(accumulator, automata[i]);
+		accumulator.minimize();
+		auto free_memory = std::move(automata[i]);
+	}
 	return 0;
 }
