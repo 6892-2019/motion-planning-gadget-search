@@ -50,7 +50,7 @@ void renumber_popularity(vector<vector<int>>& clauses, bool least) {
 	for (vector<int>& c : clauses)
 		for (int v : c) {
 			v = std::abs(v);
-			if ((unsigned)v > occurrences.size())
+			if ((unsigned)v >= occurrences.size())
 				occurrences.resize(v+1);
 			++occurrences[v];
 		}
