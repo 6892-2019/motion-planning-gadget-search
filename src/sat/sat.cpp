@@ -3,6 +3,7 @@
 #include "alphabet.hpp"
 #include "ioutils.hpp"
 #include "stringutils.hpp"
+#include "hopscotch/hopscotch_map.h"
 #include <boost/algorithm/string/trim.hpp>
 
 using std::vector;
@@ -115,6 +116,26 @@ static const std::pair<std::string_view, Heuristic> clause_heuristics[] = {
 	{"reverse-sorted"sv, &reverse_sorted_clauses},
 };
 
+unsigned long language_size_recurse(automaton::Automaton<2>& a, automaton::Automaton<2>::state_type state,
+		tsl::hopscotch_map<automaton::Automaton<2>::state_type, unsigned long>& memo) {
+	auto x = memo.find(state);
+	if (x != memo.end())
+		return x->second;
+
+	unsigned long sum = 0;
+	for (automaton::Automaton<2>::symbol_type symbol = 0; symbol < 2; ++symbol)
+		if (auto next = a.stepDeterministic(state, symbol))
+			sum += language_size_recurse(a, *next, memo);
+	if (a.accept(state))
+		sum += 1;
+	memo[state] = sum;
+	return sum;
+}
+unsigned long language_size(automaton::Automaton<2>& a) {
+	tsl::hopscotch_map<automaton::Automaton<2>::state_type, unsigned long> memo;
+	return language_size_recurse(a, 0, memo);
+}
+
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 	Heuristic variable_heuristic = nop_heuristic, clause_heuristic = nop_heuristic;
 	const char* dimacs_file = nullptr;
@@ -168,7 +189,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 			components.push_back(clause[i] > 0 ? R::lit(0) : R::lit(1));
 		}
 		components.push_back(R::repeat(R::any(), prob.variables - std::abs(clause.back()))); //TODO may be too long?
-		R regex = R::comp(R::cat(components));
+		R regex = R::conj({R::comp(R::cat(components)), R::repeat(R::any(), prob.variables)});
 		automata.push_back(regex.compile());
 		automata.back().minimize();
 		std::cout << fmt::format("{}", clause) << " " << regex << " " << automata.back().state_size() << "\n";
@@ -180,5 +201,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 		accumulator.minimize();
 		auto free_memory = std::move(automata[i]);
 	}
+	accumulator.minimize();
+	fmt::print("{}\n", language_size(accumulator));
 	return 0;
 }
