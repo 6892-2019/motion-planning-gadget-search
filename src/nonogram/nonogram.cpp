@@ -144,6 +144,8 @@ static const std::pair<std::string_view, Heuristic> heuristics[] = {
 };
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
+	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
+
 	char* puzzle_file = nullptr;
 	Heuristic heuristic = &rows_first;
 	for (int i = 1; i < argc; ++i)

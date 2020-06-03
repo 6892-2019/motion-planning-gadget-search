@@ -137,6 +137,8 @@ unsigned long language_size(automaton::Automaton<2>& a) {
 }
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
+	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
+
 	Heuristic variable_heuristic = nop_heuristic, clause_heuristic = nop_heuristic;
 	const char* dimacs_file = nullptr;
 	for (int i = 1; i < argc; ++i)
