@@ -125,6 +125,11 @@ void random_heuristic(std::vector<Constraint>& constraints) {
 	std::mt19937 rng(random_seed);
 	std::shuffle(constraints.begin(), constraints.end(), rng);
 }
+void random_cols_heuristic(std::vector<Constraint>& constraints) {
+	std::mt19937 rng(random_seed);
+	auto col_begin = std::partition_point(constraints.begin(), constraints.end(), [](const Constraint& c){return c.row != -1;});
+	std::shuffle(col_begin, constraints.end(), rng);
+}
 
 static const std::pair<std::string_view, Heuristic> heuristics[] = {
 	{"rows"sv, &rows_first},
@@ -135,6 +140,7 @@ static const std::pair<std::string_view, Heuristic> heuristics[] = {
 	{"fewest-states"sv, &fewest_states},
 	{"most-states"sv, &most_states},
 	{"random"sv, &random_heuristic},
+	{"random-cols"sv, &random_cols_heuristic},
 };
 
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
