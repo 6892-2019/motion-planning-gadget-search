@@ -143,6 +143,27 @@ static const std::pair<std::string_view, Heuristic> heuristics[] = {
 	{"random-cols"sv, &random_cols_heuristic},
 };
 
+//TODO: copied from sat.cpp; should be Automaton::count
+unsigned long language_size_recurse(automaton::Automaton<2>& a, automaton::Automaton<2>::state_type state,
+		tsl::hopscotch_map<automaton::Automaton<2>::state_type, unsigned long>& memo) {
+	auto x = memo.find(state);
+	if (x != memo.end())
+		return x->second;
+
+	unsigned long sum = 0;
+	for (automaton::Automaton<2>::symbol_type symbol = 0; symbol < 2; ++symbol)
+		if (auto next = a.stepDeterministic(state, symbol))
+			sum += language_size_recurse(a, *next, memo);
+	if (a.accept(state))
+		sum += 1;
+	memo[state] = sum;
+	return sum;
+}
+unsigned long language_size(automaton::Automaton<2>& a) {
+	tsl::hopscotch_map<automaton::Automaton<2>::state_type, unsigned long> memo;
+	return language_size_recurse(a, 0, memo);
+}
+
 int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 	setvbuf(stdout, nullptr, _IOLBF, 0); //line buffering
 
@@ -251,20 +272,20 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 		auto free_memory = std::move(puzzleConstraints[i].automaton);
 	}
 
-	std::vector<std::vector<bool>> solutions;
-	try {
-		accumulator.template enumerate<BooleanAlphabet>([&](auto& v) {solutions.push_back(v);});
-	} catch (std::bad_alloc& ex) {
-		std::cout << ex.what() << std::endl;
-		return 1;
-	}
-	std::cout << solutions.size() << " solutions" << std::endl;
-	for (auto& v : solutions) {
-		for (auto s : v)
-			std::cout << s;
-		std::cout << '\n';
-	}
-	std::cout << std::endl;
-	std::cout << puzzle->solution() << std::endl;
+//	std::vector<std::vector<bool>> solutions;
+//	try {
+//		accumulator.template enumerate<BooleanAlphabet>([&](auto& v) {solutions.push_back(v);});
+//	} catch (std::bad_alloc& ex) {
+//		std::cout << ex.what() << std::endl;
+//		return 1;
+//	}
+	std::cout << language_size(accumulator) << " solutions" << std::endl;
+//	for (auto& v : solutions) {
+//		for (auto s : v)
+//			std::cout << s;
+//		std::cout << '\n';
+//	}
+//	std::cout << std::endl;
+//	std::cout << puzzle->solution() << std::endl;
 	return 0;
 }
