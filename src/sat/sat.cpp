@@ -204,6 +204,6 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True}
 		auto free_memory = std::move(automata[i]);
 	}
 	accumulator.minimize();
-	fmt::print("{}\n", language_size(accumulator));
+	fmt::print("{} solutions\n", language_size(accumulator));
 	return 0;
 }
