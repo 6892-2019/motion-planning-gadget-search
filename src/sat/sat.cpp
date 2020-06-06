@@ -41,8 +41,22 @@ Problem parse_dimacs(const char* filename) {
 	return problem;
 }
 
-using Heuristic = void(*)(vector<vector<int>>& clauses);
+void renumber(vector<vector<int>>& clauses, const vector<unsigned int>& renumbering) {
+	for (vector<int>& c : clauses) {
+		for (unsigned int i = 0; i < c.size(); ++i) {
+			int v = std::abs(c[i]);
+			int r = renumbering[v];
+			if (c[i] < 0)
+				r = -r;
+			c[i] = r;
+		}
+		std::sort(c.begin(), c.end(), [](int a, int b) {
+			return std::abs(a) < std::abs(b);
+		});
+	}
+}
 
+using Heuristic = void(*)(vector<vector<int>>& clauses);
 void nop_heuristic(vector<vector<int>>& clauses) {}
 
 void renumber_popularity(vector<vector<int>>& clauses, bool least) {
@@ -71,18 +85,7 @@ void renumber_popularity(vector<vector<int>>& clauses, bool least) {
 		renumbering[sort[i].second] = i+1;
 	fmt::print("{}\n", renumbering);
 
-	for (vector<int>& c : clauses) {
-		for (unsigned int i = 0; i < c.size(); ++i) {
-			int v = std::abs(c[i]);
-			int r = renumbering[v];
-			if (c[i] < 0)
-				r = -r;
-			c[i] = r;
-		}
-		std::sort(c.begin(), c.end(), [](int a, int b) {
-			return std::abs(a) < std::abs(b);
-		});
-	}
+	renumber(clauses, renumbering);
 }
 void popular(vector<vector<int>>& clauses) {
 	renumber_popularity(clauses, false);
@@ -90,10 +93,24 @@ void popular(vector<vector<int>>& clauses) {
 void antipopular(vector<vector<int>>& clauses) {
 	renumber_popularity(clauses, true);
 }
+void random_variable(vector<vector<int>>& clauses) {
+	vector<unsigned int> renumbering;
+	for (vector<int>& c : clauses)
+		for (int v : c) {
+			v = std::abs(v);
+			if ((unsigned)v >= renumbering.size())
+				renumbering.resize(v+1);
+		}
+	std::iota(renumbering.begin()+1, renumbering.end(), 1);
+	std::mt19937 rng(random_seed);
+	std::shuffle(renumbering.begin()+1, renumbering.end(), rng);
+	renumber(clauses, renumbering);
+}
 
 static const std::pair<std::string_view, Heuristic> variable_heuristics[] = {
 	{"popular"sv, &popular},
 	{"antipopular"sv, &antipopular},
+	{"random"sv, &random_variable},
 };
 
 void sorted_clauses(vector<vector<int>>& clauses) {
@@ -110,10 +127,15 @@ void reverse_sorted_clauses(vector<vector<int>>& clauses) {
 	sorted_clauses(clauses);
 	std::reverse(clauses.begin(), clauses.end());
 }
+void random_clause(vector<vector<int>>& clauses) {
+	std::mt19937 rng(random_seed);
+	std::shuffle(clauses.begin(), clauses.end(), rng);
+}
 
 static const std::pair<std::string_view, Heuristic> clause_heuristics[] = {
 	{"sorted"sv, &sorted_clauses},
 	{"reverse-sorted"sv, &reverse_sorted_clauses},
+	{"random"sv, &random_clause},
 };
 
 unsigned long language_size_recurse(automaton::Automaton<2>& a, automaton::Automaton<2>::state_type state,
