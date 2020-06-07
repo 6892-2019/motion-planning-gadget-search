@@ -14,6 +14,7 @@
         <in>puzzle.cpp</in>
       </df>
       <df name="pathpuzzles">
+        <in>pathpuzzle.hpp</in>
         <in>pathpuzzles.cpp</in>
       </df>
       <df name="sat">
@@ -253,6 +254,8 @@
       <item path="src/pack.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/pack.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="src/pathpuzzles/pathpuzzle.hpp" ex="false" tool="3" flavor2="0">
       </item>
       <item path="src/pathpuzzles/pathpuzzles.cpp" ex="false" tool="1" flavor2="11">
         <ccTool flags="0">
