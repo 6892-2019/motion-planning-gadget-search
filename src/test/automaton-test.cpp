@@ -393,6 +393,16 @@ TEST_CASE("AutomatonTest_Minimize19") {
 TEST_CASE("AutomatonTest_Minimize20") {
 	minimizePreservesLanguage(epsilon<2>());
 }
+TEST_CASE("AutomatonTest_Minimize21") {
+	Automaton<2> a;
+	a.addState();
+	a.addState();
+	a.setAccept(0);
+	a.setAccept(1);
+	a.addTrans(0, 0, 1);
+	auto b = minimizePreservesLanguage(a);
+	CHECK_EQ(b.state_size(), 2);
+}
 
 TEST_CASE("AutomatonTest_CatAltMinimize") {
 	auto a = alt<2>({lit<2>(0), lit<2>(1)});

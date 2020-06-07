@@ -471,9 +471,11 @@ private:
 	void partitionOnCrashing(unsigned int nonfinalIdx) {
 		//Because we didn't totalize, we need to manually partition
 		//crashing vs. non-crashing on each symbol.
-		std::vector<typename decltype(partitions_)::iterator> bounds = {
-			partitions_.begin(), partitions_.begin()+nonfinalIdx, partitions_.end()
-		}, newbounds;
+		std::vector<typename decltype(partitions_)::iterator> bounds, newbounds;
+		bounds.push_back(partitions_.begin());
+		if (nonfinalIdx)
+			bounds.push_back(partitions_.begin()+nonfinalIdx);
+		bounds.push_back(partitions_.end());
 		boost::dynamic_bitset<std::size_t> outgoing(state_size_ * alphabet_size_);
 		automaton::impl::bitset<unsigned int, 16> activeAlphabet;
 		for (const Edge& e : a_.edges) {
