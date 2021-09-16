@@ -8,18 +8,55 @@
 #include "stopwatch.hpp"
 #include "intervals.hpp"
 #include "proj_compare.hpp"
+#include "pop_iterator.hpp"
 #include "transform_reduce.hpp"
 #include "tsl/ordered_set.h"
 #include "task_parallel.hpp"
 #include "ioutils.hpp"
+#include "bounded_queue.hpp"
 #include <fmt/chrono.h>
 #include <functional>
+#include <future>
 
 using std::vector;
 using std::pair;
 using std::uint8_t;
 using std::uint64_t;
 using namespace std::literals::string_view_literals;
+
+namespace {
+//TODO: copied from invert-mode.cpp; see also minimum_size in gadget-encoding.cpp
+unsigned int necessary_bytes(std::size_t x) {
+	unsigned int i = 1;
+	while (x /= 256) ++i;
+	return i;
+}
+
+struct merge_unique_pop_front {
+template<typename Container, class = typename std::enable_if<!std::is_lvalue_reference<Container>::value>::type>
+Container operator()(Container&& left_rref, Container&& right_rref) const {
+	//Ensure memory is freed on return.  Less important because we're popping, but still.
+	Container left(std::move(left_rref)), right(std::move(right_rref));
+	Container result;
+	//TODO: pop_front_iterator would allow just calling the normal merge_unique
+	merge_unique(pop_front_begin(left), pop_front_end(left), pop_front_begin(right), pop_front_end(right), std::back_inserter(result));
+	return result;
+}
+};
+}
+
+struct HighBytePair {
+	HighBytePair() = default;
+	HighBytePair(unsigned char c, std::uint64_t v) : bytes(v | (static_cast<uint64_t>(c) << 56)) {}
+	std::uint64_t value() const {
+		return bytes & 0x00FFFFFFFFFFFFFF;
+	}
+	unsigned char kind() const {
+		return numeric_cast<unsigned char>((bytes & 0xFF00000000000000) >> 56);
+	}
+	std::uint64_t bytes;
+};
+static_assert(std::is_trivial<HighBytePair>::value);
 
 /**
  * SkinnyProv stores just enough information to get the actual edge later.  For
@@ -32,7 +69,7 @@ using namespace std::literals::string_view_literals;
 class SkinnyProv {
 public:
 	SkinnyProv(uint64_t output, uint64_t input, EdgeKind kind) : output_(output),
-			input_(input | (static_cast<uint64_t>(kind) << 56)) {
+			input_(static_cast<unsigned char>(kind), input) {
 		//We should never get this high, but just in case, don't silently get
 		//the wrong result.  (We could use just the highest 3 bits.)
 		if (input > 0x00FFFFFFFFFFFFFF) [[unlikely]]
@@ -46,15 +83,14 @@ public:
 		return output_;
 	}
 	uint64_t input() const {
-		return input_ & 0x00FFFFFFFFFFFFFF;
+		return input_.value();
 	}
 	EdgeKind kind() const {
-		return EdgeKind{numeric_cast<unsigned char>((input_ & 0xFF00000000000000) >> 56)};
+		return EdgeKind{input_.kind()};
 	}
 private:
-	//The EdgeKind is stored in the high byte of input_, because we only check
-	//the input when we've found something.
-	std::uint64_t output_, input_;
+	std::uint64_t output_;
+	HighBytePair input_;
 };
 bool operator<(const SkinnyProv& a, const SkinnyProv& b) {
 	return a.output() < b.output();
@@ -65,6 +101,11 @@ bool operator==(const SkinnyProv& a, const SkinnyProv& b) {
 bool operator<(const SkinnyProv& a, uint64_t b) {
 	return a.output() < b;
 }
+
+//use 1MiB blocks to amortize allocator overhead
+using LargeBlockDequeOpts = boost::container::deque_options<boost::container::block_bytes<1024 * 1024>>::type;
+template<typename T>
+using LargeBlockDeque = boost::container::deque<T, void, LargeBlockDequeOpts>;
 
 using EdgeCache = tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>;
 using DeletedLocationsCache = tsl::hopscotch_map<uint64_t, vector<unsigned int>, farmhash_hash>;
@@ -110,14 +151,358 @@ vector<AnyProv> toposort_provs(const EdgeCache& prov, uint64_t root) {
 	return ret;
 }
 
-SkinnyProv find_sp(const vector<vector<SkinnyProv>>& provs, uint64_t output) {
-	for (const vector<SkinnyProv>& prov : provs) {
-		auto lb = std::lower_bound(prov.begin(), prov.end(), output);
-		if (lb != prov.end() && lb->output() == output)
-			return *lb;
+class ProvStorage {
+private:
+	enum class BlockType : unsigned char {
+		literal, //holds a vector of SkinnyProv
+		//varint-delta coded outputs, followed by fixed-width inputs
+		point_two, point_three, point_four, point_five,
+		//varint-delta interval lists of outputs, followed by fixed-width inputs
+		interval_two, interval_three, interval_four, interval_five,
+	};
+	struct BlockHeader {
+		//The first and one-past-last output of the SkinnyProvs represented by
+		//this block.  first stores the BlockType and second the EnumKind.
+		HighBytePair first_, second_; //first and one-past-last output in block
+		BlockHeader(BlockType type, uint64_t first, uint64_t second, EdgeKind kind) :
+				first_(static_cast<unsigned char>(type), first),
+				second_(static_cast<unsigned char>(kind), second) {}
+		uint64_t first() const {return first_.value();}
+		uint64_t second() const {return second_.value();}
+		BlockType type() const {return BlockType{first_.kind()};}
+		EdgeKind kind() const {return EdgeKind{second_.kind()};}
+	};
+
+	struct LiteralBlock : BlockHeader {
+		LiteralBlock(vector<SkinnyProv>&& provs) :
+				BlockHeader(BlockType::literal, provs.front().output(), provs.back().output()+1, provs.front().kind()),
+				provs_(std::move(provs)) {}
+		LiteralBlock(vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last) :
+				LiteralBlock(vector(first, last)) {}
+		vector<SkinnyProv> provs_;
+		vector<SkinnyProv> decode() const {
+			//This makes an unnecessary copy, but I don't know how to do better,
+			//and we shouldn't have large enough LiteralBlocks for it to matter.
+			return provs_;
+		}
+		pair<std::size_t, std::size_t> size_capacity() const {
+			return {provs_.size() * sizeof(SkinnyProv), provs_.capacity() * sizeof(SkinnyProv) + sizeof(*this)};
+		}
+	};
+
+	struct CompressedBlock : BlockHeader {
+		std::unique_ptr<const std::byte, free_deleter> bytes;
+		unsigned int output_bytes, input_bytes;
+		CompressedBlock(BlockType type, EdgeKind kind, uint64_t firstOutput, uint64_t secondOutput,
+				const dynarray<std::byte>& workspace, unsigned int outputBytes, unsigned int inputBytes) :
+				BlockHeader(type, firstOutput, secondOutput, kind), bytes(),
+				output_bytes(outputBytes), input_bytes(inputBytes) {
+			void* data = std::malloc(outputBytes+inputBytes);
+			if (!data) throw std::bad_alloc();
+			std::memcpy(data, workspace.cbegin(), output_bytes + input_bytes);
+			bytes.reset(reinterpret_cast<std::byte*>(data));
+		}
+		vector<SkinnyProv> decode() const {
+			switch (type()) {
+				case BlockType::point_two:      return decode_point<2>();
+				case BlockType::point_three:    return decode_point<3>();
+				case BlockType::point_four:     return decode_point<4>();
+				case BlockType::point_five:     return decode_point<5>();
+				case BlockType::interval_two:   return decode_interval<2>();
+				case BlockType::interval_three: return decode_interval<3>();
+				case BlockType::interval_four:  return decode_interval<4>();
+				case BlockType::interval_five:  return decode_interval<5>();
+				default:
+					throw std::logic_error(fmt::format("unhandled type {} in CompressedBlock::decode",
+							static_cast<unsigned int>(type())));
+			}
+		}
+		pair<std::size_t, std::size_t> size_capacity() const {
+#ifndef __SANITIZE_ADDRESS__
+			std::size_t capacity_estimate = nallocx(output_bytes + input_bytes, 0);
+#else
+			std::size_t capacity_estimate = output_bytes + input_bytes; //Could try malloc_usable_size?
+#endif
+			return {output_bytes + input_bytes, capacity_estimate + sizeof(*this)};
+		}
+	private:
+		template<unsigned int W>
+		vector<SkinnyProv> decode_point() const {
+			if (unsigned int remainder = input_bytes % W)
+				throw std::logic_error(fmt::format("decode_point<{}> called for type {} but input_bytes {} leaves remainder {}",
+						W, static_cast<unsigned int>(type()), input_bytes, remainder));
+			const EdgeKind kind = this->kind();
+			const std::byte* output_first = bytes.get();
+			const std::byte* output_last = bytes.get() + output_bytes;
+			const std::array<std::byte, W>* input_first = reinterpret_cast<const std::array<std::byte, W>*>(output_last);
+			MAYBE_UNUSED const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
+			vector<SkinnyProv> result;
+			result.reserve(input_bytes / W);
+			uint64_t prev_output = 0;
+			while (output_first != output_last) {
+				assert(input_first != input_last);
+				uint64_t output = upv::read(output_first) + prev_output;
+				assert(first() <= output && output < second());
+				uint64_t input = 0;
+				std::memcpy(&input, input_first->data(), input_first->size());
+				++input_first;
+				result.emplace_back(output, input, kind);
+				prev_output = output;
+			}
+			return result;
+		}
+		template<unsigned int W>
+		vector<SkinnyProv> decode_interval() const {
+			if (unsigned int remainder = input_bytes % W)
+				throw std::logic_error(fmt::format("decode_point<{}> called for type {} but input_bytes {} leaves remainder {}",
+						W, static_cast<unsigned int>(type()), input_bytes, remainder));
+			const EdgeKind kind = this->kind();
+			const std::byte* output_first = bytes.get();
+			const std::byte* output_last = bytes.get() + output_bytes;
+			const std::array<std::byte, W>* input_first = reinterpret_cast<const std::array<std::byte, W>*>(output_last);
+			MAYBE_UNUSED const std::array<std::byte, W>* input_last = input_first + input_bytes / W;
+			vector<SkinnyProv> result;
+			result.reserve(input_bytes / W);
+			uint64_t prev_output = 0;
+			while (output_first != output_last) {
+				uint64_t output_interval_begin = upv::read(output_first) + prev_output;
+				prev_output = output_interval_begin;
+				uint64_t output_interval_end = upv::read(output_first) + prev_output;
+				prev_output = output_interval_end;
+				assert(output_interval_begin < output_interval_end);
+				assert(first() <= output_interval_begin && output_interval_begin < second());
+				assert(first() < output_interval_end && output_interval_end <= second());
+
+				for (uint64_t output = output_interval_begin; output < output_interval_end; ++output, ++input_first) {
+					assert(input_first != input_last);
+					uint64_t input = 0;
+					std::memcpy(&input, input_first->data(), input_first->size());
+					result.emplace_back(output, input, kind);
+				}
+			}
+			return result;
+		}
+	};
+
+	static vector<SkinnyProv> decode(const BlockHeader* header) {
+		if (header->type() == BlockType::literal)
+			return static_cast<const LiteralBlock*>(header)->decode();
+		else
+			return static_cast<const CompressedBlock*>(header)->decode();
 	}
-	throw std::logic_error(fmt::format("could not find SkinnyProv for {}", output));
-}
+
+	static void free(const BlockHeader* header) {
+		if (header->type() == BlockType::literal)
+			delete static_cast<const LiteralBlock*>(header);
+		else
+			delete static_cast<const CompressedBlock*>(header);
+	}
+
+	//This should really be an extra return value from compress, but compress is
+	//pretty complicated already.
+	static pair<std::size_t, std::size_t> size_capacity(const BlockHeader* header) {
+		if (header->type() == BlockType::literal)
+			return static_cast<const LiteralBlock*>(header)->size_capacity();
+		else
+			return static_cast<const CompressedBlock*>(header)->size_capacity();
+	}
+
+	static BlockHeader* compress(vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last,
+			dynarray<std::byte>& workspace) {
+		if (std::distance(first, last) < 100)
+			//Some blocks are just too small to be worth compressing.
+			return new LiteralBlock(first, last);
+
+		//Could be improved with a pointer_to_member_function_iterator and maximal_intervals.
+		interval_accumulator<uint64_t> accum(512);
+		//We don't actually need to know the largest input; we just want to find
+		//the highest bit set in any of the inputs.  Use branchless bitwise or.
+		uint64_t input_bits = 0;
+		uint64_t last_output = 0;
+		for (vector<SkinnyProv>::iterator i = first; i != last; ++i) {
+			last_output = i->output();
+			accum(last_output);
+			input_bits |= i->input();
+		}
+		vector<pair<uint64_t, uint64_t>> intervals = std::move(accum).finish();
+		//Strictly speaking, this condition doesn't imply the varint-delta
+		//interval list is smaller than the point list, but it's close enough.
+		bool write_intervals = intervals.size() * sizeof(intervals.front()) < std::distance(first, last) * sizeof(*first);
+
+		std::byte* end = workspace.begin();
+		if (write_intervals) {
+			uint64_t prev = 0;
+			for (pair<uint64_t, uint64_t> p : intervals) {
+				upv::write(end, p.first - prev);
+				prev = p.first;
+				upv::write(end, p.second - prev);
+				prev = p.second;
+			}
+		} else {
+			uint64_t prev = 0;
+			for (vector<SkinnyProv>::iterator i = first; i != last; ++i) {
+				uint64_t output = i->output();
+				upv::write(end, output - prev);
+				prev = output;
+			}
+		}
+		unsigned int output_bytes = static_cast<unsigned int>(std::distance(workspace.begin(), end));
+
+		unsigned int width = necessary_bytes(input_bits);
+		BlockType type;
+		switch (width) {
+			case 2:
+				write_inputs<2>(end, first, last);
+				type = write_intervals ? BlockType::interval_two : BlockType::point_two;
+				break;
+			case 3:
+				write_inputs<3>(end, first, last);
+				type = write_intervals ? BlockType::interval_three : BlockType::point_three;
+				break;
+			case 4:
+				write_inputs<4>(end, first, last);
+				type = write_intervals ? BlockType::interval_four : BlockType::point_four;
+				break;
+			case 5:
+				write_inputs<5>(end, first, last);
+				type = write_intervals ? BlockType::interval_five : BlockType::point_five;
+				break;
+			default:
+				throw std::logic_error(fmt::format("unhandled width {} in ProvStorage::compress", width));
+		}
+		unsigned int input_bytes = static_cast<unsigned int>(width * std::distance(first, last));
+		assert(workspace.begin() + (input_bytes + output_bytes) == end);
+
+		return new CompressedBlock(type, first->kind(), first->output(), last_output+1,
+				workspace, output_bytes, input_bytes);
+	}
+
+	template<unsigned int W>
+	static void write_inputs(std::byte*& dest, vector<SkinnyProv>::iterator first, vector<SkinnyProv>::iterator last) {
+		for (vector<SkinnyProv>::iterator i = first; i != last; ++i) {
+			uint64_t input = i->input();
+			std::memcpy(dest, &input, W);
+			dest += W;
+		}
+	}
+
+	vector<const BlockHeader*> blocks_;
+	std::size_t size_, capacity_;
+	unsigned int num_threads_;
+public:
+	/**
+	 * ProvSearcher looks up provs from its parent ProvStorage.  It caches the
+	 * decoded blocks for its lifetime.
+	 */
+	class ProvSearcher {
+	public:
+		SkinnyProv operator()(uint64_t output) {
+			for (const BlockHeader* h : parent_->blocks_)
+				if (h->first() <= output && output < h->second()) {
+					auto i = cache_.find(h);
+					if (i == cache_.end()) {
+						cache_[h] = ProvStorage::decode(h);
+						i = cache_.find(h);
+					}
+
+					auto lb = std::lower_bound(i->second.begin(), i->second.end(), output);
+					if (lb != i->second.end() && lb->output() == output)
+						return *lb;
+				}
+			throw std::logic_error(fmt::format("could not find SkinnyProv for {}", output));
+		}
+	private:
+		friend class ProvStorage;
+		ProvSearcher(const ProvStorage* parent) : parent_(parent) {}
+		const ProvStorage* parent_;
+		//TODO: use the prime growth policy or a non-identity pointer hash
+		tsl::hopscotch_map<const BlockHeader*, vector<SkinnyProv>> cache_;
+	};
+
+	ProvStorage(unsigned int num_threads = 1) : size_(0), capacity_(0), num_threads_(num_threads) {}
+	ProvStorage(ProvStorage&& other) = default;
+	ProvStorage& operator=(ProvStorage&& other) = default;
+	~ProvStorage() {
+		for (const BlockHeader* h : blocks_)
+			free(h);
+		blocks_.clear();
+	}
+
+	void ingest(LargeBlockDeque<SkinnyProv>&& provs) {
+		const std::size_t block_size = 8 * 1024 * 1024 / sizeof(SkinnyProv);
+		std::size_t possible_blocks = (provs.size() + (block_size-1)) / block_size;
+		unsigned int num_threads = std::min(num_threads_, numeric_cast<unsigned int>(possible_blocks));
+		assert(num_threads > 0);
+
+		//This use of a raw pointer is exception-unsafe in the case where
+		//reallocating the block list fails.  We're probably screwed in that
+		//case anyway, but we could fix this with std::unique_ptr and a
+		//custom deleter that calls ProvStorage::free to properly free the block.
+		vector<std::future<vector<BlockHeader*>>> futures;
+		bounded_queue<vector<SkinnyProv>> batches(num_threads+1), batch_pool(num_threads+1);
+		for (std::size_t i = 0; i < num_threads; ++i) {
+			vector<SkinnyProv> batch;
+			batch.reserve(block_size);
+			batch_pool.put(std::move(batch));
+		}
+
+		for (std::size_t i = 0; i < num_threads; ++i)
+			futures.push_back(std::async(std::launch::async, [&]() {
+				dynarray<std::byte> workspace(block_size * sizeof(SkinnyProv));
+				vector<BlockHeader*> finished;
+				while (true) {
+					vector<SkinnyProv> batch = batches.take();
+					if (batch.empty())
+						return finished;
+					finished.push_back(compress(batch.begin(), batch.end(), workspace));
+					batch.clear();
+					batch_pool.put(std::move(batch));
+				}
+			}));
+
+		while (!provs.empty()) {
+			std::size_t this_block_size = std::min<std::size_t>(block_size, provs.size());
+			auto batch_end = provs.begin() + this_block_size;
+			vector<SkinnyProv> batch = batch_pool.take();
+			batch.assign(provs.begin(), batch_end);
+			provs.erase(provs.begin(), batch_end);
+			batches.put(std::move(batch));
+		}
+		for (std::size_t i = 0; i < num_threads; ++i) {
+			//Shut down threads by sending empty batches.  They don't go back in
+			//the pool, so this will only block transiently on batches being full.
+			vector<SkinnyProv> empty_batch;
+			batches.put(empty_batch);
+		}
+
+		for (std::size_t i = 0; i < num_threads; ++i) {
+			vector<BlockHeader*> blocks = futures[i].get();
+			for (BlockHeader* block : blocks) {
+				blocks_.push_back(block);
+				pair<uint64_t, uint64_t> sizecap = size_capacity(block);
+				size_ += sizecap.first;
+				capacity_ += sizecap.second;
+			}
+		}
+	}
+
+	ProvSearcher searcher() const {
+		return ProvSearcher(this);
+	}
+
+	/**
+	 * Storage occupied by prov data, not including overheads.
+	 */
+	std::size_t total_size() const {
+		return size_;
+	}
+	/**
+	 * Total storage used, including unused space, pointers, etc.
+	 */
+	std::size_t total_capacity() const {
+		return capacity_ + sizeof(*this) + blocks_.capacity() * sizeof(blocks_.front()) + sizeof(size_) + sizeof(capacity_);
+	}
+};
 
 template<class Edge>
 std::optional<Edge> search_for_edge(lmdb::txn& txn, lmdb::dbi& edges, uint64_t input, uint64_t output) {
@@ -156,8 +541,9 @@ void fill_cache(lmdb::env& env,
 		vector<pair<uint64_t, lmdb::dbi>>& combine_edges, vector<pair<uint64_t, lmdb::dbi>>& combine_skinny_edges,
 		lmdb::dbi& connect_edges, lmdb::dbi& connect_skinny_edges,
 		lmdb::dbi& close_edges, lmdb::dbi& mirror_edges,
-		const vector<pair<uint64_t, uint64_t>>& roots, const vector<vector<SkinnyProv>>& prov,
+		const vector<pair<uint64_t, uint64_t>>& roots, const ProvStorage& prov,
 		EdgeCache& edge_cache, DeletedLocationsCache& delloc, std::string_view db_path, unsigned int threads) {
+	ProvStorage::ProvSearcher searcher = prov.searcher();
 	vector<uint64_t> trace_lhs = interval_inflate(roots.begin(), roots.end());
 	vector<pair<uint64_t, SkinnyProv>> combine_batch;
 	vector<SkinnyProv> connect_batch, close_batch, mirror_batch;
@@ -169,7 +555,7 @@ void fill_cache(lmdb::env& env,
 				//but traces shouldn't get large enough for that to matter.
 				std::find(trace_lhs.begin(), trace_lhs.end(), trace_lhs[i]) != trace_lhs.begin()+i)
 			continue;
-		SkinnyProv p = find_sp(prov, trace_lhs[i]);
+		SkinnyProv p = searcher(trace_lhs[i]);
 		switch (p.kind()) {
 			case EdgeKind::source:
 				continue; //nothing to do; end of this branch of the trace
@@ -512,29 +898,15 @@ struct EdgeVisitor {
 	}
 };
 
-struct merge_unique_vectors {
-template<typename T>
-vector<T> operator()(vector<T>&& left_rref, vector<T>&& right_rref) const {
-	vector<T> left(std::move(left_rref)), right(std::move(right_rref)); //ensure memory is freed on return
-	vector<T> result;
-	//This is an overestimate, but at most by max(left.size(), right.size()),
-	//because we know each vector is already uniqued.  Empirically, this
-	//improved utilization from ~.75 to ~.95 without requiring a big vector copy
-	//(as in shrink_to_fit()).
-	result.reserve(left.size() + right.size());
-	merge_unique(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(result));
-	return result;
-}
-};
-
-vector<pair<uint64_t, uint64_t>> build_output_intervals(const vector<SkinnyProv>& provs, unsigned int num_threads) {
+vector<pair<uint64_t, uint64_t>> build_output_intervals(const LargeBlockDeque<SkinnyProv>& provs, unsigned int num_threads) {
 	vector<pair<std::size_t, std::size_t>> intervalize_tasks;
 	for (std::size_t i = 0; i < provs.size(); i += 30000)
 		intervalize_tasks.emplace_back(i, std::min(i + 30000, provs.size()));
 	return transform_reduce(std::move(intervalize_tasks), num_threads, [&provs](pair<std::size_t, std::size_t> p) {
+		//TODO: could be improved with pointer-to-member-function iterator and maximal_intervals
 		interval_accumulator<uint64_t> accum(512);
-		for (std::size_t i = p.first; i < p.second; ++i)
-			accum(provs[i].output());
+		for (auto i = provs.begin() + p.first, end = provs.begin() + p.second; i != end; ++i)
+			accum(i->output());
 		return std::move(accum).finish();
 	}, [](vector<pair<uint64_t, uint64_t>> left, vector<pair<uint64_t, uint64_t>> right) {
 		return interval_union(left.begin(), left.end(), right.begin(), right.end());
@@ -542,34 +914,34 @@ vector<pair<uint64_t, uint64_t>> build_output_intervals(const vector<SkinnyProv>
 }
 
 template<class Edge>
-pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_edges(
+pair<LargeBlockDeque<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_edges(
 		lmdb::env& env, lmdb::dbi& edge_db, EdgeKind kind, const vector<pair<uint64_t, uint64_t>>& possible,
 		const vector<pair<uint64_t, uint64_t>>& closed, unsigned int num_threads) {
 	auto chunks = interval_chunk(possible.begin(), possible.end(), 10000);
-	vector<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
+	LargeBlockDeque<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		EdgeVisitor visitor = {.kind = kind, .closed = &closed, .followed = {}, .already_added = {}};
 		visit_edges<Edge>(txn, edge_db, chunk, visitor);
 		txn.commit();
 		std::sort(visitor.followed.begin(), visitor.followed.end());
-		return std::move(visitor.followed);
-	}, merge_unique_vectors());
+		return LargeBlockDeque<SkinnyProv>(visitor.followed.begin(), visitor.followed.end());
+	}, merge_unique_pop_front());
 	auto discovered = build_output_intervals(provs, num_threads);
 	return {std::move(provs), std::move(discovered)};
 }
 
-pair<vector<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_skinny_edges(
+pair<LargeBlockDeque<SkinnyProv>, vector<pair<uint64_t, uint64_t>>> discover_through_skinny_edges(
 		lmdb::env& env, lmdb::dbi& edge_db, EdgeKind kind, const vector<pair<uint64_t, uint64_t>>& possible,
 		const vector<pair<uint64_t, uint64_t>>& closed, unsigned int num_threads) {
 	auto chunks = interval_chunk(possible.begin(), possible.end(), 25000);
-	vector<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
+	LargeBlockDeque<SkinnyProv> provs = transform_reduce(std::move(chunks), num_threads, [&](vector<pair<uint64_t, uint64_t>> chunk) {
 		auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 		EdgeVisitor visitor = {.kind = kind, .closed = &closed, .followed = {}, .already_added = {}};
 		visit_skinny_edges(txn, edge_db, chunk, visitor);
 		txn.commit();
 		std::sort(visitor.followed.begin(), visitor.followed.end());
-		return std::move(visitor.followed);
-	}, merge_unique_vectors());
+		return LargeBlockDeque<SkinnyProv>(visitor.followed.begin(), visitor.followed.end());
+	}, merge_unique_pop_front());
 	auto discovered = build_output_intervals(provs, num_threads);
 	return {std::move(provs), std::move(discovered)};
 }
@@ -636,11 +1008,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	TargetStuff target = target_stuff(env);
 	const vector<pair<uint64_t, uint64_t>> possible_combine_rights = find_all_combine_rights(env);
 
-	//Minimal provenance information.  All vectors are sorted.  There's no
-	//correspondence between the various vectors and generations; we're mostly
-	//just avoiding sorting all the data over and over, on the assumption that
-	//we're printing tracebacks infrequently.
-	vector<vector<SkinnyProv>> prov;
+	ProvStorage prov(num_threads);
 	//We store most edges as SkinnyProv, only getting the full edge data when
 	//we're going to print a derivation.
 	EdgeCache edge_cache;
@@ -754,7 +1122,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("close", awaiting_closemirror);
 				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_close, EdgeKind::close, possible, closed, num_threads);
 				if (!provs.empty())
-					prov.push_back(std::move(provs));
+					prov.ingest(std::move(provs));
 				if (!discovered.empty()) //avoid copying if nothing found (especially for close)
 					task_parallel(num_threads,
 							std::bind_front(record_closed, std::cref(discovered)),
@@ -770,7 +1138,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 				vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("mirror", awaiting_closemirror);
 				auto [provs, discovered] = discover_through_edges<SimpleEdge>(env, edges_mirror, EdgeKind::mirror, possible, closed, num_threads);
 				if (!provs.empty())
-					prov.push_back(std::move(provs));
+					prov.ingest(std::move(provs));
 				if (!discovered.empty()) //avoid copying if nothing found (should be uncommon for mirror...)
 					task_parallel(num_threads,
 							std::bind_front(record_closed, std::cref(discovered)),
@@ -805,7 +1173,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 			vector<pair<uint64_t, uint64_t>> possible = discover_whats_possible("connect", awaiting_connect);
 			auto [provs, discovered] = discover_through_skinny_edges(env, edges_skinny_connect, EdgeKind::connect, possible, closed, num_threads);
 			if (!provs.empty())
-				prov.push_back(std::move(provs));
+				prov.ingest(std::move(provs));
 			if (!discovered.empty())
 				task_parallel(num_threads,
 						std::bind_front(record_closed, std::cref(discovered)),
@@ -820,7 +1188,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 						fmt::format("combine-{}", right.first), awaiting_combine);
 				auto [provs, discovered] = discover_through_skinny_edges(env, right.second, EdgeKind::combine, possible, closed, num_threads);
 				if (!provs.empty())
-					prov.push_back(std::move(provs));
+					prov.ingest(std::move(provs));
 				if (!discovered.empty())
 					task_parallel(num_threads,
 							std::bind_front(record_closed, std::cref(discovered)),
@@ -850,11 +1218,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		print_stats_line(awaiting_connect, "connect");
 		print_stats_line(awaiting_combine, "combine");
 
-		std::size_t prov_total_bytes = 0, prov_total_capacity = 0;
-		for (const auto& p : prov) {
-			prov_total_bytes += p.size() * sizeof(p.front());
-			prov_total_capacity += p.capacity() * sizeof(p.front());
-		}
+		std::size_t prov_total_bytes = prov.total_size(), prov_total_capacity = prov.total_capacity();
 		fmt::print("--> provenance: {:6.2f} GiB {:6.2f} GiB {:.2f}\n",
 				((double)prov_total_bytes) / (1024*1024*1024),
 				((double)prov_total_capacity) / (1024*1024*1024),

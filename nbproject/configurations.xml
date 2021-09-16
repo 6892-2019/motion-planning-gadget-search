@@ -27,6 +27,7 @@
         <in>circular_deque-test.cpp</in>
         <in>expr-test.cpp</in>
         <in>intervals-test.cpp</in>
+        <in>pop_iterator-test.cpp</in>
         <in>proj_compare-test.cpp</in>
         <in>regex-test.cpp</in>
         <in>util-test.cpp</in>
@@ -92,6 +93,7 @@
       <in>pack-detail.hpp</in>
       <in>pack.cpp</in>
       <in>pack.hpp</in>
+      <in>pop_iterator.hpp</in>
       <in>precompiled-instantiations.cpp</in>
       <in>stopwatch.cpp</in>
       <in>stopwatch.hpp</in>
@@ -257,6 +259,8 @@
       </item>
       <item path="src/pinning.cpp" ex="false" tool="1" flavor2="0">
       </item>
+      <item path="src/pop_iterator.hpp" ex="false" tool="3" flavor2="0">
+      </item>
       <item path="src/precompiled-instantiations.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/randutils.hpp" ex="false" tool="3" flavor2="0">
@@ -294,6 +298,8 @@
       <item path="src/test/expr-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/intervals-test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="src/test/pop_iterator-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
       <item path="src/test/proj_compare-test.cpp" ex="false" tool="1" flavor2="0">
       </item>
