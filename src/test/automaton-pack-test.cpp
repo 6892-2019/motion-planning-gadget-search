@@ -4,7 +4,7 @@
 #include "pack-detail.hpp"
 #include "automaton-io.hpp"
 #include "util.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 using namespace automaton;
 using state_type = AutomatonBase::state_type;

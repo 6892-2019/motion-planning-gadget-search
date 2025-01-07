@@ -3,7 +3,7 @@
 
 #include "automaton.hpp"
 #include "automaton-regexesque.hpp" //for compare_languages
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 //for custom assertion failure messages
 //I couldn't get the compiler to find an operator<< overload, shrug

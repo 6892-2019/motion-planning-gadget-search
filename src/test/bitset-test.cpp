@@ -1,6 +1,6 @@
 #include "precompiled.hpp"
 #include "bitset.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 using automaton::bitset;
 

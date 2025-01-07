@@ -1,6 +1,6 @@
 #include "precompiled.hpp"
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN //genbuild {'entrypoint': True}
-#include <doctest.h>
+#include <doctest/doctest.h>
 #include "automaton.hpp"
 #include "automaton-regexesque.hpp"
 #include "util.hpp"

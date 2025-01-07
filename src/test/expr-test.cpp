@@ -2,7 +2,7 @@
 #include "expr.hpp"
 #include "automaton.hpp"
 #include "regex.hpp" //for interpret(Expr::const_ptr)
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 using automaton::impl::Expr;
 using automaton::impl::interpret;

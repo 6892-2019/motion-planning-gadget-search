@@ -1,6 +1,6 @@
 #include "precompiled.hpp"
 #include "proj_compare.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 TEST_CASE("ProjLess00") {
 	std::tuple<int> a(0), b(1);

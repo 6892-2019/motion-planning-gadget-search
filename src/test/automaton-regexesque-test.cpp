@@ -2,7 +2,7 @@
 #include "automaton.hpp"
 #include "automaton-regexesque.hpp"
 #include "util.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 using namespace automaton;
 

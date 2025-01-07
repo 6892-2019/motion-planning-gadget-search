@@ -1,6 +1,6 @@
 #include "precompiled.hpp"
 #include "intervals.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 #include <fmt/format.h>
 
 using std::initializer_list;

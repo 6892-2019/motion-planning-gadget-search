@@ -1,6 +1,6 @@
 #include "precompiled.hpp"
 #include "algoutils.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 TEST_CASE("AlgoutilsTest_ApplyReversePermutationSanity") {
 	dynarray<int> foo(5), perm(5);

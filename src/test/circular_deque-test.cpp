@@ -1,6 +1,6 @@
 #include "precompiled.hpp"
 #include "circular_deque.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 using std::swap;
 

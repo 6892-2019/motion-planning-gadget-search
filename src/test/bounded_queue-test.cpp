@@ -1,7 +1,7 @@
 #include "precompiled.hpp"
 #include <future>
 #include "bounded_queue.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 TEST_CASE("BoundedQueueTest_Trivial") {
 	bounded_queue<int> queue(5);

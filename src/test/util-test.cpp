@@ -1,7 +1,7 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
 #include "util.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 using namespace automaton;
 

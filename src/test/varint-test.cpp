@@ -1,6 +1,6 @@
 #include "precompiled.hpp"
 #include "varint.hpp"
-#include <doctest.h>
+#include <doctest/doctest.h>
 
 using std::uint64_t;
 using std::pair;
