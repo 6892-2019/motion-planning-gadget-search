@@ -342,7 +342,7 @@ int invert_index_mode(std::string_view db_path, std::vector<std::string_view>& a
 	}
 
 	lmdb::env env = lmdb::env::create();
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_NORDAHEAD);
 	unsigned int lmdb_max_readers = 0;
@@ -513,7 +513,7 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 	}
 
 	lmdb::env env = lmdb::env::create();
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_NORDAHEAD);
 	DatabaseMetadata meta = read_meta(env);

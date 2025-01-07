@@ -666,7 +666,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 	}
 
 	lmdb::env env = lmdb::env::create(); //TODO: flags?
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str()); //TODO: flags?
 	lmdb::dbi gadget_hashtable, gadget_index, names_db, completions, close_edges, mirror_edges;

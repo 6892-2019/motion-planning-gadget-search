@@ -127,7 +127,7 @@ int dump_gadget_mode(std::string_view db_path, vector<std::string_view>& gadget_
 	GadgetSet gadget_set = parse_gid_specs(gadget_spec);
 
 	lmdb::env env = lmdb::env::create();
-	env.set_mapsize(1UL * 1024 * 1024 * 1024 * 1024);
+	env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	env.set_max_dbs(64);
 	env.open(std::string(db_path).c_str(), MDB_NORDAHEAD);
 

@@ -9,6 +9,8 @@ void jemalloc_tuning();
 int sync_mode(std::string_view db_path, const vector<std::string_view>& files);
 //defined in dump-gadget-mode.cpp
 int dump_gadget_mode(std::string_view db_path, vector<std::string_view>& gadget_spec);
+//defined in scan-mode.cpp
+int scan_mode(std::string_view db_path, vector<std::string_view>& args);
 //defined in incoming-edges-mode.cpp
 int incoming_edges_mode(std::string_view db_path, const vector<std::string_view>& gadget_spec);
 //defined in invert-mode.cpp
@@ -54,6 +56,8 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		return sync_mode(db_path, positionals);
 	else if (mode == "dump-gadget"sv || mode == "dump-gadgets"sv)
 		return dump_gadget_mode(db_path, positionals);
+	else if (mode == "scan"sv)
+		return scan_mode(db_path, positionals);
 	else if (mode == "incoming-edges"sv)
 		return incoming_edges_mode(db_path, positionals);
 	else if (mode == "invert-index"sv)
