@@ -2,8 +2,8 @@
 #include <array>
 #include <vector>
 #include <boost/circular_buffer.hpp>
-#include <hopscotch/hopscotch_set.h>
-#include <hopscotch/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
+#include <tsl/hopscotch_map.h>
 #include <string>
 #include <string_view>
 #include <tuple>

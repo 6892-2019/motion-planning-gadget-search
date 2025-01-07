@@ -15,7 +15,6 @@
 #include "stringutils.hpp"
 #include "varint.hpp"
 #include "lmdb++.h"
-#include "hopscotch/hopscotch_map.h"
 #include "proj_compare.hpp"
 #include "bounded_queue.hpp"
 #include "transform_reduce.hpp"

@@ -4,7 +4,6 @@
 #include "../gadget-set.hpp"
 #include "gadget-encoding.hpp"
 #include "proj_compare.hpp"
-#include <hopscotch/hopscotch_map.h>
 #include <yaml-cpp/yaml.h>
 
 using std::vector;

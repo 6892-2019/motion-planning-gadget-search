@@ -3,7 +3,6 @@
 #include "../anyprov.hpp"
 #include "intervals.hpp"
 #include "stringutils.hpp"
-#include "hopscotch/hopscotch_set.h"
 
 using std::vector;
 using std::uint64_t;

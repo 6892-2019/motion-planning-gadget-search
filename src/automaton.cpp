@@ -1,7 +1,6 @@
 #include "precompiled.hpp"
 #include "automaton.hpp"
 #include "automaton-io.hpp"
-#include "hopscotch/hopscotch_map.h"
 #include <sparsehash/dense_hash_set>
 #include <jemalloc/jemalloc.h>
 
