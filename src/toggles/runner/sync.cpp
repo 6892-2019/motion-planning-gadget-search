@@ -7,8 +7,8 @@
 #include "gadget-encoding.hpp"
 #include "selsert-gadget-by-data.hpp"
 #include "proj_compare.hpp"
-#include "tsl/ordered_set.h"
-#include "tsl/ordered_map.h"
+#include <tsl/ordered_set.h>
+#include <tsl/ordered_map.h>
 #include "lmdb++.h"
 #include "randutils.hpp"
 #include "stringutils.hpp"
@@ -725,10 +725,10 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 	}
 
 	std::size_t canonicals_size = canonicals.size();
-	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, std::move(canonicals).values_container());
+	auto selsert_result = selsert_gadget_by_data(env, gadget_hashtable, gadget_index, canonicals.release());
 	//Punning a bit on this vector: in the map, it's indices into canonicals,
 	//but we're about to remap it to gadget ids.
-	std::deque<pair<std::string, std::vector<uint64_t>>> sorted_names = std::move(naming).values_container();
+	std::deque<pair<std::string, std::vector<uint64_t>>> sorted_names = naming.release();
 	for (auto& p : sorted_names) {
 		for (std::size_t i = 0; i < p.second.size(); ++i)
 			p.second[i] = selsert_result.local_to_global[p.second[i]];

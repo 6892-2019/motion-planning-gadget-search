@@ -9,7 +9,7 @@
 #define INTERVALS_HPP
 
 #include "farmhash-util.hpp"
-#include "tsl/ordered_map.h"
+#include <tsl/ordered_map.h>
 #include <vector>
 #include <utility>
 #include <cassert>
@@ -452,7 +452,7 @@ std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>> interval_ag
 			}
 		}
 	}
-	return std::move(result).values_container();
+	return result.release();
 }
 
 #endif /* INTERVALS_HPP */

@@ -8,7 +8,7 @@
 #include "transform_reduce.hpp"
 #include "stringutils.hpp"
 #include "proj_compare.hpp"
-#include "tsl/ordered_set.h"
+#include <tsl/ordered_set.h>
 #include <deque>
 #include <ctime>
 #include <fcntl.h> //for fallocate
@@ -611,7 +611,7 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 		}
 	}
 
-	std::deque<uint64_t> visited = std::move(closed).values_container();
+	std::deque<uint64_t> visited = closed.release();
 	std::sort(visited.begin(), visited.end());
 	std::array<std::byte, 4096> buf;
 	std::byte* p = buf.data();

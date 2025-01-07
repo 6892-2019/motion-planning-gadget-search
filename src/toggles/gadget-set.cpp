@@ -2,7 +2,7 @@
 #include "gadget-set.hpp"
 #include "select-by-id.hpp"
 #include "stringutils.hpp"
-#include "tsl/ordered_set.h"
+#include <tsl/ordered_set.h>
 #include <regex>
 
 using std::vector;
@@ -90,7 +90,7 @@ std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, lmdb::dbi&
 	}
 
 	txn.commit();
-	vector<uint64_t> ret = std::move(set).values_container();
+	vector<uint64_t> ret = set.release();
 	std::sort(ret.begin(), ret.end());
 	return ret;
 }

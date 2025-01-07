@@ -6,7 +6,7 @@
 #include "gadget-encoding.hpp"
 #include "provenance.hpp"
 #include "farmhash-util.hpp"
-#include "tsl/ordered_set.h"
+#include <tsl/ordered_set.h>
 
 template<class Provenance>
 struct Finisher {

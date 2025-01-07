@@ -1064,7 +1064,7 @@ DatabaseOperationStatistics do_combine_db(vector<pair<uint64_t, uint64_t>> left_
 	Finisher<CombineProvenance> outputs = operate_combine(env, gadget_hashtable, gadget_index,
 			std::move(left_intervals), std::move(right_gids), precision, max_left_states);
 	return commit_combine_result_skinny(env, gadget_hashtable, gadget_index, edge_tables, completions,
-			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
+			outputs.rows_.release(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
 DatabaseOperationStatistics do_combine_db_full(vector<pair<uint64_t, uint64_t>> left_intervals,
@@ -1101,7 +1101,7 @@ DatabaseOperationStatistics do_combine_db_full(vector<pair<uint64_t, uint64_t>> 
 	Finisher<CombineProvenance> outputs = operate_combine(env, gadget_hashtable, gadget_index,
 			std::move(left_intervals), std::move(right_gids), precision, max_left_states);
 	return commit_combine_result_full(env, gadget_hashtable, gadget_index, edge_tables, completions,
-			std::move(outputs.rows_).values_container(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
+			outputs.rows_.release(), std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
 FirsthalfStatistics do_combine_db_firsthalf(vector<pair<uint64_t, uint64_t>> left_intervals,
@@ -1123,7 +1123,7 @@ FirsthalfStatistics do_combine_db_firsthalf(vector<pair<uint64_t, uint64_t>> lef
 			std::move(left_intervals), std::move(right_gids), precision, max_left_states);
 
 	DatabaseMetadata meta = read_meta(env);
-	return write_firsthalf(meta.id, EdgeKind::combine, std::move(outputs.rows_).values_container(),
+	return write_firsthalf(meta.id, EdgeKind::combine, outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
@@ -1262,7 +1262,7 @@ DatabaseOperationStatistics do_connect_db(vector<pair<uint64_t, uint64_t>> input
 
 	Finisher<ConnectProvenance> outputs = operate_connect(env, gadget_hashtable, gadget_index, input_intervals, max_states);
 	return commit_connect_result_skinny(env, gadget_hashtable, gadget_index, connect_edges, completions,
-			std::move(input_intervals), std::move(outputs.rows_).values_container(),
+			std::move(input_intervals), outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
@@ -1283,7 +1283,7 @@ DatabaseOperationStatistics do_connect_db_full(vector<pair<uint64_t, uint64_t>> 
 
 	Finisher<ConnectProvenance> outputs = operate_connect(env, gadget_hashtable, gadget_index, input_intervals, max_states);
 	return commit_connect_result_full(env, gadget_hashtable, gadget_index, connect_edges, completions,
-			std::move(input_intervals), std::move(outputs.rows_).values_container(),
+			std::move(input_intervals), outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
@@ -1304,7 +1304,7 @@ FirsthalfStatistics do_connect_db_firsthalf(vector<pair<uint64_t, uint64_t>> inp
 	Finisher<ConnectProvenance> outputs = operate_connect(env, gadget_hashtable, gadget_index, input_intervals, max_states);
 
 	DatabaseMetadata meta = read_meta(env);
-	return write_firsthalf(meta.id, EdgeKind::connect, std::move(outputs.rows_).values_container(),
+	return write_firsthalf(meta.id, EdgeKind::connect, outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
@@ -1381,7 +1381,7 @@ DatabaseOperationStatistics do_close_db0(vector<pair<uint64_t, uint64_t>> input_
 			env, gadget_hashtable, gadget_index, input_intervals);
 	Finisher<SimpleProvenance> outputs = do_close(std::move(inputs));
 	return commit_close_result(env, gadget_hashtable, gadget_index, close_edges, completions,
-			std::move(input_intervals), std::move(outputs.rows_).values_container(),
+			std::move(input_intervals), outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
@@ -1412,7 +1412,7 @@ FirsthalfStatistics do_close_db_firsthalf(vector<pair<uint64_t, uint64_t>> input
 	DatabaseMetadata meta = read_meta(env);
 	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(env, input_intervals);
 	Finisher<SimpleProvenance> outputs = do_close(std::move(inputs));
-	return write_firsthalf(meta.id, EdgeKind::close, std::move(outputs.rows_).values_container(),
+	return write_firsthalf(meta.id, EdgeKind::close, outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
@@ -1439,7 +1439,7 @@ DatabaseOperationStatistics do_mirror_db0(vector<pair<uint64_t, uint64_t>> input
 			env, gadget_hashtable, gadget_index, input_intervals);
 	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
 	return commit_mirror_result(env, gadget_hashtable, gadget_index, mirror_edges, completions,
-			std::move(input_intervals), std::move(outputs.rows_).values_container(),
+			std::move(input_intervals), outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_);
 }
 
@@ -1470,7 +1470,7 @@ FirsthalfStatistics do_mirror_db_firsthalf(vector<pair<uint64_t, uint64_t>> inpu
 	DatabaseMetadata meta = read_meta(env);
 	vector<pair<uint64_t, vector<std::byte>>> inputs = select_gadget_id_to_data(env, input_intervals);
 	Finisher<SimpleProvenance> outputs = do_mirror(std::move(inputs));
-	return write_firsthalf(meta.id, EdgeKind::mirror, std::move(outputs.rows_).values_container(),
+	return write_firsthalf(meta.id, EdgeKind::mirror, outputs.rows_.release(),
 			std::move(outputs.prov_), outputs.pruned_, outputs.skipped_, std::move(input_intervals));
 }
 
