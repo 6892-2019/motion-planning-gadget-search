@@ -109,7 +109,7 @@ struct formatter<CombineEdge> {
 	template<typename ParseContext>
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
-	auto format(const CombineEdge& e, FormatContext& ctx) {
+	auto format(const CombineEdge& e, FormatContext& ctx) const {
 		return format_to(ctx.out(), "[{}, {}, {}, {}, {}]",
 				e.output, e.splice, e.rotation, e.connectPoint, e.canonicalizePermutation);
 	}
@@ -120,7 +120,7 @@ struct formatter<ConnectEdge> {
 	template<typename ParseContext>
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
-	auto format(const ConnectEdge& e, FormatContext& ctx) {
+	auto format(const ConnectEdge& e, FormatContext& ctx) const {
 		return format_to(ctx.out(), "[{}, {}, {}]",
 				e.output, e.connectPoint, e.canonicalizePermutation);
 	}
@@ -131,7 +131,7 @@ struct formatter<SimpleEdge> {
 	template<typename ParseContext>
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
-	auto format(const SimpleEdge& e, FormatContext& ctx) {
+	auto format(const SimpleEdge& e, FormatContext& ctx) const {
 		return format_to(ctx.out(), "[{}, {}]", e.output, e.canonicalizePermutation);
 	}
 };

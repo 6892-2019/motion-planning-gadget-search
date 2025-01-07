@@ -56,7 +56,7 @@ vector<pair<uint64_t, uint64_t>> write_interval_list_union(
 			result.size() * sizeof(pair<uint64_t, uint64_t>));
 	if (!database.put(txn, key, value))
 		throw std::logic_error(fmt::format("can't happen? write_interval_list_union db {} key {} with {} intervals ({} bytes)",
-				key, result.size(), value.size()));
+				database.handle(), key, result.size(), value.size()));
 	//We may as well return this given we computed it.
 	return result;
 }

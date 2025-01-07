@@ -1157,7 +1157,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 		if (strchr(argv[i], ' ')) //if you put a tab in an arg, whatever
 			fmt::print("'{}'", argv[i]);
 		else
-			fmt::print(argv[i]);
+			fmt::print("{}", argv[i]);
 	}
 	fmt::print("\n");
 

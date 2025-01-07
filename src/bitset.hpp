@@ -455,7 +455,7 @@ struct formatter<automaton::bitset<N>> {
 		} else if (*it == '#') {
 			it++;
 			if (it == end)
-				ctx.on_error("bitset # modifier without format specifier");
+				report_error("bitset # modifier without format specifier");
 			if (*it == 'b') {
 				it++;
 				kind = zero_bit_first;
@@ -463,25 +463,28 @@ struct formatter<automaton::bitset<N>> {
 				it++;
 				kind = indices_bracket;
 			} else
-				ctx.on_error("bitset # modifier followed by bad character");
+				report_error("bitset # modifier followed by bad character");
 		} else
-			ctx.on_error("bad bitset format string"); //there were characters, but we don't recognize them
+			report_error("bad bitset format string"); //there were characters, but we don't recognize them
 		return it;
 	}
 
 	template<typename OutputIterator>
-	auto format_indices(const automaton::bitset<N> b, OutputIterator out) {
-		const char* format_str = "{}";
-		for (decltype(b.capacity()) i = 0; i < b.capacity(); ++i)
+	auto format_indices(const automaton::bitset<N> b, OutputIterator out) const {
+		decltype(b.capacity()) i = 0;
+		for (; i < b.capacity(); ++i)
 			if (b[i]) {
-				out = format_to(out, format_str, i);
-				format_str = ", {}";
+				out = format_to(out, "{}", i);
+				break;
 			}
+		for (++i; i < b.capacity(); ++i)
+			if (b[i])
+				out = format_to(out, ", {}", i);
 		return out;
 	}
 
 	template<typename FormatContext>
-	auto format(const automaton::bitset<N> b, FormatContext& ctx) {
+	auto format(const automaton::bitset<N> b, FormatContext& ctx) const {
 		auto out = ctx.out();
 		switch (kind) {
 			case zero_bit_first:

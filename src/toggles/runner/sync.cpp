@@ -448,7 +448,7 @@ public:
 		std::string key = alias_iter_->get_string();
 		alias_iter_->move_to_value();
 		if (!alias_iter_->is_string())
-			throw std::runtime_error(fmt::format("in {}, alias {} is type {} (not string)", filename_, key));
+			throw std::runtime_error(fmt::format("in {}, alias {} is type {} (not string)", filename_, key, alias_iter_->get_type()));
 		std::string value = alias_iter_->get_string();
 
 		if (!alias_iter_->next())

@@ -27,7 +27,7 @@ inline std::string_view name_for_kind(EdgeKind kind) {
 template<>
 struct fmt::formatter<EdgeKind> : formatter<string_view> {
 	template<typename FormatContext>
-	auto format(const EdgeKind kind, FormatContext& ctx) {
+	auto format(const EdgeKind kind, FormatContext& ctx) const {
 		return fmt::formatter<string_view>::format(name_for_kind(kind), ctx);
 	}
 };
@@ -142,7 +142,7 @@ struct fmt::formatter<AnyProv> {
 	template<typename ParseContext>
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
-	auto format(const AnyProv& p, FormatContext& ctx) {
+	auto format(const AnyProv& p, FormatContext& ctx) const {
 		switch (p.kind()) {
 			case EdgeKind::combine:
 				return fmt::format_to(ctx.out(), "{} = combine {} splice {:d} with {} rotate {:d} connect at {:d} @{:d}",

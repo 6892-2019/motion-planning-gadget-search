@@ -95,8 +95,8 @@ simple_buffer dispatch(msgpack::object_handle hcmd,
 	}
 	if (arg_array.type != msgpack::type::ARRAY)
 		return pack_error(seq_no,
-				fmt::format("argument for command '{}' not an array, actually a {}",
-				command, arg_array.type));
+				fmt::format("argument for command '{}' not an array, actually a {:x}",
+				command, static_cast<unsigned int>(arg_array.type)));
 
 	handler_ptr handler = nullptr;
 	for (auto [name, h] : make_range_for_pair(handlers_begin, handlers_end))
@@ -138,7 +138,7 @@ Response unpack_response(const simple_buffer& buf) {
 Response unpack_response(const std::byte* data, std::size_t len) {
 	msgpack::object_handle obj = msgpack::unpack(reinterpret_cast<const char*>(data), len);
 	if (obj->type != msgpack::type::ARRAY)
-		throw std::runtime_error(fmt::format("when unpacking response, expected array but got {}", obj->type));
+		throw std::runtime_error(fmt::format("when unpacking response, expected array but got {:x}", static_cast<unsigned int>(obj->type)));
 	if (obj->via.array.size != 4)
 		throw std::runtime_error(fmt::format("when unpacking response, array had unexpected size {}", obj->via.array.size));
 	auto resp = obj->as<std::tuple<std::uint8_t, std::uint32_t, msgpack::object, msgpack::object>>();
@@ -150,11 +150,14 @@ Response unpack_response(const std::byte* data, std::size_t len) {
 		//The error message object should be a string, so treat that case specially.
 		if (std::get<2>(resp).type == msgpack::type::STR) {
 			std::string_view error_str(std::get<2>(resp).via.str.ptr, std::get<2>(resp).via.str.size);
-			throw std::runtime_error(fmt::format(R"(when unpacking response with seqno {}, both error and return value were present; error "{}", return value type {})",
-					std::get<1>(resp), error_str, std::get<3>(resp).type));
+			throw std::runtime_error(fmt::format(R"(when unpacking response with seqno {}, both error and return value were present; error "{}", return value type {:x})",
+					std::get<1>(resp), error_str,
+					static_cast<unsigned int>(std::get<3>(resp).type)));
 		} else
-			throw std::runtime_error(fmt::format(R"(when unpacking response with seqno {}, both error and return value were present; error type {}, return value type {})",
-					std::get<1>(resp), std::get<2>(resp).type, std::get<3>(resp).type));
+			throw std::runtime_error(fmt::format(R"(when unpacking response with seqno {}, both error and return value were present; error type {:x}, return value type {:x})",
+					std::get<1>(resp),
+					static_cast<unsigned int>(std::get<2>(resp).type),
+					static_cast<unsigned int>(std::get<3>(resp).type)));
 
 	return {std::get<1>(resp), std::get<2>(resp), std::get<3>(resp), std::move(obj.zone())};
 }
@@ -163,6 +166,6 @@ std::logic_error Response::response_was_error(const char* target_typename) const
 	if (error_.type == msgpack::type::STR)
 		return std::logic_error(fmt::format("tried to convert result to {}, but response {} was an error: {}",
 				target_typename, seq_no_, std::string_view(error_.via.str.ptr, error_.via.str.size)));
-	return std::logic_error(fmt::format("tried to convert result to {}, but response {} was an error of type {}",
-				target_typename, seq_no_, error_.type));
+	return std::logic_error(fmt::format("tried to convert result to {}, but response {} was an error of type {:x}",
+				target_typename, seq_no_, static_cast<unsigned int>(error_.type)));
 }

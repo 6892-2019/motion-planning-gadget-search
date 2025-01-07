@@ -117,7 +117,7 @@ struct formatter<encoding::GadgetEdge> {
 	template<typename ParseContext>
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
-	auto format(const encoding::GadgetEdge& e, FormatContext& ctx) {
+	auto format(const encoding::GadgetEdge& e, FormatContext& ctx) const {
 		return format_to(ctx.out(), "[{}, {}, {}, {}]", e.start, e.from, e.to, e.end);
 	}
 };
@@ -127,7 +127,7 @@ struct formatter<encoding::Stats> {
 	template<typename ParseContext>
 	constexpr auto parse(ParseContext& ctx) {return ctx.begin();}
 	template<typename FormatContext>
-	auto format(const encoding::Stats& s, FormatContext& ctx) {
+	auto format(const encoding::Stats& s, FormatContext& ctx) const {
 		if (s.components == 1)
 			return format_to(ctx.out(), "{}l{}s{}u{}d",
 					s.locations, s.states, s.undirected_edges, s.directed_edges);

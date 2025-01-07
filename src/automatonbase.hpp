@@ -435,7 +435,7 @@ namespace fmt {
 template<>
 struct formatter<automaton::OptimizeKind> : formatter<string_view> {
 	template<typename FormatContext>
-	auto format(automaton::OptimizeKind k, FormatContext& ctx) {
+	auto format(automaton::OptimizeKind k, FormatContext& ctx) const {
 		string_view name = "(unknown OptimizeKind)"; //I guess we should jam the numeric value in here?
 		switch (k) {
 			case automaton::OptimizeKind::RIGHT: name = "RIGHT"; break;

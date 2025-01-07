@@ -19,7 +19,7 @@ inline bool operator<(PredicateKind a, PredicateKind b) {
 template<>
 struct fmt::formatter<PredicateKind> : formatter<string_view> {
 	template<typename FormatContext>
-	auto format(const PredicateKind kind, FormatContext& ctx) {
+	auto format(const PredicateKind kind, FormatContext& ctx) const {
 		string_view name;
 		switch (kind) {
 			case PredicateKind::locations: name = "locations"; break;

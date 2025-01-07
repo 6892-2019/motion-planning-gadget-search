@@ -283,7 +283,7 @@ bool update_SL_predicates_commit(lmdb::env& env, lmdb::dbi& predicates, uint64_t
 		auto commit_stuff = [&](vector<pair<unsigned int, vector<pair<uint64_t, uint64_t>>>> stuff,
 				const char* key_format_string) {
 			for (pair<unsigned int, vector<pair<uint64_t, uint64_t>>>& p : stuff) {
-				std::string real_key = fmt::format(key_format_string, p.first);
+				std::string real_key = fmt::format(fmt::runtime(key_format_string), p.first);
 				std::string_view key = real_key;
 				//If we're committing a new state predicate, the key may not exist.
 				if (cur.get(key, value, MDB_SET)) {
