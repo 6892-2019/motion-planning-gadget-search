@@ -13,7 +13,7 @@ using encoding::GadgetEdge;
 using namespace std::literals::string_view_literals;
 
 auto invert_names(lmdb::env& env, lmdb::dbi& names) {
-	tsl::hopscotch_map<uint64_t, vector<std::string>, farmhash_hash> singletons, groups;
+	tsl::hopscotch_map<uint64_t, vector<std::string>, object_hash> singletons, groups;
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 	lmdb::cursor cur = lmdb::cursor::open(txn, names);
 	std::string_view key, value;

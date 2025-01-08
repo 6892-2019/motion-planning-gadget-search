@@ -49,7 +49,7 @@ vector<ProposedInsert> hash_and_move(vector<vector<std::byte>>&& gadgets) {
 	vector<ProposedInsert> ret;
 	ret.reserve(gadgets.size());
 	for (std::size_t i = 0; i < gadgets.size(); ++i) {
-		std::size_t hash = farmhash::Fingerprint64(gadgets[i]);
+		std::size_t hash = contig_range_hash()(gadgets[i]);
 		ret.push_back({numeric_cast<unsigned int>(i), hash, std::move(gadgets[i])}); //stats initialized later for survivors
 	}
 	vector<vector<std::byte>> ensure_memory_is_freed(std::move(gadgets));

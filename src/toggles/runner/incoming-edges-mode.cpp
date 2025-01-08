@@ -57,7 +57,7 @@ int incoming_edges_mode(std::string_view db_path, const vector<std::string_view>
 	}
 
 	vector<uint64_t> all_ids = collect_initial_gadget_set(env, gadget_hashtable, gadget_index, names_db, gadget_set);
-	tsl::hopscotch_set<uint64_t, farmhash_hash> targets(all_ids.begin(), all_ids.end());
+	tsl::hopscotch_set<uint64_t, object_hash> targets(all_ids.begin(), all_ids.end());
 	std::vector<AnyProv> results;
 	std::vector<std::string> skinny_results;
 	vector<pair<uint64_t, uint64_t>> every_gadget_ever = {{1, std::numeric_limits<uint64_t>::max()}};

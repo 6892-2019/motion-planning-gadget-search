@@ -60,7 +60,7 @@ std::vector<std::uint64_t> collect_initial_gadget_set(lmdb::env& env, lmdb::dbi&
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 	uint64_t max_id = get_current_max_gadget_id(txn, gadget_index);
 	//vector_ordered_set
-	tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> set;
+	tsl::ordered_set<uint64_t, object_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> set;
 
 	for (uint64_t i : gs.ids) {
 		if (i < 1 || i > max_id)

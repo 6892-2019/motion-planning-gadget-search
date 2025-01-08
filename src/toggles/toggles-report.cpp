@@ -66,12 +66,12 @@ bool operator<(const SkinnyProv& a, uint64_t b) {
 	return a.output() < b;
 }
 
-using EdgeCache = tsl::hopscotch_map<uint64_t, AnyProv, farmhash_hash>;
-using DeletedLocationsCache = tsl::hopscotch_map<uint64_t, vector<unsigned int>, farmhash_hash>;
+using EdgeCache = tsl::hopscotch_map<uint64_t, AnyProv, object_hash>;
+using DeletedLocationsCache = tsl::hopscotch_map<uint64_t, vector<unsigned int>, object_hash>;
 
 vector<AnyProv> toposort_provs(const EdgeCache& prov, uint64_t root) {
-	tsl::hopscotch_map<uint64_t, uint64_t, farmhash_hash> needs;
-	tsl::hopscotch_map<uint64_t, vector<uint64_t>, farmhash_hash> releases;
+	tsl::hopscotch_map<uint64_t, uint64_t, object_hash> needs;
+	tsl::hopscotch_map<uint64_t, vector<uint64_t>, object_hash> releases;
 	vector<uint64_t> stack;
 	stack.push_back(root);
 	while (!stack.empty()) {
@@ -390,7 +390,7 @@ const std::string_view preferred_names[] = {
 struct TargetStuff {
 	vector<pair<uint64_t, uint64_t>> intervals;
 	EdgeCache edge_cache;
-	tsl::hopscotch_map<uint64_t, vector<std::string>, farmhash_hash> inv_names;
+	tsl::hopscotch_map<uint64_t, vector<std::string>, object_hash> inv_names;
 };
 
 TargetStuff target_stuff(lmdb::env& env) {
@@ -401,7 +401,7 @@ TargetStuff target_stuff(lmdb::env& env) {
 	EdgeCache edge_cache;
 	//We'll have many repeated strings we could try to share, maybe by indices
 	//into another vector?
-	tsl::hopscotch_map<uint64_t, vector<std::string>, farmhash_hash> inv_names;
+	tsl::hopscotch_map<uint64_t, vector<std::string>, object_hash> inv_names;
 
 	auto txn = lmdb::txn::begin(env, nullptr, MDB_RDONLY);
 	lmdb::dbi names = lmdb::dbi::open(txn, "names");
@@ -500,7 +500,7 @@ struct EdgeVisitor {
 	vector<SkinnyProv> followed;
 	//TODO: don't care if this is ordered_set or some other set
 	//vector_ordered_set (could use deque here, I guess)
-	tsl::ordered_set<uint64_t, farmhash_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
+	tsl::ordered_set<uint64_t, object_hash, std::equal_to<uint64_t>, std::allocator<uint64_t>, std::vector<uint64_t>> already_added;
 	template<class Edge>
 	VisitEdgeResult operator()(uint64_t input, const Edge& e) {
 		return (*this)(input, e.output);

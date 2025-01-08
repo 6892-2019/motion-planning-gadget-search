@@ -8,11 +8,11 @@
 #ifndef BITSET_HPP
 #define BITSET_HPP
 
+#include "hashutils.hpp"
 #include <iostream>
 #include <cassert>
 #include <bit>
 #include <boost/integer.hpp>
-#include <farmhash/farmhash.h>
 
 namespace automaton {
 namespace impl {
@@ -424,7 +424,7 @@ namespace std {
 template<unsigned int N>
 struct hash<automaton::bitset<N>> {
 	size_t operator()(const automaton::bitset<N>& b) const {
-		return farmhash::Fingerprint(b.bits_);
+		return object_hash()(b.bits_);
 	}
 };
 }

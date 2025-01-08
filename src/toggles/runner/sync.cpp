@@ -493,7 +493,7 @@ int sync_mode(std::string_view db_path, const vector<std::string_view>& position
 			files.push_back(positionals[i]);
 
 	//vector_ordered_set
-	tsl::ordered_set<vector<std::byte>, farmhash_hash, std::equal_to<vector<std::byte>>,
+	tsl::ordered_set<vector<std::byte>, contig_range_hash, std::equal_to<vector<std::byte>>,
 			std::allocator<vector<std::byte>>, std::vector<vector<std::byte>>> canonicals;
 	auto register_gadget = [&](vector<std::byte>&& gadget) {
 		auto it = canonicals.insert(std::move(gadget)).first;

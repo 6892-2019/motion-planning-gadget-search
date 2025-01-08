@@ -5,14 +5,13 @@
 #include "canonicalize.hpp"
 #include "gadget-encoding.hpp"
 #include "provenance.hpp"
-#include "farmhash-util.hpp"
 #include <tsl/ordered_set.h>
 
 template<class Provenance>
 struct Finisher {
 	//I'm assuming we aren't generating so many rows as to need the PageHolder
 	//machinery to reduce fragmentation.
-	tsl::ordered_set<std::vector<std::byte>, farmhash_hash, std::equal_to<std::vector<std::byte>>,
+	tsl::ordered_set<std::vector<std::byte>, contig_range_hash, std::equal_to<std::vector<std::byte>>,
 			std::allocator<std::vector<std::byte>>, std::vector<std::vector<std::byte>>> rows_;
 	std::vector<Provenance> prov_;
 	std::size_t pruned_ = 0, skipped_ = 0;

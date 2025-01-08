@@ -9,7 +9,7 @@
 #define GADGET_ENCODING_HPP
 
 #include "automaton.hpp"
-#include "farmhash/farmhash.h"
+#include "hashutils.hpp"
 #include <vector>
 #include <cstddef>
 #include <memory>
@@ -101,12 +101,7 @@ namespace std {
 template<>
 struct hash<encoding::GadgetEdge> {
 	size_t operator()(const encoding::GadgetEdge& e) const {
-		std::array<char, 4 * sizeof(unsigned int)> a;
-		std::memcpy(&a[0], &e.start, sizeof(e.start));
-		std::memcpy(&a[4], &e.from, sizeof(e.from));
-		std::memcpy(&a[8], &e.to, sizeof(e.to));
-		std::memcpy(&a[12], &e.end, sizeof(e.end));
-		return farmhash::Hash(a.cbegin(), a.size());
+		return object_hash()(e);
 	}
 };
 }

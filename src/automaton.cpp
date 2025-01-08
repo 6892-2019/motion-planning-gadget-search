@@ -581,7 +581,7 @@ bool determinize(const AutomatonBase& source, AddStateAction&& addState, AddTran
 	};
 	auto set_hash = [](nfa_state* set) {
 		//this includes the size of the set as the first element of the hash
-		return farmhash::Hash(reinterpret_cast<char*>(set), (*set + 1) * sizeof(*set));
+		return hash_contiguous_range(set, *set + 1);
 	};
 	tsl::hopscotch_map<nfa_state*, state_type,
 			decltype(std::ref(set_hash)), decltype(std::ref(set_equal)),

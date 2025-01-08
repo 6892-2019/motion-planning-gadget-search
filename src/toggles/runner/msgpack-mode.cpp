@@ -262,7 +262,7 @@ FirsthalfStatistics write_firsthalf0(uint64_t database_id, EdgeKind kind,
 
 	vector<vector<SliceItem>> slices(firsthalf_slices);
 	for (uint32_t i = 0; i < allgadgets.size(); ++i) {
-		std::size_t hash = farmhash::Fingerprint64(allgadgets[i]);
+		std::size_t hash = contig_range_hash()(allgadgets[i]);
 		std::size_t slice = hash / firsthalf_slice_divisor;
 		slices[slice].push_back({});
 		slices[slice].back() = {hash, allgadgets[i].data(), numeric_cast<uint32_t>(allgadgets[i].size()), i};
@@ -358,7 +358,7 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 
 	DatabaseOperationStatistics stats = {};
 	std::vector<const FirsthalfHeader*> files;
-	tsl::hopscotch_map<uint64_t, vector<uint64_t>, farmhash_hash> firsthalf_to_globals;
+	tsl::hopscotch_map<uint64_t, vector<uint64_t>, object_hash> firsthalf_to_globals;
 	for (const std::string& filename : filenames) {
 		mmapping m = do_mmap(filename);
 		auto header = reinterpret_cast<const FirsthalfHeader*>(m.first);
@@ -1491,7 +1491,7 @@ vector<pair<uint64_t, vector<unsigned int>>> do_deleted_locations(vector<AnyProv
 	std::sort(gids.begin(), gids.end());
 	gids.erase(std::unique(gids.begin(), gids.end()), gids.end());
 
-	tsl::hopscotch_map<uint64_t, vector<std::byte>, farmhash_hash> gadget_data;
+	tsl::hopscotch_map<uint64_t, vector<std::byte>, object_hash> gadget_data;
 	{
 		lmdb::env env = lmdb::env::create();
 		env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);

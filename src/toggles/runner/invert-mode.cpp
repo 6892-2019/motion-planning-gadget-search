@@ -574,7 +574,7 @@ int invert_search_mode(std::string_view db_path, std::vector<std::string_view>& 
 	//This gives significant speedup over the serial implementation, but we're
 	//bottlenecked by inserting the accumulated result into closed, despite
 	//knowing all elements are unique and not already present.
-	tsl::ordered_set<uint64_t, farmhash_hash> closed(sources.begin(), sources.end());
+	tsl::ordered_set<uint64_t, object_hash> closed(sources.begin(), sources.end());
 	std::size_t curgen_start = 0;
 	while (curgen_start != closed.size()) {
 		vector<pair<std::size_t, std::size_t>> pending = {{curgen_start, closed.size()}};

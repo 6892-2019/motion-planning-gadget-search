@@ -187,7 +187,7 @@ unsigned int packed_size(const Pack* pack) {
 	return detail::PackReader(pack, pack+4).read24() & ~detail::coding_all;
 }
 std::size_t packed_hash(const Pack* pack) {
-	return farmhash::Hash(pack, packed_size(pack));
+	return hash_contiguous_range(pack, packed_size(pack));
 }
 bool packed_equal(const Pack* left, const Pack* right) {
 	auto lsize = packed_size(left), rsize = packed_size(right);

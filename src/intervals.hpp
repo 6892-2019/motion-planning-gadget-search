@@ -8,7 +8,7 @@
 #ifndef INTERVALS_HPP
 #define INTERVALS_HPP
 
-#include "farmhash-util.hpp"
+#include "hashutils.hpp"
 #include <tsl/ordered_map.h>
 #include <vector>
 #include <utility>
@@ -423,7 +423,7 @@ std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>> interval_ag
 	//epilogue is unnecessary because the active set is empty at the end.
 	T cur = 0;
 	//vector_ordered_map
-	tsl::ordered_map<std::vector<K>, std::vector<std::pair<T, T>>, farmhash_hash,
+	tsl::ordered_map<std::vector<K>, std::vector<std::pair<T, T>>, contig_range_hash,
 			std::equal_to<std::vector<K>>, std::allocator<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>>,
 			std::vector<std::pair<std::vector<K>, std::vector<std::pair<T, T>>>>> result;
 	while (!events.empty()) {

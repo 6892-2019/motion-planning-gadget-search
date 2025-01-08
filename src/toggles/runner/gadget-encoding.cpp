@@ -176,7 +176,7 @@ std::pair<std::vector<GadgetEdge>, std::vector<GadgetEdge>> deflate_slls(const A
 	auto activealpha = a.activeAlphabet();
 
 	unsigned int gadgetStates = 0;
-	tsl::hopscotch_map<AutomatonBase::state_type, unsigned int, farmhash_hash> autoToGadget; //maps automaton states to gadget states
+	tsl::hopscotch_map<AutomatonBase::state_type, unsigned int, object_hash> autoToGadget; //maps automaton states to gadget states
 	tsl::hopscotch_set<GadgetEdge> edges;
 	for (AutomatonBase::state_type start = 0; start < state_size; ++start) {
 		if (!a.accept(start)) continue;
