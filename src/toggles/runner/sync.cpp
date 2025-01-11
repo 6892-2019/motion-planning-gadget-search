@@ -14,7 +14,10 @@
 #include "stringutils.hpp"
 #include <fmt/chrono.h>
 #include <yaml-cpp/yaml.h>
-#include <simdjson/simdjson.h>
+#ifndef NDEBUG
+#define SIMDJSON_DEVELOPMENT_CHECKS 1
+#endif
+#include <simdjson.h>
 #include <ctime>
 #include <variant>
 #include <sys/mman.h>
@@ -273,17 +276,113 @@ public:
 };
 
 
+namespace simdjson {
+template<typename simdjson_value>
+auto tag_invoke(deserialize_tag, simdjson_value& val, GadgetEdge& e) {
+	ondemand::array arr;
+	SIMDJSON_TRY(val.get_array().get(arr))
+	auto targets = {&e.start, &e.from, &e.to, &e.end};
+	auto i = arr.begin();
+	for (auto p : targets) {
+		if (i == arr.end()) return error_code::INCOMPLETE_ARRAY_OR_OBJECT;
+		SIMDJSON_TRY((*i).get(*p));
+		++i;
+	}
+	return i == arr.end() ? error_code::SUCCESS : error_code::INCOMPLETE_ARRAY_OR_OBJECT;
+}
+
+template<typename simdjson_value>
+auto tag_invoke(deserialize_tag, simdjson_value& val, GadgetPragma& p) {
+	auto process_pragma = [&](std::string_view n) {
+		if (n == "allow-pruning-named-states"sv)
+			p.allow_pruning_named_states = true;
+		else
+			throw std::runtime_error(fmt::format("unrecognized pragma \"{}\"", n));
+	};
+	std::string_view v;
+	ondemand::array arr;
+	switch (val.type()) {
+	case ondemand::json_type::string:
+		SIMDJSON_TRY(val.get_string().get(v))
+		process_pragma(v);
+		return error_code::SUCCESS;
+	case ondemand::json_type::array:
+		SIMDJSON_TRY(val.get_array().get(arr))
+		for (auto e : arr) {
+			SIMDJSON_TRY(e.get_string().get(v))
+			process_pragma(v);
+		}
+		return error_code::SUCCESS;
+	default:
+		return error_code::INCORRECT_TYPE;
+	}
+}
+
+template<typename simdjson_value>
+auto tag_invoke(deserialize_tag, simdjson_value& val, RawGadget& g) {
+	ondemand::object obj;
+	SIMDJSON_TRY(val.get_object().get(obj))
+	for (auto f : obj) {
+		if (f.key() == "uedges") SIMDJSON_TRY(f.value().get(g.uedges))
+		else if (f.key() == "dedges") SIMDJSON_TRY(f.value().get(g.dedges))
+		else if (f.key() == "pragma") SIMDJSON_TRY(f.value().get(g.pragma))
+		else if (f.key() == "state-names") {
+			std::string_view v;
+			switch (f.value().type()) {
+			case ondemand::json_type::string:
+				SIMDJSON_TRY(f.value().get_string().get(v))
+				g.state_names.emplace<std::string>(v);
+				break;
+			case ondemand::json_type::object: {
+				ondemand::object names_obj;
+				bool n;
+				SIMDJSON_TRY(f.value().get_object().get(names_obj))
+				auto i = names_obj.begin();
+				std::size_t field_count;
+				SIMDJSON_TRY(names_obj.count_fields().get(field_count))
+				SIMDJSON_TRY((*i).value().is_null().get(n))
+				if (field_count == 1 && n) {
+					SIMDJSON_TRY((*i).unescaped_key(v));
+					g.state_names.emplace<unsigned int>(to_uint(v));
+					return error_code::SUCCESS;
+				}
+
+				names_obj.reset();
+				tsl::ordered_map<unsigned int, std::string> m;
+				for (auto nf : names_obj) {
+					SIMDJSON_TRY(nf.unescaped_key(v))
+					auto state = to_uint(v);
+					SIMDJSON_TRY(nf.value().get_string(v))
+					auto emplace_pair = m.try_emplace(state, v);
+					if (!emplace_pair.second)
+						throw std::runtime_error(fmt::format("duplicate state name {} for {}", state, g.name));
+				}
+				g.state_names = std::move(m);
+				break;
+			}
+			default:
+				return error_code::INCORRECT_TYPE;
+			}
+		}
+	}
+	return error_code::SUCCESS;
+}
+}
+
 /**
  * A raw gadget source that uses simdjson to parse JSON.
  */
 class JSONRawGadgetSource : public RawGadgetSource {
 private:
 	std::string filename_;
-	std::pair<void*, std::size_t> data_;
-	simdjson::ParsedJson tape_;
-	std::optional<simdjson::ParsedJson::Iterator> gadget_iter_, alias_iter_;
+	std::string_view json_;
+	std::size_t map_len_;
+	simdjson::ondemand::parser parser_;
+	simdjson::ondemand::document doc_;
+	simdjson::ondemand::object_iterator gadget_iter_, gadget_end_;
+	std::vector<std::pair<std::string, std::string>> aliases_;
 
-	static std::pair<void*, std::size_t> mmap_with_padding(std::string filename) {
+	static std::pair<std::string_view, std::size_t> mmap_with_padding(const std::string& filename) {
 		int fd = open(filename.c_str(), O_RDONLY);
 		if (fd < 0)
 			throw std::runtime_error("failed to open "+filename);
@@ -293,167 +392,70 @@ private:
 		struct stat s;
 		if (fstat(fd, &s) < 0)
 			throw std::runtime_error("failed to stat "+filename);
-		void* map_base = mmap(nullptr, s.st_size+getpagesize(), PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		auto json_len = numeric_cast<std::size_t>(s.st_size);
+		auto map_len = json_len + numeric_cast<size_t>(getpagesize());
+		void* map_base = mmap(nullptr, map_len, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		if (map_base == MAP_FAILED)
 			throw std::runtime_error("anonymous mapping failed");
-		void* map2_base = mmap(map_base, s.st_size, PROT_READ, MAP_PRIVATE | MAP_FIXED, fd, 0);
+		void* map2_base = mmap(map_base, json_len, PROT_READ, MAP_PRIVATE | MAP_FIXED, fd, 0);
 		if (map2_base == MAP_FAILED)
 			throw std::runtime_error("failed to map "+filename);
 		if (map_base != map2_base)
 			throw std::runtime_error("something funny happened");
 		close(fd);
-		return {map_base, s.st_size};
-	}
-
-	void parse_edgelist(vector<GadgetEdge>& edges, const std::string& gadget_name) {
-		if (!edges.empty())
-			throw std::runtime_error(fmt::format("in {} gadget {}, duplicate edgelist key?", filename_, gadget_name));
-		if (!gadget_iter_->is_array())
-			throw std::runtime_error(fmt::format("in {} gadget {}, expected edgelist but got type {} (not array)",
-					filename_, gadget_name, gadget_iter_->get_type()));
-		gadget_iter_->down();
-		do {
-			if (!gadget_iter_->is_array())
-				throw std::runtime_error(fmt::format("in {} gadget {}, expected edge at index {} but got type {} (not array)",
-					filename_, gadget_name, edges.size(), gadget_iter_->get_type()));
-			gadget_iter_->down();
-			std::array<unsigned int, 4> edge_buf;
-			auto p = edge_buf.begin();
-			do {
-				if (!gadget_iter_->is_integer())
-					throw std::runtime_error(fmt::format("in {} gadget {}, expected integer in edge at index {} but got type {}",
-							filename_, gadget_name, edges.size(), gadget_iter_->get_type()));
-				std::int64_t i = gadget_iter_->get_integer();
-				if (p == edge_buf.end())
-					throw std::runtime_error(fmt::format("in {} gadget {}, edge at index {} too big; parsed {} {} {} {} {}",
-							filename_, gadget_name, edges.size(), edge_buf[0], edge_buf[1], edge_buf[2], edge_buf[3], i));
-				if (i < 0 || i > std::numeric_limits<unsigned int>::max())
-					throw std::runtime_error(fmt::format("in {} gadget {}, bad integer {} in edge at index {}",
-							filename_, gadget_name, i, edges.size()));
-				*p++ = static_cast<unsigned int>(i);
-			} while (gadget_iter_->next());
-			gadget_iter_->up();
-			edges.push_back(GadgetEdge{edge_buf[0], edge_buf[1], edge_buf[2], edge_buf[3]});
-		} while (gadget_iter_->next());
-		gadget_iter_->up();
+		std::string_view json(static_cast<const char*>(map_base), json_len);
+		return {json, map_len};
 	}
 public:
-	JSONRawGadgetSource(std::string_view filename) : filename_(filename), data_(mmap_with_padding(filename_)),
-			tape_(simdjson::build_parsed_json(static_cast<char*>(data_.first), data_.second, false)) {
-		if (!tape_.is_valid())
-			throw std::runtime_error(fmt::format("JSON parsing error in {}: {}", filename_, tape_.get_error_message()));
-		gadget_iter_.emplace(tape_);
-		if (gadget_iter_->move_to_key("gadgets"))
-			gadget_iter_->move_to_value();
-		else
-			gadget_iter_.reset();
-		alias_iter_.emplace(tape_);
-		if (alias_iter_->move_to_key("aliases"))
-			alias_iter_->move_to_value();
-		else
-			alias_iter_.reset();
+	JSONRawGadgetSource(std::string_view filename) : filename_(filename) {
+		std::tie(json_, map_len_) = mmap_with_padding(filename_);
+		if (auto error = parser_.iterate(json_, map_len_).get(doc_))
+			throw std::runtime_error(fmt::format("error parsing {}: {}",
+				filename_, simdjson::error_message(error)));
+		simdjson::ondemand::object toplevel = doc_.get_object();
+		simdjson::ondemand::object aliases;
+		if (auto error = toplevel["aliases"].get_object().get(aliases); !error)
+			for (auto f : aliases) {
+				std::string_view k, v;
+				f.unescaped_key(k);
+				f.value().get_string(v);
+				aliases_.emplace_back(k, v);
+			}
+		else if (error != simdjson::error_code::NO_SUCH_FIELD)
+			throw std::runtime_error(fmt::format("error parsing aliases in {}: {}",
+				filename_, simdjson::error_message(error)));
+		std::reverse(aliases_.begin(), aliases_.end());
+		simdjson::ondemand::object gadgets = toplevel["gadgets"].get_object();
+		gadget_iter_ = gadgets.begin();
+		gadget_end_ = gadgets.end();
 	}
 	~JSONRawGadgetSource() override {
-		munmap(data_.first, data_.second);
+		munmap(const_cast<char*>(json_.data()), map_len_);
 	};
 
 	bool hasGadget() override {
-		return gadget_iter_.has_value();
+		return gadget_iter_ != gadget_end_;
 	}
 	RawGadget nextGadget() override {
 		RawGadget ret;
-		ret.name.assign(gadget_iter_->get_string(), gadget_iter_->get_string_length());
-		gadget_iter_->move_to_value();
-		if (!gadget_iter_->is_object())
-			throw std::runtime_error(fmt::format("in {}, gadget {} is type {} (not object)",
-					filename_, ret.name, gadget_iter_->get_type()));
-		gadget_iter_->down();
-
-		do {
-			const char* key = gadget_iter_->get_string(); //valid only until the cursor moves?
-			gadget_iter_->move_to_value();
-			if ("uedges"sv.compare(key) == 0) {
-				parse_edgelist(ret.uedges, ret.name);
-			} else if ("dedges"sv.compare(key) == 0) {
-				parse_edgelist(ret.dedges, ret.name);
-			} else if ("pragma"sv.compare(key) == 0) {
-				vector<std::string> pragmas;
-				if (gadget_iter_->is_array()) {
-					gadget_iter_->down();
-					do {
-						if (!gadget_iter_->is_string())
-							throw std::runtime_error(fmt::format("in {} gadget {}, pragma index {} is type {} (not string)",
-									filename_, ret.name, pragmas.size(), gadget_iter_->get_type()));
-						pragmas.push_back(gadget_iter_->get_string());
-					} while (gadget_iter_->next());
-					gadget_iter_->up();
-				} else if (gadget_iter_->is_string())
-					pragmas.push_back(gadget_iter_->get_string());
-				else
-					throw std::runtime_error(fmt::format("in {} gadget {}, pragma value is type {} (not string or array of strings)",
-							filename_, ret.name, gadget_iter_->get_type()));
-				ret.pragma = parse_gadget_pragma(pragmas, ret.name, filename_);
-			} else if ("state-names"sv.compare(key) == 0) {
-				if (gadget_iter_->is_object()) {
-					gadget_iter_->down();
-					//Check for a singleton map to null first.  This is simpler
-					//than buffering one item in the general loop.
-					gadget_iter_->move_to_value();
-					bool singleton = gadget_iter_->is_null();
-					bool not_singleton = gadget_iter_->next();
-					if (singleton && not_singleton)
-						throw std::runtime_error(fmt::format("in {} gadget {}, found apparent state-names null singleton but more keys present",
-								filename_, ret.name));
-					gadget_iter_->to_start_scope();
-
-					//JSON keys are always strings, but here they represent
-					//unsigned integers, so we have to string-parse.
-					if (singleton)
-						ret.state_names = to_uint(gadget_iter_->get_string());
-					else {
-						tsl::ordered_map<unsigned int, std::string> map;
-						do {
-							unsigned int number = to_uint(gadget_iter_->get_string());
-							gadget_iter_->move_to_value();
-							if (!gadget_iter_->is_string())
-								throw std::runtime_error(fmt::format("in {} gadget {}, state-names value for key {} is type {} (not string)",
-										filename_, ret.name, number, gadget_iter_->get_type()));
-							auto emplace_pair = map.try_emplace(number, gadget_iter_->get_string());
-							if (!emplace_pair.second)
-								throw std::runtime_error(fmt::format("in {} gadget {}, duplicate state names for key {} (old {}, new {})",
-									filename_, ret.name, number, emplace_pair.first->second, gadget_iter_->get_string()));
-						} while (gadget_iter_->next());
-						ret.state_names = map;
-					}
-
-					gadget_iter_->up();
-				} else if (gadget_iter_->is_string())
-					ret.state_names = gadget_iter_->get_string();
-				else
-					throw std::runtime_error(fmt::format("in {} gadget {}, state-names value is type {} (not string or object)",
-							filename_, ret.name, gadget_iter_->get_type()));
-			}
-		} while (gadget_iter_->next());
-
-		gadget_iter_->up();
-		if (!gadget_iter_->next())
-			gadget_iter_.reset();
+		simdjson::ondemand::field f = (*gadget_iter_);
+		if (auto error = f.unescaped_key(ret.name))
+			throw std::runtime_error(fmt::format("in {}, bad gadget name: {}",
+				filename_, simdjson::error_message(error)));
+		if (auto error = f.value().get(ret))
+			throw std::runtime_error(fmt::format("in {}, error parsing gadget {}: {}",
+				filename_, ret.name, simdjson::error_message(error)));
+		++gadget_iter_;
 		return ret;
 	}
 
 	bool hasAlias() override {
-		return alias_iter_.has_value();
+		return !aliases_.empty();
 	}
 	pair<std::string, std::string> nextAlias() override {
-		std::string key = alias_iter_->get_string();
-		alias_iter_->move_to_value();
-		if (!alias_iter_->is_string())
-			throw std::runtime_error(fmt::format("in {}, alias {} is type {} (not string)", filename_, key, alias_iter_->get_type()));
-		std::string value = alias_iter_->get_string();
-
-		if (!alias_iter_->next())
-			alias_iter_.reset();
-		return {std::move(key), std::move(value)};
+		pair<std::string, std::string> p = std::move(aliases_.back());
+		aliases_.pop_back();
+		return p;
 	}
 };
 

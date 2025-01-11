@@ -10,7 +10,7 @@ from operator import attrgetter
 
 # the vendor/ subdirectories we want
 # TODO: currently we make all headers available; this only controls objects
-import_vendored = ['vta', 'simdjson']
+import_vendored = ['vta']
 
 default_targets = ['debug', 'release']
 
