@@ -186,13 +186,13 @@ void Automaton<AlphabetSize>::for_each_transition(std::function<void(state_type,
 }
 
 template<unsigned int AlphabetSize>
-void Automaton<AlphabetSize>::for_each_edge(state_type state, function_view<void(symbol_mask_type, state_type)> action) const {
+void Automaton<AlphabetSize>::for_each_edge(state_type state, function_ref<void(symbol_mask_type, state_type)> action) const {
 	for (const Transition& t : transitions_[state])
 		action(t.symbols_, t.next_);
 }
 
 template<unsigned int AlphabetSize>
-void Automaton<AlphabetSize>::for_each_edge(function_view<void(state_type, symbol_mask_type, state_type)> action) const {
+void Automaton<AlphabetSize>::for_each_edge(function_ref<void(state_type, symbol_mask_type, state_type)> action) const {
 	for (state_type s = 0; s < state_size(); ++s)
 		for (const Transition& t : transitions_[s])
 			action(s, t.symbols_, t.next_);

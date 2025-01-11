@@ -12,7 +12,7 @@
 #include "automatonbase.hpp"
 #include "bitset.hpp"
 #include "n_copies_iterator.hpp"
-#include <function_view.hpp>
+#include "function_ref.hpp"
 
 //uncomment the line below to enable debugging logging expressions
 //#define AUTOMATON_DEBUG(expr) do {expr;} while(0);
@@ -193,8 +193,8 @@ public:
 
 	void for_each_transition(std::function<void(state_type, symbol_type, state_type)> action) const override;
 
-	void for_each_edge(state_type state, function_view<void(symbol_mask_type, state_type)> action) const;
-	void for_each_edge(function_view<void(state_type, symbol_mask_type, state_type)> action) const;
+	void for_each_edge(state_type state, function_ref<void(symbol_mask_type, state_type)> action) const;
+	void for_each_edge(function_ref<void(state_type, symbol_mask_type, state_type)> action) const;
 
 	void reserve(state_type state_capacity) override;
 

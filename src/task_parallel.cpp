@@ -3,7 +3,7 @@
 #include <atomic>
 #include <future>
 
-void task_parallel(unsigned int threads, function_view<void()>* tasks, std::size_t task_count) {
+void task_parallel(unsigned int threads, function_ref<void()>* tasks, std::size_t task_count) {
 	std::atomic<std::size_t> task_index_dispenser(0);
 	std::vector<std::future<void>> futures;
 	for (std::size_t i = 0; i < threads && i < task_count; ++i)
