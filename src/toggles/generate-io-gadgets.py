@@ -2,10 +2,10 @@
 
 import sys, argparse
 import itertools
+import functools
 import json
 from types import SimpleNamespace
 from pathlib import Path
-import memoized
 
 def bracelets(size):
     u = set()
@@ -95,7 +95,7 @@ def name_for_state(state_sig, state):
     statechunks = [('up', 'down')[s] for i, s in enumerate(state) if state_sig[i] == 2]
     return '-'.join(statechunks)
 
-@memoized.memoized
+@functools.cache
 def state_data(state_sig):
     # We have to force this because we're going to iterate it repeatedly.
     states = list(itertools.product(*[range(s) for s in state_sig]))
