@@ -707,7 +707,7 @@ private:
 	DatabaseOperationStatistics do_generic_operation(std::vector<simple_buffer> tasks, std::optional<std::string_view> secondhalf_cmd = std::nullopt) {
 		std::reverse(tasks.begin(), tasks.end());
 
-		if (unsigned int dead_count = check_for_stale_readers(database_))
+		if (auto dead_count = database_.reader_check())
 			fmt::print("cleaned up {} stale readers\n", dead_count);
 
 		std::string operation_name = phase_ == Phase::compute_combine ? "combine" :
@@ -748,7 +748,7 @@ private:
 			}
 			return false;
 		}, [&](simple_buffer& buffer) {
-			if (unsigned int dead_count = check_for_stale_readers(database_))
+			if (auto dead_count = database_.reader_check())
 				fmt::print("cleaned up {} stale readers\n", dead_count);
 			std::optional<Response> resp; //just for lazy init because Response isn't default-constructible
 			try {
@@ -1205,7 +1205,7 @@ int main(int argc, char* argv[]) { //genbuild {'entrypoint': True, 'ldflags': '-
 	data_env.set_mapsize(10UL * 1024 * 1024 * 1024 * 1024);
 	data_env.set_max_dbs(64);
 	data_env.open(std::string(db_path).c_str(), MDB_NORDAHEAD); //TODO: flags?
-	if (unsigned int dead_count = check_for_stale_readers(data_env))
+	if (auto dead_count = data_env.reader_check())
 		fmt::print("cleaned up {} stale readers\n", dead_count);
 	DatabaseMetadata metadata = read_meta(data_env);
 	fmt::print("Database ID {:x}, created on {} at {}\n", metadata.id, metadata.creator_hostname, metadata.creation_timestamp);

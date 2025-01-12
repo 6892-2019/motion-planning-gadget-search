@@ -366,7 +366,7 @@ void fill_cache(lmdb::env& env,
 	}
 
 	if (!request_files.empty() || !newly_cached_connects.empty())
-		if (unsigned int dead_count = check_for_stale_readers(env))
+		if (auto dead_count = env.reader_check())
 			fmt::print("cleaned up {} stale readers\n", dead_count);
 }
 

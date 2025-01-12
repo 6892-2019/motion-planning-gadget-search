@@ -14,8 +14,6 @@
 
 void jemalloc_tuning();
 
-unsigned int check_for_stale_readers(lmdb::env& env);
-
 
 struct DatabaseOperationStatistics {
 	std::size_t skipped, pruned_locally, pruned_database, novel_gadgets, edges;
