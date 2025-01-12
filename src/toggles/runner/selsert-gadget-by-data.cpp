@@ -76,13 +76,15 @@ void append_gadget_index(lmdb::txn& txn, lmdb::dbi& gadget_index, const std::vec
 		std::size_t new_elements = std::min(hashes.size(), index_page_size - current_size);
 		std::uint64_t current_key = lmdb::from_sv<uint64_t>(last_index_key);
 		std::uint64_t new_key = current_key + new_elements;
-		//See above comment about undefined behavior.
-		std::string_view new_page(nullptr, (current_size + new_elements) * sizeof(std::size_t));
-		if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
+		//We're about to mutate the database, so we need to copy the old data.
+		std::vector<char> old_data_bytes(last_index_value.begin(), last_index_value.end());
+		std::size_t length = (current_size + new_elements) * sizeof(std::size_t);
+		if (!index_cur.put_reserve(lmdb::to_sv(new_key), length, MDB_APPEND | MDB_NOOVERWRITE, [&](std::byte* dest, std::size_t length){
+			std::memcpy(dest, old_data_bytes.data(), old_data_bytes.size());
+			std::memcpy(dest + old_data_bytes.size(), hashes.data(), new_elements * sizeof(std::size_t));
+		}))
 			throw std::logic_error(fmt::format("failed to append while extending index page: {} {} {} {}",
-					current_key, current_size, new_key, new_page.size()));
-		std::memcpy(const_cast<char*>(new_page.data()), last_index_value.data(), last_index_value.size());
-		std::memcpy(const_cast<char*>(new_page.data()) + last_index_value.size(), hashes.data(), new_elements * sizeof(std::size_t));
+					current_key, current_size, new_key, length));
 		if (!index_cur.get(last_index_key, MDB_SET))
 			throw std::logic_error(fmt::format("failed to position for deletion? {}", current_key));
 		index_cur.del(); //throws on failure
@@ -92,12 +94,12 @@ void append_gadget_index(lmdb::txn& txn, lmdb::dbi& gadget_index, const std::vec
 	while (hashes_index < hashes.size()) {
 		std::size_t new_elements = std::min(hashes.size() - hashes_index, index_page_size);
 		std::size_t new_key = first_novel_id + hashes_index + new_elements - 1;
-		//See above comment about undefined behavior.
-		std::string_view new_page(nullptr, new_elements * sizeof(std::size_t));
-		if (!index_cur.put(lmdb::to_sv(new_key), new_page, MDB_APPEND | MDB_RESERVE | MDB_NOOVERWRITE))
+		std::size_t length = new_elements * sizeof(std::size_t);
+		if (!index_cur.put_reserve(lmdb::to_sv(new_key), length, MDB_APPEND | MDB_NOOVERWRITE, [&](std::byte* dest, std::size_t length) {
+			std::memcpy(dest, hashes.data() + hashes_index, new_elements * sizeof(std::size_t));
+		}))
 			throw std::logic_error(fmt::format("failed to append new index page: {} {} {} {}",
-					hashes_index, new_key, new_elements, new_page.size()));
-		std::memcpy(const_cast<char*>(new_page.data()), hashes.data() + hashes_index, new_elements * sizeof(std::size_t));
+					hashes_index, new_key, new_elements, length));
 		hashes_index += new_elements;
 	}
 }
@@ -221,12 +223,13 @@ SelsertGadgetByDataResult selsert_gadget_by_data(lmdb::env& env, lmdb::dbi& gadg
 				//behavior.  We have to const_cast it later again anyway, so
 				//string_view is just the wrong abstraction for MDB_RESERVE.
 				//TODO: rewrite lmdbxx using std::span (hah)
-				std::string_view target(nullptr, pi.data.size()+8);
-				if (!hashtable_cur.put(lmdb::to_sv(pi.hash), target, MDB_RESERVE | MDB_NOOVERWRITE))
-					throw std::logic_error(fmt::format("can't happen: collision after late-pruning for hash {}", pi.hash));
-				std::memcpy(const_cast<char*>(target.begin()), pi.data.data(), pi.data.size());
-				std::memcpy(const_cast<char*>(target.begin()) + pi.data.size(), &ret.local_to_global[pi.local_index],
+				auto length = pi.data.size() + sizeof(ret.local_to_global[pi.local_index]);
+				if (!hashtable_cur.put_reserve(lmdb::to_sv(pi.hash), length, MDB_NOOVERWRITE, [&](std::byte* dest, std::size_t length) {
+					std::memcpy(dest, pi.data.data(), pi.data.size());
+					std::memcpy(dest + pi.data.size(), &ret.local_to_global[pi.local_index],
 						sizeof(ret.local_to_global[pi.local_index]));
+				}))
+					throw std::logic_error(fmt::format("can't happen: collision after late-pruning for hash {}", pi.hash));
 			}
 
 			append_gadget_index(txn, gadget_index, hashes, ret.novel_global_ids.first);

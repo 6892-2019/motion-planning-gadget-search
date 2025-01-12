@@ -1447,11 +1447,48 @@ public:
    */
   bool put(MDB_txn* const txn,
            const std::string_view key,
-           std::string_view data,
+           std::string_view&& data,
            const unsigned int flags = default_put_flags) {
+    // It's reasonable to pass MDB_NOOVERWRITE and ignore the old value, but it
+    // is unreasonable to pass MDB_RESERVE and not write there.
+    if (flags & MDB_RESERVE)
+      throw std::logic_error("ignoring result of MDB_RESERVE; should be using an lvalue");
     const MDB_val keyV{key.size(), const_cast<char*>(key.data())};
     MDB_val dataV{data.size(), const_cast<char*>(data.data())};
     return lmdb::dbi_put(txn, handle(), &keyV, &dataV, flags);
+  }
+
+  /**
+   * Stores a key/value pair into this database.
+   *
+   * @param txn a transaction handle
+   * @param key
+   * @param data
+   * @param flags
+   * @throws lmdb::error on failure
+   */
+  bool put(MDB_txn* const txn,
+           const std::string_view key,
+           std::string_view& data,
+           const unsigned int flags = default_put_flags) {
+    const MDB_val keyV{key.size(), const_cast<char*>(key.data())};
+    MDB_val dataV{data.size(), const_cast<char*>(data.data())};
+    bool ret = lmdb::dbi_put(txn, handle(), &keyV, &dataV, flags);
+	  //ret just decides between success and KEYEXIST, so we always update data.
+	  if (flags & (MDB_NOOVERWRITE | MDB_RESERVE))
+		  data = std::string_view(static_cast<char*>(dataV.mv_data), dataV.mv_size);
+	  return ret;
+  }
+
+  template<typename Callable>
+  bool put_reserve(MDB_txn* const txn, const std::string_view& key, std::size_t length, unsigned int flags, Callable&& callable) {
+    MDB_val keyV{key.size(), const_cast<char*>(key.data())};
+    MDB_val valV{length, nullptr};
+    flags |= MDB_RESERVE;
+    bool ret = lmdb::dbi_put(txn, handle(), &keyV, &valV, flags);
+    if (ret)
+      callable(static_cast<std::byte*>(valV.mv_data), valV.mv_size);
+    return ret;
   }
 
   /**
@@ -1654,11 +1691,38 @@ public:
    * @throws lmdb::error on failure
    */
   bool put(const std::string_view &key,
-           const std::string_view &val,
+           std::string_view&& val,
            const unsigned int flags = 0) {
+    // It's reasonable to pass MDB_NOOVERWRITE and ignore the old value, but it
+    // is unreasonable to pass MDB_RESERVE and not write there.
+    if (flags & MDB_RESERVE)
+      throw std::logic_error("ignoring result of MDB_RESERVE; should be using an lvalue");
     MDB_val keyV{key.size(), const_cast<char*>(key.data())};
     MDB_val valV{val.size(), const_cast<char*>(val.data())};
     return lmdb::cursor_put(handle(), &keyV, &valV, flags);
+  }
+
+  bool put(const std::string_view &key,
+           std::string_view& val,
+           const unsigned int flags = 0) {
+    MDB_val keyV{key.size(), const_cast<char*>(key.data())};
+    MDB_val valV{val.size(), const_cast<char*>(val.data())};
+    bool ret = lmdb::cursor_put(handle(), &keyV, &valV, flags);
+    //ret just decides between success and KEYEXIST, so we always update data.
+    if (flags & (MDB_NOOVERWRITE | MDB_RESERVE))
+      val = std::string_view(static_cast<char*>(valV.mv_data), valV.mv_size);
+    return ret;
+  }
+
+  template<typename Callable>
+  bool put_reserve(const std::string_view& key, std::size_t length, unsigned int flags, Callable&& callable) {
+    MDB_val keyV{key.size(), const_cast<char*>(key.data())};
+    MDB_val valV{length, nullptr};
+    flags |= MDB_RESERVE;
+    bool ret = lmdb::cursor_put(handle(), &keyV, &valV, flags);
+    if (ret)
+      callable(static_cast<std::byte*>(valV.mv_data), valV.mv_size);
+    return ret;
   }
 
   /**

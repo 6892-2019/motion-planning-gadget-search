@@ -184,14 +184,13 @@ std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last,
 void insert_skinny_edges(lmdb::txn& txn, lmdb::dbi& edges, std::vector<SkinnyPage>&& pages) {
 	lmdb::cursor cur = lmdb::cursor::open(txn, edges);
 	for (const SkinnyPage& p : pages) {
-		//See comments elsewhere about undefined behavior.
-		std::string_view value(nullptr, p.header.size() + p.page.size());
-		if (!cur.put(lmdb::to_sv(p.last_input), value, MDB_RESERVE | MDB_NOOVERWRITE))
+		auto length = p.header.size() + p.page.size();
+		if (!cur.put_reserve(lmdb::to_sv(p.last_input), length, MDB_NOOVERWRITE, [&](std::byte* dest, size_t length){
+			std::memcpy(dest, p.header.data(), p.header.size());
+			std::memcpy(dest + p.header.size(), p.page.data(), p.page.size());
+		}))
 			throw std::logic_error(fmt::format("failed to insert skinny edge data for {} (length ())",
-					p.last_input, value.size())); //would like to get the DB name here...
-		char* dest = const_cast<char*>(value.data());
-		std::memcpy(dest, p.header.data(), p.header.size());
-		std::memcpy(dest + p.header.size(), p.page.data(), p.page.size());
+					p.last_input, length)); //would like to get the DB name here...
 	}
 	std::vector<SkinnyPage> ensure_memory_is_freed(std::move(pages));
 }
@@ -587,18 +586,15 @@ DatabaseOperationStatistics do_secondhalf_db(vector<std::string> filenames, Edge
 				}
 
 				for (ProposedInsert& pi : gadgets) {
-					//Constructing a string_view to nullptr is technically undefined
-					//behavior.  We have to const_cast it later again anyway, so
-					//string_view is just the wrong abstraction for MDB_RESERVE.
-					//TODO: rewrite lmdbxx using std::span (hah)
-					std::string_view target(nullptr, pi.data.size()+8);
-					if (!hashtable_cur.put(lmdb::to_sv(pi.hash), target, MDB_RESERVE | MDB_NOOVERWRITE))
+					auto length = pi.data.size() + sizeof(*pi.global_id);
+					if (!hashtable_cur.put_reserve(lmdb::to_sv(pi.hash), length, MDB_NOOVERWRITE, [&](std::byte* dest, std::size_t length) {
+						std::memcpy(dest, pi.data.data(), pi.data.size());
+						std::memcpy(dest + pi.data.size(), pi.global_id, sizeof(*pi.global_id));
+					}))
 						//If there ever is a self-collision we can fix up the
 						//hash in the hashes vector by taking the difference
 						//between *pi.global_id and last_id's initial value.
 						throw std::runtime_error(fmt::format("collision for hash {} in slice {}; possible self-collision?", pi.hash, slice));
-					std::memcpy(const_cast<char*>(target.begin()), pi.data.data(), pi.data.size());
-					std::memcpy(const_cast<char*>(target.begin()) + pi.data.size(), pi.global_id, sizeof(*pi.global_id));
 				}
 
 				append_gadget_index(txn, gadget_index, hashes, first_novel_id);
