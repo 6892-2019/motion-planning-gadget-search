@@ -124,7 +124,7 @@ std::vector<SkinnyPage> paginate_for_skinny_edges(Iterator first, Iterator last,
 	std::vector<SkinnyPage> ret;
 	if (first == last) return ret;
 	std::vector<std::byte> header, page;
-	std::array<std::byte, 5> length;
+	std::array<std::byte, 9> length;
 	std::vector<uint64_t> block;
 	std::vector<std::byte> chunk;
 	uint64_t previous_input = first->input1 - 1; //so we don't commit an empty page to start
