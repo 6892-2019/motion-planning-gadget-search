@@ -202,6 +202,7 @@ public:
 
 	bool addEpsilon(state_type from, state_type to) override;
 
+	using WorkingAutomaton::addTrans;
 	bool addTrans(state_type from, symbol_type symbol, state_type to) override;
 
 	bool setAccept(state_type state, bool accepts = true) override;
