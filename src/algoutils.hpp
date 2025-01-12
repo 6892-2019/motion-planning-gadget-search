@@ -64,35 +64,6 @@ struct identity_permutation {
 	T operator[](T&& t) const {return t;}
 };
 
-template<typename Iter>
-bool is_possibly_mirrored_rotation_permutation(Iter first, Iter last) {
-	auto dist = std::distance(first, last);
-	assert(dist > 0);
-	auto size = static_cast<std::make_unsigned_t<decltype(dist)>>(dist);
-	using T = typename std::iterator_traits<Iter>::value_type;
-	auto zeroit = std::find(first, last, 0);
-	if (zeroit == last)
-		return false;
-	auto theirzero = std::distance(first, zeroit);
-
-	dynarray<T> exemplar(size);
-	std::iota(exemplar.begin(), exemplar.end(), static_cast<T>(0));
-	std::rotate(exemplar.rbegin(), exemplar.rbegin()+theirzero, exemplar.rend());
-	if (std::equal(first, last, exemplar.begin(), exemplar.end()))
-		return true;
-	std::iota(exemplar.begin(), exemplar.end(), static_cast<T>(0));
-	std::reverse(exemplar.begin(), exemplar.end());
-	std::rotate(exemplar.begin(), exemplar.begin()+(size-theirzero-1), exemplar.end());
-	if (std::equal(first, last, exemplar.begin(), exemplar.end()))
-		return true;
-	return false;
-}
-
-template<typename T>
-bool is_possibly_mirrored_rotation_permutation(std::initializer_list<T> list) {
-	return is_possibly_mirrored_rotation_permutation(list.begin(), list.end());
-}
-
 
 template<typename LeftIter, typename RightIter>
 bool unordered_equal(LeftIter first1, LeftIter end1, RightIter first2, RightIter end2) {
@@ -117,12 +88,6 @@ bool unordered_equal(std::initializer_list<T> left, std::initializer_list<U> rig
 }
 
 
-template<typename T, typename Compare = std::less<T>>
-int sgncmp(const T& left, const T& right, Compare comp = Compare()) {
-	if (comp(left, right)) return -1;
-	if (comp(right, left)) return 1;
-	return 0;
-}
 
 template<class Front, class Sentinel>
 class range_for_pair {
@@ -159,21 +124,6 @@ auto xrange(Integer first, Integer last) {
 	return boost::irange(first, last);
 }
 
-struct indirect_equal {
-	using is_transparent = std::true_type;
-	template<typename L, typename R>
-	constexpr decltype(auto) operator()(L&& l, R&& r) const
-	noexcept(noexcept(*std::forward<L>(l) == *std::forward<R>(r)))
-	{return *std::forward<L>(l) == *std::forward<R>(r);}
-};
-struct indirect_hash {
-	using is_transparent = std::true_type;
-	template<typename T>
-	constexpr decltype(auto) operator()(T&& p) const
-	noexcept(noexcept(std::hash<std::remove_cv_t<std::remove_reference_t<decltype(*std::forward<T>(p))>>>()(*std::forward<T>(p))))
-	{return std::hash<std::remove_cv_t<std::remove_reference_t<decltype(*std::forward<T>(p))>>>()(*std::forward<T>(p));}
-};
-
 
 struct free_deleter {
 	constexpr free_deleter() noexcept = default;
@@ -200,61 +150,6 @@ template<typename T>
 	if (!present) return std::nullopt;
 	return std::make_optional(std::forward<T>(value));
 }
-
-
-//https://stackoverflow.com/q/42987144/3614835 by Vittorio Romeo
-template <typename... Ts>
-struct overloader : Ts... {
-	//TODO: ?
-//    template <typename... TArgs>
-//    overload(TArgs&&... xs) : Ts(std::forward<TArgs>(xs))... {}
-    using Ts::operator()...;
-};
-//template<typename... Ts> overload(Ts...) -> overload<Ts...>;
-template <typename... Ts>
-auto overload(Ts&&... xs) {
-    return overloader<std::decay_t<Ts>...>{std::forward<Ts>(xs)...};
-}
-
-
-/**
- * Partitions [ids_first, ids_last) by exclusion from the union of the ranges in
- * [ranges_first, ranges_last).  That is, [ids_first, the-return-value) contains
- * those elements not contained in any range.  The ranges are inclusive on their
- * first element and exclusive on their second.  Both ranges must be sorted.
- */
-template<typename TIter, typename PairIter>
-TIter partition_on_range_exclusion(TIter ids_first, TIter ids_last, PairIter ranges_first, PairIter ranges_last) {
-	TIter id_idx = ids_first, needy_end = ids_first;
-	PairIter r_idx = ranges_first;
-	while (id_idx != ids_last && r_idx != ranges_last) {
-		while (id_idx != ids_last && *id_idx < r_idx->first)
-			std::iter_swap(id_idx++, needy_end++);
-		while (id_idx != ids_last && *id_idx < r_idx->second)
-			++id_idx;
-		++r_idx;
-	}
-	while (id_idx != ids_last)
-		std::iter_swap(id_idx++, needy_end++);
-	return needy_end;
-}
-
-
-//based on https://stackoverflow.com/a/335972/3614835, modified to not use the
-//deprecated std::iterator
-struct null_output_iterator {
-	using iterator_category = std::output_iterator_tag;
-	using value_type = void;
-	using difference_type = void;
-	using pointer = void;
-	using reference = void;
-	template<typename T>
-	void operator=(T const&) {}
-    null_output_iterator & operator++() {return *this;}
-	null_output_iterator operator++(int) {return *this;}
-	null_output_iterator & operator*() { return *this; }
-};
-
 
 
 template<typename InputIter1, typename InputIter2, typename OutputIter>
