@@ -3,7 +3,6 @@
 *.exe
 *.d
 *.gch
-nbproject/private/
 build/
 __pycache__/
 
