@@ -20,7 +20,7 @@ const static std::pair<uint64_t, std::ptrdiff_t> upv_data[] = {
 TEST_CASE("upv_RoundtripBoundaries") {
 	using upv::write, upv::read;
 	std::array<std::byte, 11> data;
-	for (const auto [thing, expected_length] : upv_data) {
+	for (auto&& [thing, expected_length] : upv_data) {
 		std::fill(data.begin(), data.end(), std::byte{0});
 		std::byte* end = write(data.data(), thing);
 		CHECK_EQ(end - data.begin(), expected_length);
