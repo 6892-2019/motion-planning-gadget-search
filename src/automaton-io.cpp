@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 #include "precompiled.hpp"
 #include "automatonbase.hpp"
 #include "ioutils.hpp"

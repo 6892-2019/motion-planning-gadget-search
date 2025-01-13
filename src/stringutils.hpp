@@ -1,10 +1,5 @@
-/*
- * File:   stringutils.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on May 25, 2018, 6:53 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 #ifndef STRINGUTILS_HPP
 #define STRINGUTILS_HPP
 

@@ -1,10 +1,5 @@
-/*
- * File:   n_copies_iterator.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on October 5, 2018, 10:52 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 #ifndef AUTOMATON_N_COPIES_ITERATOR_HPP_INCLUDED
 #define AUTOMATON_N_COPIES_ITERATOR_HPP_INCLUDED
 

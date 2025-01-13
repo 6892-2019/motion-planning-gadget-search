@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef VARINT_HPP
 #define VARINT_HPP
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright 2019 Massachusetts Institute of Technology
 
 import functools
 import itertools

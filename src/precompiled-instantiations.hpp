@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 //If AUTOMATA_EXTERN_TEMPLATE is defined, these are extern template dclarations.
 //Otherwise, they are explicit instantiations.  This way we don't have separate
 //lists to keep in sync.

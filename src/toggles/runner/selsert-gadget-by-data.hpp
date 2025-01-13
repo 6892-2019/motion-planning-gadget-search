@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef SELSERT_GADGET_BY_DATA_HPP
 #define SELSERT_GADGET_BY_DATA_HPP
 

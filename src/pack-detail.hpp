@@ -1,10 +1,5 @@
-/*
- * File:   pack-detail.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on September 21, 2018, 1:13 AM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 #ifndef AUTOMATON_PACK_DETAIL_HPP_INCLUDED
 #define AUTOMATON_PACK_DETAIL_HPP_INCLUDED
 

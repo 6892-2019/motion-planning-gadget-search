@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2025 Jeffrey Bosboom
 #ifndef HASHUTILS_HPP
 #define HASHUTILS_HPP
 

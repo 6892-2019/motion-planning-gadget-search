@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright 2019 Massachusetts Institute of Technology
 
 # This file isn't related to the other database-centered stuff.  It just
 # generates gadgetdefs for Viglietta-style doors.

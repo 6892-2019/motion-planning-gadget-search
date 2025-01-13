@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef RANDUTILS_HPP
 #define RANDUTILS_HPP
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2025 Jeffrey Bosboom
 #ifndef AUTOMATON_FUNCTION_REF_HPP_INCLUDED
 #define AUTOMATON_FUNCTION_REF_HPP_INCLUDED
 

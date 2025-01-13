@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef AUTOMATON_REGEXESQUE_HPP
 #define AUTOMATON_REGEXESQUE_HPP
 

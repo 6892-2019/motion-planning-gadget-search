@@ -1,10 +1,5 @@
-/*
- * File:   linear_set.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on April 11, 2017, 9:47 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 #ifndef LINEAR_SET_HPP
 #define LINEAR_SET_HPP
 

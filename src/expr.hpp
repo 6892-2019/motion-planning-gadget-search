@@ -1,10 +1,5 @@
-/*
- * File:   expr.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on October 12, 2016, 7:37 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
 #ifndef EXPR_HPP
 #define EXPR_HPP
 

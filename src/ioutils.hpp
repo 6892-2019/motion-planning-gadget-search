@@ -1,10 +1,5 @@
-/*
- * File:   ioutils.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on November 27, 2016, 12:08 AM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
 #ifndef IOUTILS_HPP
 #define IOUTILS_HPP
 

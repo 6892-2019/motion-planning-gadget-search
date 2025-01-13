@@ -1,10 +1,6 @@
-/*
- * File:   toggles-shared.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on March 14, 2019, 12:27 AM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef TOGGLES_SHARED_HPP
 #define TOGGLES_SHARED_HPP
 

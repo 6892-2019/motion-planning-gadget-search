@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright 2016 Massachusetts Institute of Technology
+# Copyright 2025 Jeffrey Bosboom
 
 from collections import OrderedDict, defaultdict, namedtuple
 import os

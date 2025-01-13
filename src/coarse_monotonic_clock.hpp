@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef COARSE_MONOTONIC_CLOCK_HPP
 #define COARSE_MONOTONIC_CLOCK_HPP
 

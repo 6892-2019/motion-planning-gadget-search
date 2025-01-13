@@ -1,10 +1,5 @@
-/*
- * File:   stopwatch.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on October 4, 2018, 6:22 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 #ifndef AUTOMATON_STOPWATCH_HPP_INCLUDED
 #define AUTOMATON_STOPWATCH_HPP_INCLUDED
 

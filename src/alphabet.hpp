@@ -1,10 +1,5 @@
-/*
- * File:   alphabet.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on October 25, 2016, 11:30 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
 #ifndef ALPHABET_HPP
 #define ALPHABET_HPP
 

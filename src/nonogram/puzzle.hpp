@@ -1,10 +1,5 @@
-/*
- * File:   puzzle.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on October 25, 2016, 8:14 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
 #ifndef NONOGRAM_PUZZLE_HPP
 #define NONOGRAM_PUZZLE_HPP
 

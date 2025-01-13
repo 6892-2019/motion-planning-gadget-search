@@ -1,10 +1,6 @@
-/*
- * File:   bitset.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on November 2, 2016, 7:54 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef BITSET_HPP
 #define BITSET_HPP
 

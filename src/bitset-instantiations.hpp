@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 //NO INCLUDE GUARD
 
 #include <boost/preprocessor/repetition/repeat_from_to.hpp>

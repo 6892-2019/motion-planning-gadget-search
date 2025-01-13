@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #include "precompiled.hpp"
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN //genbuild {'entrypoint': True}
 #include <doctest/doctest.h>

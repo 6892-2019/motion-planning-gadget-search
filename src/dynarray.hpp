@@ -1,10 +1,5 @@
-/*
- * File:   dynarray.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on November 18, 2016, 6:46 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
 #ifndef DYNARRAY_HPP
 #define DYNARRAY_HPP
 

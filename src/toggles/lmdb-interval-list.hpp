@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef LMDB_INTERVAL_LIST_HPP
 #define LMDB_INTERVAL_LIST_HPP
 

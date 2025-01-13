@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #include "precompiled.hpp"
 #include "lmdb-interval-list.hpp"
 #include "intervals.hpp"

@@ -1,10 +1,6 @@
-/*
- * File:   gadget-encoding.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on May 4, 2019, 5:37 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef GADGET_ENCODING_HPP
 #define GADGET_ENCODING_HPP
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 #include "precompiled.hpp"
 #include "randaut.hpp"
 #include "automaton-regexesque.hpp" //for same_language, but should probably canonicalize instead

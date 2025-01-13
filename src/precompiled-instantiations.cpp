@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 //Get the precompiled #includes, but not the extern template declarations.
 #include "precompiled-includes.hpp"
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef SELECT_BY_ID_HPP
 #define SELECT_BY_ID_HPP
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright 2019 Massachusetts Institute of Technology
+# Copyright 2025 Jeffrey Bosboom
 
 import sys, argparse
 import itertools

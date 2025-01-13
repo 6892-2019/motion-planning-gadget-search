@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #include "precompiled.hpp"
 #include "select-by-id.hpp"
 #include "intervals.hpp"

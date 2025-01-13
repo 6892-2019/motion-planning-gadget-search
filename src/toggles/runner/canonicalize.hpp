@@ -1,10 +1,5 @@
-/*
- * File:   canonicalize.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on April 15, 2017, 9:37 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef CANONICALIZE_HPP
 #define CANONICALIZE_HPP
 

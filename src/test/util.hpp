@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef AUTOMATON_TEST_UTIL_HPP_INCLUDED
 #define AUTOMATON_TEST_UTIL_HPP_INCLUDED
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 //NO INCLUDE GUARD
 
 AUTOMATON_EXTERN_TEMPLATE template class Automaton<AUTOMATON_SIZE>;

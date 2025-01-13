@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #include "precompiled.hpp"
 #include "gadget-set.hpp"
 #include "select-by-id.hpp"

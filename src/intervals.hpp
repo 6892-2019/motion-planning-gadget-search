@@ -1,10 +1,6 @@
-/*
- * File:   intervals.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on May 11, 2019, 12:02 AM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef INTERVALS_HPP
 #define INTERVALS_HPP
 

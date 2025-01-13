@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 //The #include part of the precompiled header.
 #include <array>
 #include <vector>

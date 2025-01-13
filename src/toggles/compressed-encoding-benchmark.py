@@ -1,4 +1,6 @@
 #!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+# Copyright 2019 Massachusetts Institute of Technology
 
 import lmdb, snappy, zstandard
 import argparse, itertools

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 constexpr unsigned int a2l2m0r0[] = {0, 1};
 constexpr unsigned int a2l2m0r1[] = {1, 0};
 constexpr unsigned int a3l2m0r0[] = {0, 1, 2};

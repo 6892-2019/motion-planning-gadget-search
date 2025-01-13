@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #include "precompiled.hpp"
 #include "circular_deque.hpp"
 #include <doctest/doctest.h>

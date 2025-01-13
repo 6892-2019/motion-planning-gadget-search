@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 #ifndef HOPCROFT_HPP
 #define HOPCROFT_HPP
 

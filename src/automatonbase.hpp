@@ -1,10 +1,6 @@
-/*
- * File:   automatonbase.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on May 17, 2017, 4:56 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef AUTOMATONBASE_HPP
 #define AUTOMATONBASE_HPP
 

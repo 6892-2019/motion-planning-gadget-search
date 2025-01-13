@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef WORKER_MANAGER_HPP
 #define WORKER_MANAGER_HPP
 

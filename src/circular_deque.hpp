@@ -1,10 +1,5 @@
-/*
- * File:   circular_deque.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on May 25, 2017, 1:00 AM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 #ifndef CIRCULAR_DEQUE_HPP
 #define CIRCULAR_DEQUE_HPP
 

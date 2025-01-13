@@ -1,10 +1,6 @@
-/*
- * File:   algoutils.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on March 30, 2017, 12:17 AM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef ALGOUTILS_HPP
 #define ALGOUTILS_HPP
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2019 Massachusetts Institute of Technology
 dicrumbler:
   dedges: [[0, 0, 1, 1]]
   state-names: {0: 'open', 1: 'closed'}

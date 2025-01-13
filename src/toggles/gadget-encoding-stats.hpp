@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2019 Massachusetts Institute of Technology
 #ifndef GADGET_ENCODING_STATS_HPP
 #define GADGET_ENCODING_STATS_HPP
 

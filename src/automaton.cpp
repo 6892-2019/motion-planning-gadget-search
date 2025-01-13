@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #include "precompiled.hpp"
 #include "automaton.hpp"
 #include "automaton-io.hpp"

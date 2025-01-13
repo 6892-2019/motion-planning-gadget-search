@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #include "hopcroft.hpp"
 #include "nfa-optimize.hpp"
 #include "automaton-regexesque-basic.hpp" // empty, epsilon, all

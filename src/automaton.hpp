@@ -1,10 +1,6 @@
-/*
- * File:   automaton.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on October 16, 2016, 4:36 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
+// Copyright 2025 Jeffrey Bosboom
 #ifndef AUTOMATON_HPP
 #define AUTOMATON_HPP
 

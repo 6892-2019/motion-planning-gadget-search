@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2017 Massachusetts Institute of Technology
 #ifndef NUMUTILS_HPP
 #define NUMUTILS_HPP
 

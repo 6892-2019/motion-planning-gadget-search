@@ -1,10 +1,5 @@
-/*
- * File:   regex.hpp
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on October 12, 2016, 7:36 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2016 Massachusetts Institute of Technology
 #ifndef REGEX_HPP
 #define REGEX_HPP
 

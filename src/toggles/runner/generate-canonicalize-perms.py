@@ -1,4 +1,6 @@
 #!/usr/bin/env python2
+# SPDX-License-Identifier: MIT
+# Copyright 2019 Massachusetts Institute of Technology
 
 import itertools
 

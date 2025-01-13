@@ -1,16 +1,5 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
-
-/*
- * File:   circular_deque.tcc
- * Author: Jeffrey Bosboom <jbosboom@csail.mit.edu>
- *
- * Created on May 30, 2018, 6:31 PM
- */
-
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 #ifndef CIRCULAR_DEQUE_TCC
 #define CIRCULAR_DEQUE_TCC
 

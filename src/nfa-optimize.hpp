@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright 2018 Massachusetts Institute of Technology
 #ifndef AUTOMATON_NFA_OPTIMIZE_HPP_INCLUDED
 #define AUTOMATON_NFA_OPTIMIZE_HPP_INCLUDED
 
