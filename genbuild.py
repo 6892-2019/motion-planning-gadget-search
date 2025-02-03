@@ -36,7 +36,7 @@ config_flags['{config}_pchtarget'] = '${config}_builddir/include/precompiled.hpp
 
 debug_cfg = {
   'config': 'debug',
-  'optflags': '-g -O0 -march=native -gsplit-dwarf -fdebug-types-section -grecord-gcc-switches',
+  'optflags': '-g -O0 -march=native -fdebug-types-section -grecord-gcc-switches',
 }
 sanitize_cfg = {
   'config': 'sanitize',
@@ -44,7 +44,7 @@ sanitize_cfg = {
 }
 fastdebug_cfg = {
   'config': 'fastdebug',
-  'optflags': '-g -O1 -march=native -gsplit-dwarf -fdebug-types-section -grecord-gcc-switches',
+  'optflags': '-g -O1 -march=native -fdebug-types-section -grecord-gcc-switches',
 }
 release_cfg = {
   'config': 'release',
