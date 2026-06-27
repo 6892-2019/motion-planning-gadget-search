@@ -1,0 +1,29 @@
+────────────────────────────────────────────────────────────
+Original chain (before closure):
+Traversal modes — 3 state(s), 2 location(s)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  A  entry  B  exit
+
+  B  entry  C  exit
+
+After closure (shortcut A→C added):
+Traversal modes — 3 state(s), 2 location(s)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  A  entry  B  exit
+  A  entry  C  exit
+
+  B  entry  C  exit
+
+Idempotency check (closure of closure = closure): True
+
+The shortcut the closure adds:
+  Modes in closure but not in raw chain: {(0, 0, 2, 1)}
+  i.e. the shortcut (A→entry→C→exit) exists only after closure.
+
+NOTE: the closure records reachability through repeated re-entry at
+the SAME location; it is a derived view, not a new gadget.  Adding
+the shortcut as a raw transition makes the gadget nondeterministic
+from (A, entry), which is why equivalence/minimization operate on
+the raw single-step transitions, not the closure.

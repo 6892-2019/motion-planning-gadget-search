@@ -1,0 +1,18 @@
+────────────────────────────────────────────────────────────
+Two gadgets with the same structure but swapped location labels:
+
+g1
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  0  0  1  1
+
+g2 (same structure, locs 0↔1 swapped)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  0  1  1  0
+
+is_equivalent_to  (holds locs fixed): False
+  → False: g1 enters at loc 0; g2 enters at loc 1.
+
+is_isomorphic_to  (tries all loc permutations): True
+  → True: the abstract traversal-mode structure is the same.

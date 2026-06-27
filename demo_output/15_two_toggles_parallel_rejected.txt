@@ -1,0 +1,20 @@
+────────────────────────────────────────────────────────────
+Claim (PLAUSIBLE BUT FALSE): two toggles sharing both endpoints
+simulate a single toggle.
+
+Construction: 2 instance(s), 2 wire(s), external = ['L', 'R']
+Induced gadget: 4 reachable config(s), 8 traversal mode(s).
+  induced reversible? True   target reversible? True
+  induced DAG?        False   target DAG?        False
+  DEFECT: 4 same-port traversal(s) that change state (extra behavior no gadget can represent):
+    enter L in (T1=1, T2=0) can exit L in (T1=0, T2=1)
+    enter R in (T1=1, T2=0) can exit R in (T1=0, T2=1)
+    enter L in (T1=0, T2=1) can exit L in (T1=1, T2=0)
+    enter R in (T1=0, T2=1) can exit R in (T1=1, T2=0)
+Simulates target: False  (induced is NOT equivalent to target)
+
+The construction is unfaithful: at the shared L junction the agent can
+enter L, traverse one toggle to R, walk along the shared R junction back
+into the OTHER toggle, and return to L — exiting where it entered with
+the configuration changed.  No gadget has an "enter L, exit L, change
+state" traversal, so the verifier reports these as defects.

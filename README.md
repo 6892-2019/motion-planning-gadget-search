@@ -55,3 +55,22 @@ PATH="$(pwd)/build/release/bin/:$PATH" build/release/bin/toggles-report.exe \
   --threads $nthreads --db-path ./database.mdb \
   toggle-toggle-parallel 3-split > ./database.mdb/report.txt
 ```
+
+### Python exploration layer
+
+`src/gadget*.py` is a lightweight, dependency-light Python toolkit for working
+with individual gadgets by hand: defining them, testing whether two gadgets are
+behaviourally **equivalent**, soundly **refuting** simulations, and **building
+and verifying** explicit simulation constructions with step-by-step traces and
+paper-style diagrams. It complements the exhaustive C++ search above — use it to
+prototype, hand-check, or illustrate specific gadgets.
+
+```bash
+python3 src/demo_simulations.py                       # regenerate demo_output/ + REPORT.md
+python3 -m unittest discover -s src -p 'test_*.py'    # run the Python tests
+```
+
+See **[USAGE.md](USAGE.md)** for the full guide and
+**[demo_output/REPORT.md](demo_output/REPORT.md)** for a gallery of worked
+examples. Diagrams need the `graphviz` Python package plus the `dot` binary, and
+an SVG→PNG converter (`rsvg-convert`, ImageMagick `convert`, or `inkscape`).

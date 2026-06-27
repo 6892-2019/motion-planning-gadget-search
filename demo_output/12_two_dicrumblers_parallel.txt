@@ -1,0 +1,47 @@
+────────────────────────────────────────────────────────────
+Claim: two dicrumblers sharing both endpoints simulate a gadget that
+crumbles after exactly TWO L→R traversals (a "two-use" gadget).
+  D1.L,D2.L are joined as external L; D1.R,D2.R as external R.
+
+Construction: 2 instance(s), 2 wire(s), external = ['L', 'R']
+Induced gadget: 4 reachable config(s), 4 traversal mode(s).
+  induced reversible? False   target reversible? False
+  induced DAG?        True   target DAG?        True
+Simulates target: True
+
+The induced gadget has FOUR configurations, but (D1=1,D2=0) and
+(D1=0,D2=1) are behaviorally identical ("one use left"), so the
+equivalence check merges them — the simulated gadget has 3 states.
+
+Traces of every allowed traversal (note the agent's choice from the
+fresh configuration):
+
+From config (D1=0, D2=0) (induced state 0):
+  ── traversal L → R ──
+  enter external port L (= D1.0);  config (D1=0, D2=0)
+  1. traverse D1: enter loc 0 → exit loc 1   (state 0→1);  config (D1=1, D2=0)
+  exit external port R (= D1.1);  config (D1=1, D2=0)
+  ── traversal L → R ──
+  enter external port L (= D1.0);  config (D1=0, D2=0)
+  1. walk wire D1.0 → D2.0
+  2. traverse D2: enter loc 0 → exit loc 1   (state 0→1);  config (D1=0, D2=1)
+  3. walk wire D2.1 → D1.1
+  exit external port R (= D1.1);  config (D1=0, D2=1)
+
+From config (D1=1, D2=0) (induced state 1):
+  ── traversal L → R ──
+  enter external port L (= D1.0);  config (D1=1, D2=0)
+  1. walk wire D1.0 → D2.0
+  2. traverse D2: enter loc 0 → exit loc 1   (state 0→1);  config (D1=1, D2=1)
+  3. walk wire D2.1 → D1.1
+  exit external port R (= D1.1);  config (D1=1, D2=1)
+
+From config (D1=0, D2=1) (induced state 2):
+  ── traversal L → R ──
+  enter external port L (= D1.0);  config (D1=0, D2=1)
+  1. traverse D1: enter loc 0 → exit loc 1   (state 0→1);  config (D1=1, D2=1)
+  exit external port R (= D1.1);  config (D1=1, D2=1)
+
+From config (D1=1, D2=1) (induced state 3):
+  (no traversals; dead configuration)
+

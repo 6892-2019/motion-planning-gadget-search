@@ -1,0 +1,13 @@
+────────────────────────────────────────────────────────────
+Claim: three dicrumblers in parallel simulate a THREE-use gadget.
+  The pattern generalizes: k parallel dicrumblers ⇒ a k-use gadget.
+
+Construction: 3 instance(s), 4 wire(s), external = ['L', 'R']
+Induced gadget: 8 reachable config(s), 12 traversal mode(s).
+  induced reversible? False   target reversible? False
+  induced DAG?        True   target DAG?        True
+Simulates target: True
+
+Here the induced gadget has 2^3 = 8 configurations, which collapse to
+the 4 states of the three-use gadget (grouped by how many dicrumblers
+have crumbled).

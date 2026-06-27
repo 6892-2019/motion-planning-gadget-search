@@ -1,0 +1,37 @@
+────────────────────────────────────────────────────────────
+A2T — alternating-toggle-toggle-antiparallel (gadgets.yaml)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  A0  p0  A1  p1
+
+  A1  p1  A0  p2
+
+  B0  p2  B1  p3
+
+  B1  p3  B0  p0
+
+
+Closure of A2T (expect: no new modes — all entry locations appear once):
+A2T closure
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  A0  p0  A1  p1
+
+  A1  p1  A0  p2
+
+  B0  p2  B1  p3
+
+  B1  p3  B0  p0
+
+
+Tracing a full cycle  A0 → A1 → A0  (using first two transitions):
+Trace start: A0
+  Move 1: enter p0, exit p1  ->  A0 -> A1
+  Move 2: enter p1, exit p2  ->  A1 -> A0
+Trace end: A0
+
+Tracing a full cycle  B0 → B1 → B0  (using last two transitions):
+Trace start: B0
+  Move 1: enter p2, exit p3  ->  B0 -> B1
+  Move 2: enter p3, exit p0  ->  B1 -> B0
+Trace end: B0

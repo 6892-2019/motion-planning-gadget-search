@@ -1,0 +1,40 @@
+toggle  (tunnels.yaml)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  closed  L  open    R
+
+  open    R  closed  L
+
+dicrumbler  (tunnels.yaml)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  intact  L  crumbled  R
+
+seven  (tunnels.yaml)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  closed  L  open    R
+
+  open    L  open    R
+
+  open    R  closed  L
+  open    R  open    L
+
+one_way_crumbler  (tunnels.yaml)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  open  L  closed  R
+
+  open  R  open    L
+
+alternating-toggle-toggle-antiparallel  (gadgets.yaml)
+  from_state  entry_loc  to_state  exit_loc
+  -----------------------------------------
+  A0  p0  A1  p1
+
+  A1  p1  A0  p2
+
+  B0  p2  B1  p3
+
+  B1  p3  B0  p0
+

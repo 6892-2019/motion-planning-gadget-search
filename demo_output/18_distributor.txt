@@ -1,0 +1,38 @@
+────────────────────────────────────────────────────────────
+Claim: two dicrumblers sharing an entry junction simulate a 3-port
+"distributor": enter A, exit B or C (agent's choice); each exit can
+be produced once, then the gadget is dead.
+
+Construction: 2 instance(s), 1 wire(s), external = ['A', 'B', 'C']
+Induced gadget: 4 reachable config(s), 4 traversal mode(s).
+  induced reversible? False   target reversible? False
+  induced DAG?        True   target DAG?        True
+Simulates target: True
+
+From config (D1=0, D2=0) (induced state 0):
+  ── traversal A → B ──
+  enter external port A (= D1.0);  config (D1=0, D2=0)
+  1. traverse D1: enter loc 0 → exit loc 1   (state 0→1);  config (D1=1, D2=0)
+  exit external port B (= D1.1);  config (D1=1, D2=0)
+  ── traversal A → C ──
+  enter external port A (= D1.0);  config (D1=0, D2=0)
+  1. walk wire D1.0 → D2.0
+  2. traverse D2: enter loc 0 → exit loc 1   (state 0→1);  config (D1=0, D2=1)
+  exit external port C (= D2.1);  config (D1=0, D2=1)
+
+From config (D1=1, D2=0) (induced state 1):
+  ── traversal A → C ──
+  enter external port A (= D1.0);  config (D1=1, D2=0)
+  1. walk wire D1.0 → D2.0
+  2. traverse D2: enter loc 0 → exit loc 1   (state 0→1);  config (D1=1, D2=1)
+  exit external port C (= D2.1);  config (D1=1, D2=1)
+
+From config (D1=0, D2=1) (induced state 2):
+  ── traversal A → B ──
+  enter external port A (= D1.0);  config (D1=0, D2=1)
+  1. traverse D1: enter loc 0 → exit loc 1   (state 0→1);  config (D1=1, D2=1)
+  exit external port B (= D1.1);  config (D1=1, D2=1)
+
+From config (D1=1, D2=1) (induced state 3):
+  (no traversals; dead configuration)
+

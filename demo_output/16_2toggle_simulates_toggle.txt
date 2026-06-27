@@ -1,0 +1,22 @@
+────────────────────────────────────────────────────────────
+Claim: a 2-toggle simulates a toggle, using only its (a,b) tunnel.
+  The (c,d) tunnel is left unconnected, so the agent never reaches it.
+
+Construction: 1 instance(s), 0 wire(s), external = ['L', 'R']
+Induced gadget: 2 reachable config(s), 2 traversal mode(s).
+  induced reversible? True   target reversible? True
+  induced DAG?        False   target DAG?        False
+Simulates target: True
+
+From config (X=0) (induced state 0):
+  ── traversal L → R ──
+  enter external port L (= X.0);  config (X=0)
+  1. traverse X: enter loc 0 → exit loc 1   (state 0→1);  config (X=1)
+  exit external port R (= X.1);  config (X=1)
+
+From config (X=1) (induced state 1):
+  ── traversal R → L ──
+  enter external port R (= X.1);  config (X=1)
+  1. traverse X: enter loc 1 → exit loc 0   (state 1→0);  config (X=0)
+  exit external port L (= X.0);  config (X=0)
+

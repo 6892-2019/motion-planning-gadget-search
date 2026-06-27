@@ -1,0 +1,14 @@
+────────────────────────────────────────────────────────────
+toggle      reversible?  True    DAG (bounded)?  False
+dicrumbler  reversible?  False    DAG (bounded)?  True
+
+Are they the same gadget?
+  behaviorally_equivalent(toggle, dicrumbler) = False
+  → No: the toggle has the reverse traversal the dicrumbler lacks.
+
+Can a system of toggles simulate a dicrumbler?
+Simulation is IMPOSSIBLE. Sound obstruction(s):
+  - reversibility: the block is reversible but the target is not; any system of reversible gadgets is itself reversible, so it can never simulate an irreversible gadget
+
+Conclusion: NO.  A system of reversible gadgets is reversible, so it
+cannot simulate the irreversible dicrumbler — no construction exists.

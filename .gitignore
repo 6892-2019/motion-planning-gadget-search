@@ -17,3 +17,31 @@ release.ninja
 
 # managed in a separate repo
 /data/
+
+# Python virtualenv / caches
+.venv/
+*.pyc
+.ipynb_checkpoints/
+
+# local tooling
+.claude/settings.local.json
+*.code-workspace
+
+# build artefacts and vendored dependencies (fetched/built, not tracked here)
+build.ninja
+database.mdb/
+include/
+lib/
+share/
+vendor/
+
+# reference material (papers / theses kept locally, not in the repo)
+*.pdf
+arXiv-*/
+
+# generated diagram scratch outputs (the gadget Python layer)
+viz_output/
+src/viz_output/
+/*.png
+src/*.png
+demo_output/*.svg

@@ -1,0 +1,15 @@
+────────────────────────────────────────────────────────────
+seven   reversible?  True    DAG (bounded)?  False
+toggle  reversible?  True    DAG (bounded)?  False
+
+Same gadget?  behaviorally_equivalent(seven, toggle) = False
+  → No: seven adds two free-traverse modes in the open state.
+
+Does any invariant refute "seven simulates toggle"?
+No composition-invariant obstruction found (this does NOT prove a simulation exists).
+Does any invariant refute "toggle simulates seven"?
+No composition-invariant obstruction found (this does NOT prove a simulation exists).
+
+Conclusion: the necessary conditions are silent here.  Whether
+either simulates the other is not settled by these invariants and
+would require an explicit construction (out of scope for this demo).

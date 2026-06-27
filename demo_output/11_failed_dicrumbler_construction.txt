@@ -1,0 +1,12 @@
+────────────────────────────────────────────────────────────
+Claim (FALSE): the series-toggle network simulates a dicrumbler.
+
+Construction: 2 instance(s), 1 wire(s), external = ['L', 'R']
+Induced gadget: 2 reachable config(s), 2 traversal mode(s).
+  induced reversible? True   target reversible? False
+  induced DAG?        False   target DAG?        True
+Simulates target: False  (induced is NOT equivalent to target)
+
+Verified: False.  The induced gadget is a toggle (reversible); the
+dicrumbler is irreversible, so no wiring of toggles can produce it.
+This agrees with refute_simulation in Examples 3–4.

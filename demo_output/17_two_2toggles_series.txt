@@ -1,0 +1,40 @@
+────────────────────────────────────────────────────────────
+Claim: two 2-toggles wired tunnel-to-tunnel simulate one 2-toggle.
+  Internal wires A.b–B.a and A.d–B.c; external ports a,c (left) and
+  b,d (right).  Every traversal threads both gadgets, keeping them
+  synchronized, so only two joint configurations are reachable.
+
+Construction: 2 instance(s), 2 wire(s), external = ['a', 'c', 'b', 'd']
+Induced gadget: 2 reachable config(s), 4 traversal mode(s).
+  induced reversible? True   target reversible? True
+  induced DAG?        False   target DAG?        False
+Simulates target: True
+
+From config (A=0, B=0) (induced state 0):
+  ── traversal a → b ──
+  enter external port a (= A.0);  config (A=0, B=0)
+  1. traverse A: enter loc 0 → exit loc 1   (state 0→1);  config (A=1, B=0)
+  2. walk wire A.1 → B.0
+  3. traverse B: enter loc 0 → exit loc 1   (state 0→1);  config (A=1, B=1)
+  exit external port b (= B.1);  config (A=1, B=1)
+  ── traversal c → d ──
+  enter external port c (= A.2);  config (A=0, B=0)
+  1. traverse A: enter loc 2 → exit loc 3   (state 0→1);  config (A=1, B=0)
+  2. walk wire A.3 → B.2
+  3. traverse B: enter loc 2 → exit loc 3   (state 0→1);  config (A=1, B=1)
+  exit external port d (= B.3);  config (A=1, B=1)
+
+From config (A=1, B=1) (induced state 1):
+  ── traversal b → a ──
+  enter external port b (= B.1);  config (A=1, B=1)
+  1. traverse B: enter loc 1 → exit loc 0   (state 1→0);  config (A=1, B=0)
+  2. walk wire B.0 → A.1
+  3. traverse A: enter loc 1 → exit loc 0   (state 1→0);  config (A=0, B=0)
+  exit external port a (= A.0);  config (A=0, B=0)
+  ── traversal d → c ──
+  enter external port d (= B.3);  config (A=1, B=1)
+  1. traverse B: enter loc 3 → exit loc 2   (state 1→0);  config (A=1, B=0)
+  2. walk wire B.2 → A.3
+  3. traverse A: enter loc 3 → exit loc 2   (state 1→0);  config (A=0, B=0)
+  exit external port c (= A.2);  config (A=0, B=0)
+

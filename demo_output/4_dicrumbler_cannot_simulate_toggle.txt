@@ -1,0 +1,10 @@
+────────────────────────────────────────────────────────────
+Are they the same gadget?
+  behaviorally_equivalent(dicrumbler, toggle) = False
+
+Can a system of dicrumblers simulate a toggle?
+Simulation is IMPOSSIBLE. Sound obstruction(s):
+  - DAG/boundedness: the block has an acyclic state graph (bounded number of traversals) but the target's state graph has a cycle; a system of bounded gadgets is bounded and cannot simulate an unbounded target
+
+Conclusion: NO.  A system of bounded (DAG) gadgets is bounded and
+cannot reproduce the toggle's unbounded back-and-forth cycling.
