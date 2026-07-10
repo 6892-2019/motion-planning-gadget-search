@@ -37,11 +37,23 @@ boolean):
 1. For each state `s`, compute the language `L_s` of executable `(a,b)` sequences via
    subset construction (determinize from `{s}`), minimize (partition refinement, all
    states accepting, missing edge = dead sink), canonically BFS-renumber → a string
-   `key_s`.
-2. `canon_fixed(G) = ( q, ℓ, sorted multiset{key_s} )` — canonical **with ports
-   fixed**.
+   `key_s`. (This is exactly `gadget_simulation._canonical_language`.)
+2. `canon_fixed(G) = ( ℓ, sorted **set** {key_s : s ∈ Q} )` — canonical **with ports
+   fixed**. Note: a **set**, not a multiset, and **no raw `q`** — behaviourally
+   indistinguishable states (equal `key_s`) collapse, exactly as
+   `behaviorally_equivalent` uses `frozenset(...)`. `ℓ` **is** included (differing port
+   counts are different gadgets, even if the extra ports are dead — you can still wire
+   to them).
 3. `canon(G) = min over port permutations π of canon_fixed(π·G)` — canonical **up to
-   port relabelling**. `ℓ ≤ ~6` so brute-forcing `ℓ!` is fine; memoize.
+   port relabelling**. For `ℓ ≤ ~5` brute-forcing `ℓ!` is fine (our targets are small);
+   for larger `ℓ` replace the `ℓ!` loop with iterated port-colour refinement
+   (nauty-style) seeded by per-port mode/degree signatures. Memoize on the raw edge list.
+
+**Equality contract (the acceptance test):**
+`canon(A) == canon(B) ⇔ behaviorally_equivalent(A, B)` and
+`canon_fixed(A) == canon_fixed(B) ⇔ behaviorally_equivalent(A, B, fixed_locations=True)`.
+Proof sketch: `canon_fixed` equal ⇔ equal per-state-language sets ⇔ fixed-loc
+equivalence; `canon` mins over π, so equal ⇔ ∃π with equal sets ⇔ free equivalence.
 
 Emit both: `canon_fixed` (ports have identity — the simulation interface) and `canon`
 (abstract gadget identity, for enumeration/dedup). Store `canon` as the benchmark

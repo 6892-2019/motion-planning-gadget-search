@@ -1,9 +1,12 @@
 # 07 — Codebase layout, interfaces, and milestones
 
-Buildable from the other docs. New package `mlsim/` (pure research code; keeps the
-existing `src/` toolkit as the reference oracle). Python + a compiled simulator.
+Buildable from the other docs. New package **`src/mlsim/`** (revised from a top-level
+`mlsim/` so it sits beside the existing flat `src/*.py` modules and imports the
+reference oracle — `from gadget import Gadget` — with no path gymnastics; `mlsim`'s
+`__init__` puts `src/` on `sys.path`). Pure research code; keeps the existing `src/`
+toolkit as the reference oracle. Python now; a compiled simulator later (M1+).
 
-## 1. Layout
+## 1. Layout  (under `src/`)
 ```
 mlsim/
   core/
