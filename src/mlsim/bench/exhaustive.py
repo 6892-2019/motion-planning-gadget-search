@@ -22,7 +22,7 @@ import os
 import sys
 import time
 from collections import Counter
-from itertools import combinations_with_replacement, permutations
+from itertools import combinations, combinations_with_replacement
 from typing import Dict, Iterator, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -74,13 +74,19 @@ def restricted_growth_strings(m: int) -> Iterator[tuple]:
 
 def generate_level(bs: BlockSet, n: int, pcap: int) -> Iterator[Construction]:
     """Every construction with exactly ``n`` instances (init all 0), in a fixed order.
-    Isomorphic duplicates are removed by the caller via ``canon_sys``."""
+    Isomorphic duplicates are removed by the caller via ``canon_sys``.
+
+    The interface uses ``combinations`` (one target-port ordering per chosen set of
+    components), not ``permutations``: reordering the exposed components just relabels
+    the induced gadget's ports, and target identity (``canon``) is relabeling-invariant,
+    so every reachable target is still found — at ~k! less work. The recorded witness
+    therefore realizes *a* relabeling of the target (which is the same target)."""
     for M in combinations_with_replacement(range(len(bs)), n):
         nports = sum(bs.num_locations(t) for t in M)
         for wire in restricted_growth_strings(nports):
             comps = sorted(set(wire))
             for k in range(1, min(pcap, len(comps)) + 1):
-                for iface in permutations(comps, k):
+                for iface in combinations(comps, k):
                     yield Construction(bs, list(M), list(wire), list(iface))
 
 
@@ -177,6 +183,7 @@ def run(identity: dict, run_dir: str, checkpoint_seconds: float = 5.0,
 def _identity_from_args(args) -> dict:
     return {
         "job": "exhaustive",
+        "gen_version": 2,          # bump when the candidate enumeration order changes
         "blocks": list(args.blocks),
         "max_instances": args.max_instances,
         "target_max_states": args.target_max_states,
