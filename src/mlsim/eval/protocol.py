@@ -37,9 +37,12 @@ class Result:
 
 
 class Oracle:
-    """Wraps a target gadget; ``evaluate`` returns (solved, distance) and counts one
-    unit of work. Exact solved-detection via ``canon`` (relabeling-invariant); distance
-    is only a search guide."""
+    """Wraps a target gadget; every ``check``/``evaluate`` = one unit of work (one
+    ``induced`` call). ``check`` is the cheap exact test (for solvers that don't need
+    a gradient); ``evaluate`` additionally returns the behavioural distance (for
+    annealing/RL). Both count identically in verifier-calls; ``evaluate`` just costs
+    more wall-time — the honest price of the guidance. Solved-detection is always exact
+    via ``canon`` (relabeling-invariant)."""
 
     def __init__(self, target: Gadget):
         self.target = target
@@ -48,10 +51,19 @@ class Oracle:
         self._tlangs = state_language_multiset(target)
         self.calls = 0
 
-    def evaluate(self, c: Construction) -> Tuple[bool, float]:
+    def _run(self, c: Construction):
         self.calls += 1
         g, defects = induced(c)
-        if defects or g.num_locations != self._tell:
+        ok = (not defects) and g.num_locations == self._tell
+        return g, ok
+
+    def check(self, c: Construction) -> bool:
+        g, ok = self._run(c)
+        return ok and canon(g) == self._tcanon
+
+    def evaluate(self, c: Construction) -> Tuple[bool, float]:
+        g, ok = self._run(c)
+        if not ok:
             return (False, 1.0)
         if canon(g) == self._tcanon:
             return (True, 0.0)

@@ -45,8 +45,7 @@ class RandomSolver(Solver):
             c = sample_construction(blocks, k, rng, self.max_inst)
             if c is None:
                 continue
-            solved, _ = oracle.evaluate(c)
-            if solved:
+            if oracle.check(c):                 # cheap exact test (no distance)
                 return self._result(oracle, t0, True, c, self.name)
         return self._result(oracle, t0, False, None, self.name)
 
@@ -72,7 +71,6 @@ class CanonicalRandomSolver(RandomSolver):
                 continue
             stale = 0
             seen.add(key)
-            solved, _ = oracle.evaluate(c)
-            if solved:
+            if oracle.check(c):
                 return self._result(oracle, t0, True, c, self.name)
         return self._result(oracle, t0, False, None, self.name)
