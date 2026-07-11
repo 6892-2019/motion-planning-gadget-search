@@ -3,7 +3,21 @@
 Research code implementing the plan in [`docs/ml/`](../../docs/ml/). Lives under
 `src/` so it can import the reference toolkit (`from gadget import Gadget`) directly.
 
-## Status: **M0 complete** (core representations + oracle parity)
+## Status: **M0 + M1 baselines** (core, resumable runs, exhaustive labels, B1/B2)
+
+- **M0** — core representations + oracle parity (below).
+- **M1 so far** — resumable-run framework (`run/`), the exhaustive `m*` labeler
+  (`bench/exhaustive.py`, baseline **B3**), the `Solver` protocol + resumable eval
+  harness (`eval/`), and baselines **B1/B2a/B2b** (`baselines/`). First measured
+  baseline frontier on 86 targets is in [`docs/ml/results-m1.md`](../../docs/ml/results-m1.md)
+  (headline: canonical-random ≈ 0.52 solve-rate is the current bar; the annealer needs
+  a better distance — next task). **Next:** faster/compiled simulator, a better `d_lang`
+  distance + tuned annealing, then the E1 learnability probe.
+
+All experiments are **pause/restart-safe** (Ctrl-C, laptop sleep, hard kill): re-run
+the same command to resume. See `run/checkpoint.py`.
+
+### M0 core (representations + oracle parity)
 
 `mlsim.core` provides the correctness-first, pure-Python foundation everything else
 depends on:
