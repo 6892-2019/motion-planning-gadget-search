@@ -45,3 +45,6 @@ src/viz_output/
 /*.png
 src/*.png
 demo_output/*.svg
+
+# mlsim experiment run outputs (regenerable)
+runs/

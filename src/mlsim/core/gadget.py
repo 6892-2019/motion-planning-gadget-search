@@ -17,7 +17,16 @@ from typing import Dict, Tuple
 from gadget import Gadget
 from gadget_simulation import _canonical_language, is_reversible, is_dag
 
-__all__ = ["Gadget", "canon", "canon_fixed", "relabel_locs", "is_reversible", "is_dag"]
+__all__ = ["Gadget", "canon", "canon_fixed", "relabel_locs", "minimized_shape",
+           "is_reversible", "is_dag"]
+
+
+def minimized_shape(g: Gadget) -> Tuple[int, int]:
+    """(minimized state count, port count). The minimized state count is the number
+    of behaviourally-distinct states, i.e. the size of the minimal automaton — the
+    right quantity to cap the target universe on (raw reachable configs can be larger)."""
+    q_min = len({_canonical_language(g, s) for s in range(g.num_states)})
+    return q_min, g.num_locations
 
 
 def _sig(g: Gadget) -> Tuple:
