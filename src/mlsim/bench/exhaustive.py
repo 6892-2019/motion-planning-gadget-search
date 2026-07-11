@@ -27,30 +27,11 @@ from typing import Dict, Iterator, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from mlsim.core import (BlockSet, Construction, Gadget, canon, canon_sys,
+from mlsim.blocks import make_block
+from mlsim.core import (BlockSet, Construction, canon, canon_sys,
                         induced, minimized_shape, to_actions)
 from mlsim.run.checkpoint import (RunDir, StopFlag, atomic_write_json,
                                   install_signal_handlers, read_json)
-
-
-# ---- block registry ---------------------------------------------------------
-def make_block(name: str) -> Gadget:
-    if name == "toggle":
-        g = Gadget(2, 2); g.add_transition(0, 0, 1, 1); g.add_transition(1, 1, 0, 0)
-    elif name == "dicrumbler":
-        g = Gadget(2, 2); g.add_transition(0, 0, 1, 1)
-    elif name == "2-toggle":
-        g = Gadget(2, 4)
-        for t in [(0, 0, 1, 1), (0, 2, 1, 3), (1, 1, 0, 0), (1, 3, 0, 2)]:
-            g.add_transition(*t)
-    elif name == "seven":
-        g = Gadget(2, 2)
-        for t in [(0, 0, 1, 1), (1, 1, 0, 0), (1, 0, 1, 1), (1, 1, 1, 0)]:
-            g.add_transition(*t)
-    else:
-        raise SystemExit(f"[mlsim] unknown block {name!r} "
-                         f"(known: toggle, dicrumbler, 2-toggle, seven)")
-    return g
 
 
 # ---- deterministic candidate enumeration ------------------------------------
